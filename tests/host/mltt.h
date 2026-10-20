@@ -60,26 +60,38 @@ static void mltt_close(mltt *t)
     mlt_profile_close(t->profile);
 }
 
-/* The centre pixel's Y, U and V at a position (-1 if there was no picture). */
-static int mltt_centre(mltt *t, int position, int yuv[3])
+/* The centre pixel's Y, U and V at a position, with the picture asked for
+   as yuv420p or yuv422 (-1 if there was no picture in that format). */
+static int mltt_centre_as(mltt *t, int position, mlt_image_format want, int yuv[3])
 {
     mlt_producer_seek(t->producer, position);
     mlt_frame frame = mlt_consumer_get_frame(t->consumer);
     if (!frame)
         return -1;
-    mlt_image_format format = mlt_image_yuv420p;
+    mlt_image_format format = want;
     int w = t->profile->width, h = t->profile->height;
     uint8_t *image = NULL;
     int error = mlt_frame_get_image(frame, &image, &format, &w, &h, 0);
     int result = -1;
-    if (!error && image && format == mlt_image_yuv420p) {
+    if (!error && image && format == want && want == mlt_image_yuv420p) {
         int ysize = w * h, csize = ysize / 4, c = (h / 4) * (w / 2) + w / 4;
         yuv[0] = image[(h / 2) * w + w / 2];
         yuv[1] = image[ysize + c];
         yuv[2] = image[ysize + csize + c];
         result = yuv[0];
+    } else if (!error && image && format == want && want == mlt_image_yuv422) {
+        uint8_t *p = image + ((h / 2) * w + (w / 2 & ~1)) * 2; /* Y0 U Y1 V */
+        yuv[0] = p[0];
+        yuv[1] = p[1];
+        yuv[2] = p[3];
+        result = yuv[0];
     }
     mlt_frame_close(frame);
     return result;
+}
+
+static int mltt_centre(mltt *t, int position, int yuv[3])
+{
+    return mltt_centre_as(t, position, mlt_image_yuv420p, yuv);
 }
 #endif

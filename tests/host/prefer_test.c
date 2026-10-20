@@ -16,6 +16,12 @@
  *   late    it fails part way, at its 5th packet (ENOSYS): the producer
  *           opens the default decoder and seeks again to where it was
  *   off     MLT_AVFORMAT_PREFER is empty: it is never asked for
+ *   lazy    it isn't opened with the clip (opening a project opens every
+ *           clip), only when the first picture is decoded: the Pi ran out
+ *           of VideoCore memory when every clip's decoder was opened at load
+ *   max     MLT_AVFORMAT_PREFER_MAX=1 and two clips decoded at once: one
+ *           gets it, the other the default decoder; when the first is
+ *           closed, its place is free again
  * In every mode, every picture must be the right one.
  */
 #include "mltt.h"
@@ -26,6 +32,7 @@
 static int pending = 0, asked = 0, opened_preferred = 0, refused = 0, failed_late = 0;
 static int packets_to_preferred = 0;
 static AVCodecContext *preferred_ctx = NULL;
+static int preferred_now = 0, preferred_most = 0; /* open at once, and the most */
 static const char *mode = "normal";
 static int64_t drop_before = INT64_MIN;
 static int drop_before_sets = 0;
@@ -52,6 +59,9 @@ int __wrap_avcodec_open2(AVCodecContext *c, const AVCodec *codec, AVDictionary *
         }
         opened_preferred++;
         preferred_ctx = c;
+        c->opaque = &opened_preferred;
+        if (++preferred_now > preferred_most)
+            preferred_most = preferred_now;
         packets_to_preferred = 0;
     }
     return __real_avcodec_open2(c, codec, o);
@@ -67,9 +77,18 @@ int __wrap_avcodec_send_packet(AVCodecContext *c, const AVPacket *p)
     return __real_avcodec_send_packet(c, p);
 }
 
+static int is_preferred(AVCodecContext *c)
+{
+    /* (the stand-in is FFmpeg's h264 opened as h264_vchiq: told apart by
+       the opaque pointer set at open) */
+    return c && c->opaque == (void *) &opened_preferred;
+}
+
 void __real_avcodec_free_context(AVCodecContext **c);
 void __wrap_avcodec_free_context(AVCodecContext **c)
 {
+    if (c && is_preferred(*c))
+        preferred_now--;
     if (c && *c == preferred_ctx)
         preferred_ctx = NULL;
     __real_avcodec_free_context(c);
@@ -96,6 +115,56 @@ int main(int argc, char **argv)
     mode = argv[1];
     if (!strcmp(mode, "off"))
         setenv("MLT_AVFORMAT_PREFER", "", 1);
+    if (!strcmp(mode, "lazy")) {
+        mltt t;
+        if (!mltt_open(&t, "hdv_720_25p", "avformat", argv[2]))
+            return 1;
+        /* frames got without their pictures (as a project's load, a probe,
+           or the sound alone do): no hardware decoder yet */
+        for (int i = 0; i < 3; i++) {
+            mlt_producer_seek(t.producer, i);
+            mlt_frame f = mlt_consumer_get_frame(t.consumer);
+            mlt_frame_close(f);
+        }
+        CHECK(asked == 0 && opened_preferred == 0, "lazy: before any picture, asked for %d times, opened %d",
+              asked, opened_preferred);
+        int yuv[3];
+        CHECK(abs(mltt_centre(&t, 5, yuv) - 26) <= 1, "lazy: frame 5 has luma %d, not 26", yuv[0]);
+        CHECK(opened_preferred == 1, "lazy: after the first picture, opened %d times", opened_preferred);
+        CHECK(abs(mltt_centre(&t, 6, yuv) - 28) <= 1, "lazy: frame 6 has luma %d, not 28", yuv[0]);
+        mltt_close(&t);
+        CHECK(preferred_now == 0, "lazy: %d still open after closing", preferred_now);
+        printf("prefer_test %s: %s\n", mode, mltt_failures ? "FAILED" : "passed");
+        return mltt_failures != 0;
+    }
+    if (!strcmp(mode, "max")) {
+        setenv("MLT_AVFORMAT_PREFER_MAX", "1", 1);
+        mltt a, b;
+        if (!mltt_open(&a, "hdv_720_25p", "avformat", argv[2]) || !mltt_open(&b, "hdv_720_25p", "avformat", argv[2]))
+            return 1;
+        int yuv[3];
+        for (int i = 0; i < 6; i++) {
+            CHECK(abs(mltt_centre(&a, i, yuv) - (16 + 2 * i)) <= 1, "max: clip A frame %d has luma %d", i, yuv[0]);
+            CHECK(abs(mltt_centre(&b, 10 + i, yuv) - (36 + 2 * i)) <= 1, "max: clip B frame %d has luma %d", 10 + i, yuv[0]);
+        }
+        CHECK(opened_preferred == 1 && preferred_most == 1, "max: opened %d times, %d at once (limit 1)",
+              opened_preferred, preferred_most);
+        const char *da = mlt_properties_get(MLT_PRODUCER_PROPERTIES(a.producer), "meta.media.decoder");
+        CHECK(preferred_now == 1, "max: %d open while both clips are", preferred_now);
+        mltt_close(&a);
+        CHECK(preferred_now == 0, "max: %d open after clip A closed", preferred_now);
+        /* a third clip now gets the place clip A gave back */
+        mltt c;
+        if (!mltt_open(&c, "hdv_720_25p", "avformat", argv[2]))
+            return 1;
+        CHECK(abs(mltt_centre(&c, 3, yuv) - 22) <= 1, "max: clip C frame 3 has luma %d", yuv[0]);
+        CHECK(opened_preferred == 2, "max: the freed place wasn't taken (opened %d times)", opened_preferred);
+        (void) da;
+        mltt_close(&b);
+        mltt_close(&c);
+        printf("prefer_test %s: %s\n", mode, mltt_failures ? "FAILED" : "passed");
+        return mltt_failures != 0;
+    }
 
     /* the clip's time base, for drop_before */
     AVFormatContext *fc = NULL;

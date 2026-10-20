@@ -1,15 +1,15 @@
-| ClipTest for !MLT: run by Test when MLTtest$Clip names a video. The
-| first second with -verbose (which decoder MLT used, and why), then the
-| first 10 seconds decoded with MLT's choice of decoder and on the ARM.
-Echo 6. Your clip: <MLTtest$Clip>
-melt -verbose <MLTtest$Clip> out=24 -consumer null
-Echo    the first 10 seconds (250 frames at 25 fps), MLT's choice of decoder
-Echo start <Sys$Time>
-melt <MLTtest$Clip> out=249 -consumer null
-Echo end   <Sys$Time>
-Echo    the same, decoded on the ARM
+| ClipTest for !MLT: run by Test when MLTtest$Clip names a video.
+Echo 5. Your clip: <MLTtest$Clip>
+Echo    its first 10 seconds, made as the preview makes them: VideoCore, then ARM
+mltbench <MLTtest$Clip> 250
 Set MLT_AVFORMAT_PREFER none
-Echo start <Sys$Time>
-melt <MLTtest$Clip> out=249 -consumer null
-Echo end   <Sys$Time>
+mltbench <MLTtest$Clip> 250
 Unset MLT_AVFORMAT_PREFER
+Echo    a crossfade of the clip with itself (its first 10 seconds into the next 10, 2 seconds' overlap), as a project
+melt <MLTtest$Clip> in=0 out=249 <MLTtest$Clip> in=250 out=499 -mix 50 -mixer luma -consumer xml:/<Wimp$ScrapDir>/MLTtest/clipproject.mlt
+mltbench /<Wimp$ScrapDir>/MLTtest/clipproject.mlt
+Echo    that project exported (VideoCore)
+Echo start <Sys$Time>
+melt /<Wimp$ScrapDir>/MLTtest/clipproject.mlt -consumer avformat:/<Wimp$ScrapDir>/MLTtest/clipexport.mp4 vcodec=h264_encvchiq vb=8M acodec=aac
+Echo end   <Sys$Time>
+FileInfo <Wimp$ScrapDir>.MLTtest.clipexport/mp4

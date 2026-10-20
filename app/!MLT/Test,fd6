@@ -1,17 +1,18 @@
 | Test for !MLT: tries MLT on this machine, in a TaskWindow (the desktop
-| keeps running). Double-click it. Everything it makes goes in
-| <Wimp$ScrapDir>.MLTtest (about 30MB); delete it afterwards.
-| Each step shows the time it starts and ends (Sys$Time). Save the
-| TaskWindow's text (Menu > Save) and send it back.
-| To try one of your own videos too, first:
-|   *Set MLTtest$Clip SDFS::Pi.$.Videos.clip/mp4
+| keeps running: please try using it while the test runs). Double-click
+| it. Everything it makes goes in <Wimp$ScrapDir>.MLTtest (about 30MB);
+| delete it afterwards. Save the TaskWindow's text (Menu > Save) and send
+| it back.
+| Most useful with one of your own 1080p videos (at least 20 seconds), so
+| first:  *Set MLTtest$Clip SDFS::Pi.$.Videos.clip/mp4
 If "<MLT$Dir>"="" Then Set MLT$Dir <Obey$Dir>
 Run <MLT$Dir>.!Boot
 RMEnsure SharedUnixLibrary 1.16 Error MLT needs SharedUnixLibrary 1.16 or later.
 RMEnsure ARMEABISupport 0 Error MLT needs the ARMEABISupport module.
 CDir <Wimp$ScrapDir>.MLTtest
-Echo MLT engine test (melt 7.42.0, riscos-reeledit test build)
+Echo MLT engine test 2 (melt 7.42.0, riscos-reeledit test build 2)
 melt -version
+Echo (1080p on the VideoCore needs gpu_mem=128 or more in config.txt.)
 Echo
 Echo 1. Two 10 second 1080p clips, encoded on the VideoCore (h264_encvchiq)
 Echo start <Sys$Time>
@@ -22,28 +23,30 @@ Echo
 Echo 2. A 2 second crossfade between them, saved as a project (MLT XML)
 melt -profile atsc_1080p_25 /<Wimp$ScrapDir>/MLTtest/red.mp4 /<Wimp$ScrapDir>/MLTtest/blue.mp4 -mix 50 -mixer luma -consumer xml:/<Wimp$ScrapDir>/MLTtest/project.mlt
 Echo
-Echo 3. The project played as the editor's preview plays it (decode + mix, no display):
+Echo 3. The project's pictures, made as the editor's preview makes them:
 Echo    VideoCore decoding (h264_vchiq)
-Echo start <Sys$Time>
-melt /<Wimp$ScrapDir>/MLTtest/project.mlt -consumer null
-Echo end   <Sys$Time>
+mltbench /<Wimp$ScrapDir>/MLTtest/project.mlt
 Echo    ARM decoding
 Set MLT_AVFORMAT_PREFER none
-Echo start <Sys$Time>
-melt /<Wimp$ScrapDir>/MLTtest/project.mlt -consumer null
-Echo end   <Sys$Time>
+mltbench /<Wimp$ScrapDir>/MLTtest/project.mlt
 Unset MLT_AVFORMAT_PREFER
 Echo
-Echo 4. The project at 720p (the size a preview window is likely to be)
-Echo start <Sys$Time>
-melt -profile atsc_720p_25 /<Wimp$ScrapDir>/MLTtest/project.mlt -consumer null
-Echo end   <Sys$Time>
-Echo
-Echo 5. The project exported: VideoCore decoding and encoding
+Echo 4. The project exported: VideoCore decoding and encoding
 Echo start <Sys$Time>
 melt /<Wimp$ScrapDir>/MLTtest/project.mlt -consumer avformat:/<Wimp$ScrapDir>/MLTtest/export.mp4 vcodec=h264_encvchiq vb=8M an=1
 Echo end   <Sys$Time>
+Echo    again, with at most one VideoCore decoder at a time (MLT_AVFORMAT_PREFER_MAX=1)
+Set MLT_AVFORMAT_PREFER_MAX 1
+Echo start <Sys$Time>
+melt /<Wimp$ScrapDir>/MLTtest/project.mlt -consumer avformat:/<Wimp$ScrapDir>/MLTtest/export1.mp4 vcodec=h264_encvchiq vb=8M an=1
+Echo end   <Sys$Time>
+Unset MLT_AVFORMAT_PREFER_MAX
+Echo    the exports: their sizes, then (if !FFmpeg's *ffprobe is set up) their frame counts (450 each)
+FileInfo <Wimp$ScrapDir>.MLTtest.export/mp4
+FileInfo <Wimp$ScrapDir>.MLTtest.export1/mp4
+If "<Alias$ffprobe>"<>"" Then ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=nb_read_frames -of csv=p=0 /<Wimp$ScrapDir>/MLTtest/export.mp4
+If "<Alias$ffprobe>"<>"" Then ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=nb_read_frames -of csv=p=0 /<Wimp$ScrapDir>/MLTtest/export1.mp4
 Echo
-If "<MLTtest$Clip>"="" Then Echo 6. (skipped: *Set MLTtest$Clip to one of your own videos to try it)
+If "<MLTtest$Clip>"="" Then Echo 5. (skipped: *Set MLTtest$Clip to one of your own videos to try it)
 If "<MLTtest$Clip>"<>"" Then Obey <MLT$Dir>.ClipTest
 Echo Done.

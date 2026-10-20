@@ -16,10 +16,10 @@ check and Linux test below. Nothing here has run on RISC OS yet; `!MLT`
 
 | Path | What |
 |---|---|
-| `patches/mlt/` | Four patches to MLT 7.42.0: static modules (no dlopen), no threads, the avformat module without threads, preferred (hardware) decoders with a fallback |
+| `patches/mlt/` | Five patches to MLT 7.42.0: static modules (no dlopen), no threads, the avformat module without threads, preferred (hardware) decoders with a fallback, opened only when used, and no needless picture conversions |
 | `build/` | Fetching the sources, the RISC OS build, the Linux build for the tests, the `!MLT` zip |
 | `src/engine.c` | Reel Edit's player: a project played from Wimp null events, a picture at a time |
-| `app/!MLT/` | The engine test application: `*melt`, and `Test`, which tries MLT on the machine |
+| `app/!MLT/` | The engine test application: `*melt`, `*mltbench` (`tools/bench.c`), and `Test`, which tries MLT on the machine |
 | `tests/host/` | Linux tests |
 | `docs/` | [DESIGN.md](docs/DESIGN.md): the editor; [PORTING.md](docs/PORTING.md): what was changed for RISC OS and why |
 
@@ -49,15 +49,22 @@ threads, the same preferred decoders) and checks:
   thread started (counted with an `LD_PRELOAD` wrapper), reporting progress;
   with `MLT_NO_THREADS=0` it uses threads again.
 - **pull_test** plays the project as Reel Edit does, a frame at a time from
-  the program's own loop: the right pictures in any order, and no threads.
+  the program's own loop: the right pictures in any order, the dissolve the
+  same in yuv420p as in yuv422, and no threads.
+- **render_test**: a started consumer renders every frame's picture and
+  sound with no threads (the null consumer rendered nothing before).
+- **convert_test** counts swscale calls: none when pictures are asked for in
+  their own format and size, through a dissolve, in an export, and for a
+  colour in an HD profile (which must be BT.709).
 - **engine_test** runs `src/engine.c` against a clock the test controls:
   every frame on a fast machine, keeping to the clock on a slow one with the
   sound unbroken, catching up after a stall, seeks that replace each other,
   stopping at the end, backwards at double speed, half-size preview.
 - **prefer_test** stands in for the Pi's H.264 decoder: used when it works,
   replaced by the ARM decoder when it refuses a clip at the start or part
-  way, given `drop_before` after each jump, and never asked for when
-  `MLT_AVFORMAT_PREFER` is empty.
+  way, given `drop_before` after each jump, never asked for when
+  `MLT_AVFORMAT_PREFER` is empty, opened only when the first picture is
+  decoded, and limited by `MLT_AVFORMAT_PREFER_MAX`.
 
 Each test was mutation-checked: breaking the code it covers makes it fail.
 

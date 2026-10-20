@@ -1,7 +1,7 @@
-From 8a109ef46a32d8b636a4d3e33b1d7af41610ec5a Mon Sep 17 00:00:00 2001
+From 78a8286686ffc8b76933823bdddc72f49e92b05d Mon Sep 17 00:00:00 2001
 From: Andrew Youll <andrewyoull86@gmail.com>
 Date: Tue, 20 Oct 2026 16:33:34 +0100
-Subject: [PATCH 3/4] MLT_NO_THREADS: the avformat module on the calling thread
+Subject: [PATCH 3/5] MLT_NO_THREADS: the avformat module on the calling thread
 
 Without threads (mlt_threads_disabled):
 - the avformat producer starts no packets_worker; packets_read_inline()

@@ -1,7 +1,7 @@
-From 330da3661e304cb3fd4f9fa6168716f2d2a950a5 Mon Sep 17 00:00:00 2001
+From 7beaed59c30a0574e613759a13a99574ca710b2d Mon Sep 17 00:00:00 2001
 From: Andrew Youll <andrewyoull86@gmail.com>
 Date: Tue, 20 Oct 2026 16:32:26 +0100
-Subject: [PATCH 2/4] MLT_NO_THREADS: slices and consumers on the calling
+Subject: [PATCH 2/5] MLT_NO_THREADS: slices and consumers on the calling
  thread
 
 mlt_threads_disabled() says whether MLT should do all its work on the
@@ -12,17 +12,20 @@ threads are switched by a ticker and whose Wimp tasks share one CPU.
 
 With it, mlt_slices creates no workers and runs every job on the
 caller, and mlt_consumer_start turns real_time off, so frames are
-rendered when they're asked for instead of by read-ahead threads.
+rendered when they're asked for instead of by read-ahead threads:
+mlt_consumer_rt_frame fetches each frame's sound and picture itself, as
+the read-ahead thread would have (without that, a consumer such as null,
+which leaves the rendering to that thread, rendered nothing).
 
 Also exports mlt_repository_add_static (previous commit) in mlt.vers.
 ---
  CMakeLists.txt               |  1 +
  src/framework/CMakeLists.txt |  3 +++
  src/framework/mlt.vers       |  2 ++
- src/framework/mlt_consumer.c |  7 ++++++
+ src/framework/mlt_consumer.c | 43 +++++++++++++++++++++++++++++++++
  src/framework/mlt_slices.c   | 46 ++++++++++++++++++++++++++++++++++++
  src/framework/mlt_slices.h   |  5 ++++
- 6 files changed, 64 insertions(+)
+ 6 files changed, 100 insertions(+)
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
 index 249068c..48921e3 100644
@@ -62,7 +65,7 @@ index b0ee6cb..64f6a9f 100644
 +    mlt_threads_disabled;
  } MLT_7.40.0;
 diff --git a/src/framework/mlt_consumer.c b/src/framework/mlt_consumer.c
-index d8b851e..dd3cabd 100644
+index d8b851e..a7bae0f 100644
 --- a/src/framework/mlt_consumer.c
 +++ b/src/framework/mlt_consumer.c
 @@ -26,6 +26,7 @@
@@ -73,19 +76,69 @@ index d8b851e..dd3cabd 100644
  
  #include <stdatomic.h>
  #include <stdio.h>
-@@ -567,6 +568,12 @@ int mlt_consumer_start(mlt_consumer self)
+@@ -79,6 +80,7 @@ MLT_EXPORT pthread_mutex_t mlt_frame_processing_mutex = PTHREAD_MUTEX_INITIALIZE
+ typedef struct
+ {
+     int real_time;
++    int render_inline; /* no threads: frames are rendered as rt_frame returns them */
+     atomic_int ahead;
+     int preroll;
+     mlt_image_format image_format;
+@@ -567,6 +569,15 @@ int mlt_consumer_start(mlt_consumer self)
      // Set the real_time preference
      priv->real_time = mlt_properties_get_int(properties, "real_time");
  
-+    // Without threads, frames are rendered when they're asked for
++    // Without threads, frames are rendered when they're asked for: by
++    // mlt_consumer_rt_frame, as the read-ahead thread would have
++    priv->render_inline = 0;
 +    if (priv->real_time && mlt_threads_disabled()) {
 +        priv->real_time = 0;
++        priv->render_inline = 1;
 +        mlt_properties_set_int(properties, "real_time", 0);
 +    }
 +
      // For worker threads implementation, buffer must be at least # threads
      if (abs(priv->real_time) > 1
          && mlt_properties_get_int(properties, "buffer") <= abs(priv->real_time))
+@@ -1644,6 +1655,38 @@ mlt_frame mlt_consumer_rt_frame(mlt_consumer self)
+         // Get the frame in non real time
+         frame = mlt_consumer_get_frame(self);
+ 
++        // Without threads (render_inline), render it here, as the read-ahead
++        // thread would have: its sound, then its picture
++        if (frame != NULL && priv->render_inline) {
++            if (priv->aud_counter == 0) {
++                set_audio_format(self);
++                set_image_format(self);
++                if (mlt_properties_get_int(properties, "preview_off")
++                    && mlt_properties_get_int(properties, "preview_format") != 0)
++                    priv->image_format = mlt_properties_get_int(properties, "preview_format");
++            }
++            if (!mlt_properties_get_int(properties, "audio_off")) {
++                void *audio = NULL;
++                int samples = mlt_audio_calculate_frame_samples(priv->fps,
++                                                                priv->frequency,
++                                                                priv->aud_counter);
++                mlt_frame_get_audio(frame,
++                                    &audio,
++                                    &priv->audio_format,
++                                    &priv->frequency,
++                                    &priv->channels,
++                                    &samples);
++            }
++            priv->aud_counter++;
++            if (!mlt_properties_get_int(properties, "video_off")) {
++                uint8_t *image = NULL;
++                int width = mlt_properties_get_int(properties, "width");
++                int height = mlt_properties_get_int(properties, "height");
++                mlt_events_fire(properties, "consumer-frame-render", mlt_event_data_from_frame(frame));
++                mlt_frame_get_image(frame, &image, &priv->image_format, &width, &height, 0);
++            }
++        }
++
+         // This isn't true, but from the consumers perspective it is
+         if (frame != NULL) {
+             mlt_properties_set_int(MLT_FRAME_PROPERTIES(frame), "rendered", 1);
 diff --git a/src/framework/mlt_slices.c b/src/framework/mlt_slices.c
 index ed508f5..8c6ddb3 100644
 --- a/src/framework/mlt_slices.c

@@ -1,7 +1,7 @@
-From f5b54f5bf999d7f89aeaa718bfeac06aa1d4768a Mon Sep 17 00:00:00 2001
+From b7de6ba2eaa3119459aae128c82a766a99853351 Mon Sep 17 00:00:00 2001
 From: Andrew Youll <andrewyoull86@gmail.com>
 Date: Tue, 20 Oct 2026 16:34:57 +0100
-Subject: [PATCH 4/4] avformat producer: preferred decoders, falling back to
+Subject: [PATCH 4/5] avformat producer: preferred decoders, falling back to
  the default, and drop_before after a jump
 
 The prefer property (or MLT_AVFORMAT_PREFER, or a default chosen at build
@@ -17,17 +17,26 @@ After a seek, or a jump forward that is decoded through, a preferred
 decoder is given drop_before (an option of
 the RISC OS hardware decoders; others ignore it), so the pictures before
 the one asked for are left out instead of handed over to be thrown away.
+
+A preferred decoder is opened only when the clip's first picture is
+decoded, not with the clip: opening a project opens every clip, and on
+the Raspberry Pi every clip's hardware decoder then held VideoCore memory
+before any was used, so the hardware encoder couldn't start an export.
+MLT_AVFORMAT_PREFER_MAX (or MLT_AVFORMAT_PREFER_MAX_DEFAULT at build
+time) limits how many are open at once across all producers; a clip
+beyond it uses the default decoder. A place is given back when its
+decoder is closed or falls back.
 ---
- src/modules/avformat/CMakeLists.txt        |   5 +
- src/modules/avformat/producer_avformat.c   | 128 +++++++++++++++++++++
- src/modules/avformat/producer_avformat.yml |  16 +++
- 3 files changed, 149 insertions(+)
+ src/modules/avformat/CMakeLists.txt        |   9 +
+ src/modules/avformat/producer_avformat.c   | 245 ++++++++++++++++++++-
+ src/modules/avformat/producer_avformat.yml |  16 ++
+ 3 files changed, 267 insertions(+), 3 deletions(-)
 
 diff --git a/src/modules/avformat/CMakeLists.txt b/src/modules/avformat/CMakeLists.txt
-index 8b1bf6c..1eca7f7 100644
+index 8b1bf6c..cbea7bc 100644
 --- a/src/modules/avformat/CMakeLists.txt
 +++ b/src/modules/avformat/CMakeLists.txt
-@@ -29,6 +29,11 @@ add_custom_target(Other_avformat_Files SOURCES
+@@ -29,6 +29,15 @@ add_custom_target(Other_avformat_Files SOURCES
  include(GenerateExportHeader)
  generate_export_header(mltavformat)
  mlt_module_static(mltavformat)
@@ -36,31 +45,48 @@ index 8b1bf6c..1eca7f7 100644
 +if(MLT_AVFORMAT_PREFER_DEFAULT)
 +  target_compile_definitions(mltavformat PRIVATE MLT_AVFORMAT_PREFER_DEFAULT="${MLT_AVFORMAT_PREFER_DEFAULT}")
 +endif()
++set(MLT_AVFORMAT_PREFER_MAX_DEFAULT "" CACHE STRING "How many preferred decoders may be open at once, in all producers (empty or 0: no limit); the MLT_AVFORMAT_PREFER_MAX environment variable overrides it")
++if(MLT_AVFORMAT_PREFER_MAX_DEFAULT)
++  target_compile_definitions(mltavformat PRIVATE MLT_AVFORMAT_PREFER_MAX_DEFAULT=${MLT_AVFORMAT_PREFER_MAX_DEFAULT})
++endif()
  target_compile_options(mltavformat PRIVATE ${MLT_COMPILE_OPTIONS})
  
  target_include_directories(mltavformat SYSTEM PRIVATE ${FFMPEG_INCLUDE_DIRS})
 diff --git a/src/modules/avformat/producer_avformat.c b/src/modules/avformat/producer_avformat.c
-index 62aaaeb..8df52dc 100644
+index 62aaaeb..b0afda9 100644
 --- a/src/modules/avformat/producer_avformat.c
 +++ b/src/modules/avformat/producer_avformat.c
-@@ -129,6 +129,8 @@ struct producer_avformat_s
+@@ -129,6 +129,10 @@ struct producer_avformat_s
      int packets_thread_stop; // non-zero when packets_thread is to stop
      int is_thread_init;
      int packets_inline; // no packets_thread: packets are read as they're needed (mlt_threads_disabled)
 +    int prefer_active;  // the video decoder is the one asked for by "prefer" (a hardware decoder, say)
 +    int prefer_refused; // that decoder refused this clip: use the default from now on
++    int prefer_pending; // a preferred decoder is listed for this clip, not yet opened
++    int prefer_now;     // video_codec_init may open the preferred decoder
      AVRational video_time_base;
      mlt_frame last_good_frame; // for video error concealment
      int last_good_position;    // for video error concealment
-@@ -166,6 +168,7 @@ static void producer_set_up_video(producer_avformat self, mlt_frame frame);
+@@ -166,6 +170,9 @@ static void producer_set_up_video(producer_avformat self, mlt_frame frame);
  static void producer_set_up_audio(producer_avformat self, mlt_frame frame);
  static void apply_properties(void *obj, mlt_properties properties, int flags);
  static int video_codec_init(producer_avformat self, int index, mlt_properties properties);
 +static int prefer_fall_back(producer_avformat self, mlt_properties properties, int error);
++static int prefer_available(void);
++static void free_video_codec(producer_avformat self);
  static void get_audio_streams_info(producer_avformat self);
  static mlt_audio_format pick_audio_format(int sample_fmt);
  static int pick_av_pixel_format(int *pix_fmt, int full_range);
-@@ -1927,6 +1930,19 @@ static int seek_video(producer_avformat self,
+@@ -1707,7 +1714,7 @@ static void prepare_reopen(producer_avformat self)
+         self->decode_buffer[i] = NULL;
+         avcodec_free_context(&self->audio_codec[i]);
+     }
+-    avcodec_free_context(&self->video_codec);
++    free_video_codec(self);
+     av_frame_unref(self->video_frame);
+     av_buffer_unref(&self->hwaccel.device_ctx);
+     self->hwaccel.device_ctx = NULL;
+@@ -1927,6 +1934,19 @@ static int seek_video(producer_avformat self,
              self->last_position = POSITION_INVALID;
              av_frame_unref(self->video_frame);
          }
@@ -80,7 +106,32 @@ index 62aaaeb..8df52dc 100644
      }
      pthread_mutex_unlock(&self->packets_mutex);
      return paused;
-@@ -3056,6 +3072,12 @@ static int producer_get_image(mlt_frame frame,
+@@ -2899,6 +2919,24 @@ static int producer_get_image(mlt_frame frame,
+ 
+     double delay = mlt_properties_get_double(properties, "video_delay");
+ 
++    // The first picture to decode: open the preferred decoder now, in place
++    // of the default one opened with the clip, if there is a place for it
++    if (self->prefer_pending && !self->prefer_active && !self->prefer_refused
++        && prefer_available()) {
++        self->prefer_pending = 0;
++        pthread_mutex_lock(&self->open_mutex);
++        free_video_codec(self);
++        pthread_mutex_unlock(&self->open_mutex);
++        self->prefer_now = 1;
++        int opened = video_codec_init(self, self->video_index, properties);
++        self->prefer_now = 0;
++        if (!opened || !self->video_codec)
++            goto exit_get_image;
++        // decode from a seek, as for a new clip
++        self->last_position = POSITION_INVALID;
++        av_frame_unref(self->video_frame);
++    }
++
+     // Seek if necessary
+     double speed = mlt_producer_get_speed(producer);
+     int preseek = must_decode && self->video_codec->has_b_frames && speed >= 0.0 && speed <= 1.0;
+@@ -3056,6 +3094,12 @@ static int producer_get_image(mlt_frame frame,
                                    "decoded video packet with size %d => %d\n",
                                    self->pkt.size,
                                    self->video_send_result);
@@ -93,7 +144,7 @@ index 62aaaeb..8df52dc 100644
                      // Note: decode may fail at the beginning of MPEGfile (B-frames referencing before first I-frame), so allow a few errors.
                      if (!ignore_send_packet_result(self->video_send_result)) {
                          mlt_log_warning(MLT_PRODUCER_SERVICE(producer),
-@@ -3063,6 +3085,12 @@ static int producer_get_image(mlt_frame frame,
+@@ -3063,6 +3107,12 @@ static int producer_get_image(mlt_frame frame,
                                          self->video_send_result);
                      } else {
                          int error = avcodec_receive_frame(self->video_codec, self->video_frame);
@@ -106,7 +157,7 @@ index 62aaaeb..8df52dc 100644
                          if (error < 0) {
                              if (error != AVERROR(EAGAIN) && ++decode_errors > 10) {
                                  mlt_log_warning(MLT_PRODUCER_SERVICE(producer),
-@@ -3356,6 +3384,80 @@ static void apply_properties(void *obj, mlt_properties properties, int flags)
+@@ -3356,6 +3406,159 @@ static void apply_properties(void *obj, mlt_properties properties, int flags)
  /** Initialize the video codec context.
   */
  
@@ -121,9 +172,86 @@ index 62aaaeb..8df52dc 100644
 + * the default decoder.
 + */
 +
++/* Preferred decoders open now, in every producer, against
++   MLT_AVFORMAT_PREFER_MAX (0 or unset: no limit). A hardware decoder holds
++   memory the rest of the hardware (an encoder, the display) also needs. */
++static pthread_mutex_t prefer_lock = PTHREAD_MUTEX_INITIALIZER;
++static int prefer_open = 0;
++
++static int prefer_max(void)
++{
++    const char *e = getenv("MLT_AVFORMAT_PREFER_MAX");
++#ifdef MLT_AVFORMAT_PREFER_MAX_DEFAULT
++    if (!e)
++        return MLT_AVFORMAT_PREFER_MAX_DEFAULT;
++#endif
++    return e ? atoi(e) : 0;
++}
++
++/* Take a place for a preferred decoder: 1 if there is one. */
++static int prefer_take(void)
++{
++    int max = prefer_max(), ok;
++    pthread_mutex_lock(&prefer_lock);
++    ok = max <= 0 || prefer_open < max;
++    if (ok)
++        prefer_open++;
++    pthread_mutex_unlock(&prefer_lock);
++    return ok;
++}
++
++static void prefer_give_back(void)
++{
++    pthread_mutex_lock(&prefer_lock);
++    if (prefer_open > 0)
++        prefer_open--;
++    pthread_mutex_unlock(&prefer_lock);
++}
++
++/** Free the video decoder, giving back its place if it was a preferred one. */
++
++static int prefer_available(void)
++{
++    int max = prefer_max(), ok;
++    pthread_mutex_lock(&prefer_lock);
++    ok = max <= 0 || prefer_open < max;
++    pthread_mutex_unlock(&prefer_lock);
++    return ok;
++}
++
++static void free_video_codec(producer_avformat self)
++{
++    if (self->video_codec && self->prefer_active) {
++        self->prefer_active = 0;
++        prefer_give_back();
++    }
++    avcodec_free_context(&self->video_codec);
++}
++
++static const AVCodec *preferred_decoder_find(producer_avformat self,
++                                             mlt_properties properties,
++                                             enum AVCodecID codec_id,
++                                             int find);
++
++/** Whether a preferred decoder is listed for this codec (and hasn't refused
++ * this clip). Doesn't look the decoder up. */
++
++static int preferred_listed(producer_avformat self, mlt_properties properties, enum AVCodecID codec_id)
++{
++    return preferred_decoder_find(self, properties, codec_id, 0) != NULL;
++}
++
 +static const AVCodec *preferred_decoder(producer_avformat self,
 +                                        mlt_properties properties,
 +                                        enum AVCodecID codec_id)
++{
++    return preferred_decoder_find(self, properties, codec_id, 1);
++}
++
++static const AVCodec *preferred_decoder_find(producer_avformat self,
++                                             mlt_properties properties,
++                                             enum AVCodecID codec_id,
++                                             int find)
 +{
 +    const char *list = mlt_properties_get(properties, "prefer");
 +    if (!list)
@@ -146,6 +274,8 @@ index 62aaaeb..8df52dc 100644
 +            if (n < sizeof(name)) {
 +                memcpy(name, p + codec_len + 1, n);
 +                name[n] = 0;
++                if (!find)
++                    return (const AVCodec *) 1; /* (listed: only compared with NULL) */
 +                const AVCodec *codec = avcodec_find_decoder_by_name(name);
 +                if (codec && codec->id == codec_id)
 +                    return codec;
@@ -174,10 +304,10 @@ index 62aaaeb..8df52dc 100644
 +                 self->video_codec->codec->name,
 +                 error);
 +    pthread_mutex_lock(&self->open_mutex);
-+    avcodec_free_context(&self->video_codec);
++    free_video_codec(self);
 +    pthread_mutex_unlock(&self->open_mutex);
-+    self->prefer_active = 0;
 +    self->prefer_refused = 1;
++    self->prefer_pending = 0;
 +    if (!video_codec_init(self, self->video_index, properties))
 +        return 0;
 +    self->last_position = POSITION_INVALID;
@@ -187,16 +317,24 @@ index 62aaaeb..8df52dc 100644
  static int video_codec_init(producer_avformat self, int index, mlt_properties properties)
  {
      // Initialise the codec if necessary
-@@ -3378,6 +3480,16 @@ static int video_codec_init(producer_avformat self, int index, mlt_properties pr
+@@ -3378,6 +3581,24 @@ static int video_codec_init(producer_avformat self, int index, mlt_properties pr
              if (!(codec = avcodec_find_decoder_by_name("libvpx")))
                  codec = avcodec_find_decoder(codec_params->codec_id);
          }
 +        self->prefer_active = 0;
 +        if (!mlt_properties_get(properties, "vcodec")) {
-+            const AVCodec *preferred = preferred_decoder(self, properties, codec_params->codec_id);
-+            if (preferred) {
-+                codec = preferred;
-+                self->prefer_active = 1;
++            // The preferred decoder is opened only when the first picture is
++            // decoded (prefer_now, from producer_get_image): opening a
++            // project opens every clip's decoder, and hardware decoders
++            // would hold their memory before any were used
++            if (!self->prefer_now) {
++                self->prefer_pending = preferred_listed(self, properties, codec_params->codec_id);
++            } else {
++                const AVCodec *preferred = preferred_decoder(self, properties, codec_params->codec_id);
++                if (preferred && prefer_take()) {
++                    codec = preferred;
++                    self->prefer_active = 1;
++                }
 +            }
 +        }
 +
@@ -204,7 +342,7 @@ index 62aaaeb..8df52dc 100644
  
          // Setup the codec context
          AVCodecContext *codec_context = avcodec_alloc_context3(codec);
-@@ -3476,6 +3588,17 @@ static int video_codec_init(producer_avformat self, int index, mlt_properties pr
+@@ -3476,6 +3697,19 @@ static int video_codec_init(producer_avformat self, int index, mlt_properties pr
              }
              // Now store the codec with its destructor
              self->video_codec = codec_context;
@@ -216,13 +354,15 @@ index 62aaaeb..8df52dc 100644
 +            pthread_mutex_unlock(&self->open_mutex);
 +            avcodec_free_context(&codec_context);
 +            self->prefer_active = 0;
++            prefer_give_back();
 +            self->prefer_refused = 1;
++            self->prefer_pending = 0;
 +            codec = avcodec_find_decoder(codec_params->codec_id);
 +            goto retry_open;
          } else {
              // Remember that we can't use this later
              self->video_index = -1;
-@@ -3483,6 +3606,11 @@ static int video_codec_init(producer_avformat self, int index, mlt_properties pr
+@@ -3483,6 +3717,11 @@ static int video_codec_init(producer_avformat self, int index, mlt_properties pr
              return 0;
          }
          pthread_mutex_unlock(&self->open_mutex);
@@ -234,6 +374,24 @@ index 62aaaeb..8df52dc 100644
  
          // Process properties as AVOptions
          apply_properties(codec_context,
+@@ -3641,7 +3880,7 @@ static void producer_set_up_video(producer_avformat self, mlt_frame frame)
+         self->video_index = index;
+         mlt_properties_set_int(properties, "_probe_complete", 0);
+         pthread_mutex_lock(&self->open_mutex);
+-        avcodec_free_context(&self->video_codec);
++        free_video_codec(self);
+         set_up_discard(self, self->audio_index, index);
+         pthread_mutex_unlock(&self->open_mutex);
+     }
+@@ -4634,7 +4873,7 @@ static void producer_avformat_close(producer_avformat self)
+         av_free(self->decode_buffer[i]);
+         avcodec_free_context(&self->audio_codec[i]);
+     }
+-    avcodec_free_context(&self->video_codec);
++    free_video_codec(self);
+     // Close the file
+     if (self->is_thread_init) {
+         pthread_mutex_lock(&self->packets_mutex);
 diff --git a/src/modules/avformat/producer_avformat.yml b/src/modules/avformat/producer_avformat.yml
 index e2c84b7..fc6e792 100644
 --- a/src/modules/avformat/producer_avformat.yml

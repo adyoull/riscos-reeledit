@@ -81,6 +81,17 @@ int main(int argc, char **argv)
             memcpy(mid, p, sizeof(mid));
     }
 
+    /* the crossfade drawn as yuv420p (the fast path) and as yuv422 (the
+       original path) is the same picture */
+    for (int f = 54; f <= 70; f += 8) {
+        int p420[3], p422[3];
+        CHECK(mltt_centre_as(&project, f, mlt_image_yuv420p, p420) >= 0, "no yuv420p picture at %d", f);
+        CHECK(mltt_centre_as(&project, f, mlt_image_yuv422, p422) >= 0, "no yuv422 picture at %d", f);
+        CHECK(near(p420[0], p422[0], 1) && near(p420[1], p422[1], 1) && near(p420[2], p422[2], 1),
+              "frame %d: yuv420p %d,%d,%d but yuv422 %d,%d,%d",
+              f, p420[0], p420[1], p420[2], p422[0], p422[1], p422[2]);
+    }
+
     /* random access: back into the crossfade, then forward, then back */
     int again[3];
     mltt_centre(&project, 110, p);

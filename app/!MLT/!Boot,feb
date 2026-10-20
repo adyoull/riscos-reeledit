@@ -1,12 +1,13 @@
 | !Boot for !MLT (the MLT multimedia framework 7.42.0 for RISC OS)
-| Seen by the Filer: sets up the *melt command so it works from any
-| command line or TaskWindow, and tells MLT where its data files are.
+| Seen by the Filer: sets up the *melt and *mltbench commands so they work
+| from any command line or TaskWindow, and tells MLT where its data files are.
 If "<MLT$Dir>"="" Then Set MLT$Dir <Obey$Dir>
 IconSprites <MLT$Dir>.!Sprites
 | "|<" keeps <MLT$Dir> unexpanded; UnixLib expands it when MLT opens a file
 Set MLT_DATA /|<MLT$Dir>/share/mlt-7
 Set MLT_PROFILES_PATH /|<MLT$Dir>/share/mlt-7/profiles/
 Set MLT_PRESETS_PATH /|<MLT$Dir>/share/mlt-7/presets
-| melt is about 25MB of code and 8MB of zeroed data; its heap is in a
-| dynamic area.
+| Each program is about 25MB of code and 8MB of zeroed data; their heaps
+| are in dynamic areas.
 Set Alias$melt WimpSlot -min 40960K|MRun <MLT$Dir>.melt %%*0
+Set Alias$mltbench WimpSlot -min 40960K|MRun <MLT$Dir>.bench %%*0

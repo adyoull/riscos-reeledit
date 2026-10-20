@@ -94,9 +94,11 @@ else on the desktop moves. These rules keep that time short.
    doesn't copy them out.
 5. **Scrubbing renders only the newest position.** Positions asked for while a
    frame is being made replace each other; only the latest is drawn.
-6. **Preview at a smaller size.** Over 720p, the preview renders at half size
-   (MLT's preview scaling) and the overlay scales it up. Export always renders
-   at full size.
+6. **Preview at the project's size; the overlay scales it.** Rendering at a
+   smaller size costs a software scale per clip, which on Linux made a half-size
+   preview slower than full size (21 against 13 ms a 1080p picture). The
+   hardware overlay scales for nothing. Half size stays an option, to be
+   measured on the Pi, for projects whose effects cost more than the scaling.
 7. **Long jobs in a TaskWindow.** Export, proxies and audio waveforms for long
    clips run as melt in a TaskWindow, which RISC OS switches pre-emptively.
    Reel Edit reads their progress from `TaskWindow_Output`, as !FFmpeg's
@@ -104,6 +106,15 @@ else on the desktop moves. These rules keep that time short.
 8. **Background work in slices.** Thumbnails and short waveforms are made one
    item per null event, only while stopped.
 9. **Sound is the clock** while playing, through SharedSoundBuffer, as in Reel.
+10. **Nothing converted that needn't be.** Decoded video is yuv420p, and so is
+    what the overlay and the VideoCore's encoder take: MLT is patched (0005) so
+    pictures stay yuv420p from the decoder to the screen or the encoder,
+    including through a dissolve. Each conversion of a 1080p picture costs more
+    on the ARM than the VideoCore takes to decode it.
+11. **Hardware decoders only while they're used.** A clip's VideoCore decoder
+    is opened when its first picture is needed, not when the project opens
+    (the first Pi test ran out of VideoCore memory for the export's encoder),
+    and `MLT_AVFORMAT_PREFER_MAX` can cap how many are open at once.
 
 Targets, to be measured on a Pi 4 (the engine test, `!MLT.Test`, measures
 the first ones):
@@ -111,7 +122,7 @@ the first ones):
 | Case | Target |
 |---|---|
 | 1080p25 H.264, one track, preview | 25 fps, VideoCore decoding |
-| 1080p25 dissolve between two H.264 clips | 25 fps at half-size preview |
+| 1080p25 dissolve between two H.264 clips | 25 fps, full size |
 | Longest time between two polls while playing | under one frame time (40 ms at 25 fps) |
 | CPU used while stopped | none |
 

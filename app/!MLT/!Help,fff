@@ -1,4 +1,4 @@
-MLT 7.42.0 for RISC OS: engine test 1
+MLT 7.42.0 for RISC OS: engine test 2
 =====================================
 
 This is the engine of Reel Edit, a video editor for RISC OS that is being
@@ -15,16 +15,21 @@ config.txt.
 
 Trying it
 ---------
-Double-click Test. It runs in a TaskWindow, so the desktop keeps
-working: it makes two 10 second 1080p clips with the VideoCore's encoder,
-puts a crossfade between them, plays the result as the editor's preview
-would (decoding and mixing, with nothing shown), and exports it.
+Most useful with one of your own 1080p videos, at least 20 seconds long:
+  *Set MLTtest$Clip SDFS::Pi.$.Videos.clip/mp4
+Then double-click Test. It runs in a TaskWindow, so the desktop keeps
+working (please try using it while the test runs). It makes two 1080p
+clips with the VideoCore's encoder, puts a crossfade between them, times
+how fast the editor's preview could make the pictures (VideoCore and ARM
+decoding), and exports the result; then the same with your clip.
 Everything goes in <Wimp$ScrapDir>.MLTtest. Save the TaskWindow's text
 (Menu > Save) and send it back.
 
-To include one of your own videos:
-  *Set MLTtest$Clip SDFS::Pi.$.Videos.clip/mp4
-before double-clicking Test.
+mltbench
+--------
+  mltbench FILE [FRAMES] [SCALE]
+times how long each picture of a clip or project takes to make, exactly as
+Reel Edit's preview will ask for them; SCALE 0.5 makes them at half size.
 
 melt
 ----

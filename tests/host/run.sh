@@ -5,6 +5,8 @@
 #   melt:         a crossfade project made, saved and rendered by melt with no
 #                 threads; progress reported; the output checked
 #   pull_test:    the project played as Reel Edit plays it (no consumer thread)
+#   convert_test: pictures asked for in their own format and size aren't converted
+#   render_test:  a started consumer renders each frame's picture and sound
 #   engine_test:  src/engine.c, the player, polled as the Wimp polls it
 #   prefer_test:  the preferred decoder taken, refused, failing part way, off
 # Usage: tests/host/run.sh   (after build/build-host.sh)
@@ -37,6 +39,8 @@ $CC $CFLAGS "$HERE/prefer_test.c" -o "$O/prefer_test" \
   -Wl,--wrap=avcodec_free_context,--wrap=av_opt_set_int $MLTLIBS $FFLIBS -lpthread -lm || bad=1
 $CC $CFLAGS -I"$TOP/src" "$TOP/src/engine.c" "$HERE/engine_test.c" -o "$O/engine_test" \
   -Wl,--wrap=pthread_create $MLTLIBS $FFLIBS -lpthread -lm || bad=1
+$CC $CFLAGS "$HERE/convert_test.c" -o "$O/convert_test" -Wl,--wrap=sws_scale $MLTLIBS $FFLIBS -lpthread -lm || bad=1
+$CC $CFLAGS "$HERE/render_test.c" -o "$O/render_test" $MLTLIBS $FFLIBS -lpthread -lm || bad=1
 $CC -shared -fPIC "$HERE/count_threads.c" -o "$O/count_threads.so" -ldl || bad=1
 
 # ---- melt: make and save the project, then render it with no threads
@@ -61,9 +65,15 @@ grep -q "count_threads: 0" melt-render2.log && fail "MLT_NO_THREADS=0 started no
 
 echo "== pull_test"
 "$O/pull_test" project.mlt a.mp4 b.mp4 || bad=1
+echo "== convert_test"
+# the project again at the clips' own size and colours, 320x180 BT.601
+sed -e 's/width="1280"/width="320"/' -e 's/height="720"/height="180"/' -e 's/colorspace="709"/colorspace="601"/' project.mlt > project-small.mlt
+"$O/convert_test" a.mp4 project-small.mlt || bad=1
+echo "== render_test"
+"$O/render_test" project.mlt || bad=1
 echo "== engine_test"
 "$O/engine_test" project.mlt || bad=1
-for m in normal refuse late off; do
+for m in normal refuse late off lazy max; do
   echo "== prefer_test $m"
   "$O/prefer_test" $m numbered.mp4 2>&1 | grep -v "^\[" || bad=1
 done
