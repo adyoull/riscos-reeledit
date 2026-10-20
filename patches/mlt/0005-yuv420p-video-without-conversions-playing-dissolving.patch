@@ -1,4 +1,4 @@
-From 3b6be2acf6560272aa86fc47b7a63068a33ff9fa Mon Sep 17 00:00:00 2001
+From 876f9669da488a9f9a508dfa03740fe8f49b2586 Mon Sep 17 00:00:00 2001
 From: Andrew Youll <andrewyoull86@gmail.com>
 Date: Tue, 20 Oct 2026 20:02:49 +0100
 Subject: [PATCH 5/5] yuv420p video without conversions: playing, dissolving,
@@ -27,17 +27,44 @@ decoding:
   profile, which an HD (BT.709) export converted through RGB: it now makes
   it in the profile's colour space.
 
+- Two options (off by default) cut whole-picture copies:
+  MLT_AVFORMAT_CACHE_DEFAULT sets the image cache's size when nothing else
+  does (0 on RISC OS: the cache copies each picture in, and again out),
+  and MLT_AVFORMAT_CONCEAL_BY_REFERENCE keeps the last good decoded
+  picture for error concealment by reference, converting it only when a
+  picture fails, instead of a deep copy of every converted picture.
+
 On the Linux test machine: a 1080p H.264 clip went from 19.6 to 6.6 ms a
 picture, a dissolve between two such clips from about 25 to 9 ms, and
 exporting 100 frames of a colour at 1080p from 6.1 to 1.0 s.
 ---
- src/modules/avformat/consumer_avformat.c    | 24 ++++++++++--
- src/modules/avformat/filter_avdeinterlace.c | 16 ++++++--
- src/modules/avformat/producer_avformat.c    | 23 ++++++++++--
- src/modules/core/producer_colour.c          | 35 +++++++++++++++---
- src/modules/core/transition_luma.c          | 41 ++++++++++++++++++++-
- 5 files changed, 123 insertions(+), 16 deletions(-)
+ src/modules/avformat/CMakeLists.txt         |  8 +++
+ src/modules/avformat/consumer_avformat.c    | 24 +++++++-
+ src/modules/avformat/filter_avdeinterlace.c | 16 +++++-
+ src/modules/avformat/producer_avformat.c    | 61 +++++++++++++++++++--
+ src/modules/core/producer_colour.c          | 35 ++++++++++--
+ src/modules/core/transition_luma.c          | 41 +++++++++++++-
+ 6 files changed, 169 insertions(+), 16 deletions(-)
 
+diff --git a/src/modules/avformat/CMakeLists.txt b/src/modules/avformat/CMakeLists.txt
+index cbea7bc..c2f035a 100644
+--- a/src/modules/avformat/CMakeLists.txt
++++ b/src/modules/avformat/CMakeLists.txt
+@@ -34,6 +34,14 @@ set(MLT_AVFORMAT_PREFER_DEFAULT "" CACHE STRING "Decoders the avformat producer
+ if(MLT_AVFORMAT_PREFER_DEFAULT)
+   target_compile_definitions(mltavformat PRIVATE MLT_AVFORMAT_PREFER_DEFAULT="${MLT_AVFORMAT_PREFER_DEFAULT}")
+ endif()
++set(MLT_AVFORMAT_CACHE_DEFAULT "" CACHE STRING "The avformat producer's image cache size when MLT_AVFORMAT_CACHE and the cache property aren't set (empty: MLT's default; 0: no cache, as on RISC OS: the cache copies each picture in and again out)")
++if(NOT MLT_AVFORMAT_CACHE_DEFAULT STREQUAL "")
++  target_compile_definitions(mltavformat PRIVATE MLT_AVFORMAT_CACHE_DEFAULT=${MLT_AVFORMAT_CACHE_DEFAULT})
++endif()
++option(MLT_AVFORMAT_CONCEAL_BY_REFERENCE "Keep the last good decoded picture by reference for error concealment, not a copy of each converted image" OFF)
++if(MLT_AVFORMAT_CONCEAL_BY_REFERENCE)
++  target_compile_definitions(mltavformat PRIVATE MLT_AVFORMAT_CONCEAL_BY_REFERENCE)
++endif()
+ set(MLT_AVFORMAT_PREFER_MAX_DEFAULT "" CACHE STRING "How many preferred decoders may be open at once, in all producers (empty or 0: no limit); the MLT_AVFORMAT_PREFER_MAX environment variable overrides it")
+ if(MLT_AVFORMAT_PREFER_MAX_DEFAULT)
+   target_compile_definitions(mltavformat PRIVATE MLT_AVFORMAT_PREFER_MAX_DEFAULT=${MLT_AVFORMAT_PREFER_MAX_DEFAULT})
 diff --git a/src/modules/avformat/consumer_avformat.c b/src/modules/avformat/consumer_avformat.c
 index 8272f4d..42e5f87 100644
 --- a/src/modules/avformat/consumer_avformat.c
@@ -122,10 +149,18 @@ index 3f6690d..e9c57ab 100644
      // Check that we want progressive and we aren't already progressive
      if (deinterlace && *format == mlt_image_yuv422 && *image != NULL
 diff --git a/src/modules/avformat/producer_avformat.c b/src/modules/avformat/producer_avformat.c
-index d3cfbff..f82cc06 100644
+index d3cfbff..b7a0cfe 100644
 --- a/src/modules/avformat/producer_avformat.c
 +++ b/src/modules/avformat/producer_avformat.c
-@@ -2357,14 +2357,29 @@ static mlt_colorspace convert_image_yuvp(producer_avformat self,
+@@ -137,6 +137,7 @@ struct producer_avformat_s
+     char prefer_name[64];        // its name, from the prefer list
+     AVRational video_time_base;
+     mlt_frame last_good_frame; // for video error concealment
++    AVFrame *last_good_av;     // (or, with MLT_AVFORMAT_CONCEAL_BY_REFERENCE, the decoded picture, by reference)
+     int last_good_position;    // for video error concealment
+     AVFilterGraph *vfilter_graph;
+     AVFilterContext *vfilter_in;
+@@ -2357,14 +2358,29 @@ static mlt_colorspace convert_image_yuvp(producer_avformat self,
          src_pix_fmt = intermediate_pix_fmt;
      }
  
@@ -159,6 +194,67 @@ index d3cfbff..f82cc06 100644
  
      // For YUVJ formats, the range is encoded in the format
      int effective_src_range = (src_pix_fmt == AV_PIX_FMT_YUVJ420P
+@@ -2797,6 +2813,13 @@ static void init_cache(mlt_properties properties, mlt_cache *cache)
+     // if cache size supplied by environment variable
+     int cache_supplied = getenv("MLT_AVFORMAT_CACHE") != NULL;
+     int cache_size = cache_supplied ? atoi(getenv("MLT_AVFORMAT_CACHE")) : 0;
++#ifdef MLT_AVFORMAT_CACHE_DEFAULT
++    // (the build's default: the cache copies every picture in, and again out)
++    if (!cache_supplied) {
++        cache_supplied = 1;
++        cache_size = MLT_AVFORMAT_CACHE_DEFAULT;
++    }
++#endif
+ 
+     // cache size supplied via property
+     if (mlt_properties_get(properties, "cache")) {
+@@ -3366,9 +3389,38 @@ static int producer_get_image(mlt_frame frame,
+         // Clone frame for error concealment.
+         if (self->current_position >= self->last_good_position) {
+             self->last_good_position = self->current_position;
++#ifdef MLT_AVFORMAT_CONCEAL_BY_REFERENCE
++            // Keep the decoded picture by reference, not a copy of the
++            // converted image: converted again only if it's needed (a copy of
++            // every picture costs a 1080p picture's worth of memory bandwidth)
++            if (!self->last_good_av)
++                self->last_good_av = av_frame_alloc();
++            else
++                av_frame_unref(self->last_good_av);
++            if (self->last_good_av && av_frame_ref(self->last_good_av, self->video_frame) < 0)
++                av_frame_unref(self->last_good_av);
++#else
+             if (self->last_good_frame)
+                 mlt_frame_close(self->last_good_frame);
+             self->last_good_frame = mlt_frame_clone(frame, 1);
++#endif
++        }
++    } else if (self->last_good_av && self->last_good_av->buf[0]) {
++        // Use the last good picture if there was a decoding failure
++        set_image_size(self, width, height);
++        if ((image_size = allocate_buffer(frame, codec_params, buffer, *format, *width, *height))) {
++            convert_image(self,
++                          frame_properties,
++                          self->last_good_av,
++                          *buffer,
++                          self->last_good_av->format,
++                          format,
++                          *width,
++                          *height,
++                          &alpha,
++                          dst_colorspace,
++                          dst_full_range);
++            got_picture = 1;
+         }
+     } else if (self->last_good_frame) {
+         // Use last known good frame if there was a decoding failure.
+@@ -5049,6 +5101,7 @@ static void producer_avformat_close(producer_avformat self)
+     mlt_cache_close(self->audio_cache);
+     if (self->last_good_frame)
+         mlt_frame_close(self->last_good_frame);
++    av_frame_free(&self->last_good_av);
+ 
+     // Cleanup the mutexes
+     if (self->is_mutex_init) {
 diff --git a/src/modules/core/producer_colour.c b/src/modules/core/producer_colour.c
 index 450346f..b5ea13b 100644
 --- a/src/modules/core/producer_colour.c

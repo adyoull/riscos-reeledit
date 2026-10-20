@@ -10,7 +10,7 @@ Run <MLT$Dir>.!Boot
 RMEnsure SharedUnixLibrary 1.16 Error MLT needs SharedUnixLibrary 1.16 or later.
 RMEnsure ARMEABISupport 0 Error MLT needs the ARMEABISupport module.
 CDir <Wimp$ScrapDir>.MLTtest
-Echo MLT engine test 3 (melt 7.42.0, riscos-reeledit test build 3)
+Echo MLT engine test 4 (melt 7.42.0, riscos-reeledit test build 4)
 melt -version
 Echo (1080p on the VideoCore needs gpu_mem=128 or more in config.txt. MLT keeps at most one
 Echo VideoCore decoder open; restart the Pi first if an earlier test left one open.)
@@ -24,7 +24,12 @@ Echo
 Echo 2. A 2 second crossfade between them, saved as a project (MLT XML)
 melt -profile atsc_1080p_25 /<Wimp$ScrapDir>/MLTtest/red.mp4 /<Wimp$ScrapDir>/MLTtest/blue.mp4 -mix 50 -mixer luma -consumer xml:/<Wimp$ScrapDir>/MLTtest/project.mlt
 Echo
-Echo 3. The project's pictures, made as the editor's preview makes them:
+Echo 3. One clip decoded by FFmpeg alone (no MLT), then the project's pictures made as the editor's preview makes them:
+Echo    FFmpeg alone: VideoCore, then ARM
+mltbench -raw /<Wimp$ScrapDir>/MLTtest/red.mp4
+Set MLT_AVFORMAT_PREFER none
+mltbench -raw /<Wimp$ScrapDir>/MLTtest/red.mp4
+Unset MLT_AVFORMAT_PREFER
 Echo    VideoCore decoding (h264_vchiq)
 mltbench /<Wimp$ScrapDir>/MLTtest/project.mlt
 Echo    ARM decoding

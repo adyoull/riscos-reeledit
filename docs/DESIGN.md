@@ -106,7 +106,11 @@ else on the desktop moves. These rules keep that time short.
 8. **Background work in slices.** Thumbnails and short waveforms are made one
    item per null event, only while stopped.
 9. **Sound is the clock** while playing, through SharedSoundBuffer, as in Reel.
-10. **Nothing converted that needn't be.** Decoded video is yuv420p, and so is
+10. **Nothing copied or converted that needn't be.** MLT copies each picture
+    once, into its own buffer; its image cache (two more copies) is off, so
+    Reel Edit's player keeps the few pictures it has just shown, for stepping
+    back a frame without decoding again.
+    **Nothing converted either.** Decoded video is yuv420p, and so is
     what the overlay and the VideoCore's encoder take: MLT is patched (0005) so
     pictures stay yuv420p from the decoder to the screen or the encoder,
     including through a dissolve. Each conversion of a 1080p picture costs more

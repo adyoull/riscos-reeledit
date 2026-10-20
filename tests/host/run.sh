@@ -39,7 +39,7 @@ $CC $CFLAGS "$HERE/prefer_test.c" -o "$O/prefer_test" \
   -Wl,--wrap=avcodec_free_context,--wrap=av_opt_set_int $MLTLIBS $FFLIBS -lpthread -lm || bad=1
 $CC $CFLAGS -I"$TOP/src" "$TOP/src/engine.c" "$HERE/engine_test.c" -o "$O/engine_test" \
   -Wl,--wrap=pthread_create $MLTLIBS $FFLIBS -lpthread -lm || bad=1
-$CC $CFLAGS "$HERE/convert_test.c" -o "$O/convert_test" -Wl,--wrap=sws_scale $MLTLIBS $FFLIBS -lpthread -lm || bad=1
+$CC $CFLAGS "$HERE/convert_test.c" -o "$O/convert_test" -Wl,--wrap=sws_scale,--wrap=mlt_frame_clone,--wrap=mlt_frame_clone_image,--wrap=avcodec_receive_frame $MLTLIBS $FFLIBS -lpthread -lm || bad=1
 $CC $CFLAGS "$HERE/render_test.c" -o "$O/render_test" $MLTLIBS $FFLIBS -lpthread -lm || bad=1
 $CC -shared -fPIC "$HERE/count_threads.c" -o "$O/count_threads.so" -ldl || bad=1
 
@@ -68,7 +68,7 @@ echo "== pull_test"
 echo "== convert_test"
 # the project again at the clips' own size and colours, 320x180 BT.601
 sed -e 's/width="1280"/width="320"/' -e 's/height="720"/height="180"/' -e 's/colorspace="709"/colorspace="601"/' project.mlt > project-small.mlt
-"$O/convert_test" a.mp4 project-small.mlt || bad=1
+"$O/convert_test" a.mp4 project-small.mlt numbered.mp4 || bad=1
 echo "== render_test"
 "$O/render_test" project.mlt || bad=1
 echo "== engine_test"

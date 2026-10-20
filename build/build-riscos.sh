@@ -75,7 +75,7 @@ FF_LIBS="$(PKG_CONFIG_LIBDIR=$DK/lib/pkgconfig PKG_CONFIG_PATH= pkg-config --sta
   libavfilter libavformat libavcodec libswresample libswscale libavutil) -lz"
 cmake -S "$M" -B "$M/build" "${CMAKE_RISCOS[@]}" -DCMAKE_C_FLAGS="$CFLAGS_EXTRA -include $TOP/build/riscos-compat.h" \
   -DCMAKE_C_STANDARD_LIBRARIES="$FF_LIBS" -DCMAKE_CXX_STANDARD_LIBRARIES="$FF_LIBS" \
-  -DMLT_STATIC=ON -DMLT_NO_THREADS=ON -DMLT_AVFORMAT_PREFER_DEFAULT="h264=h264_vchiq,hevc=hevc_hwdec" -DMLT_AVFORMAT_PREFER_MAX_DEFAULT=1 \
+  -DMLT_STATIC=ON -DMLT_NO_THREADS=ON -DMLT_AVFORMAT_PREFER_DEFAULT="h264=h264_vchiq,hevc=hevc_hwdec" -DMLT_AVFORMAT_PREFER_MAX_DEFAULT=1 -DMLT_AVFORMAT_CACHE_DEFAULT=0 -DMLT_AVFORMAT_CONCEAL_BY_REFERENCE=ON \
   -DMOD_AVFORMAT=ON -DUSE_AVDEVICE=OFF -DMOD_XML=ON "${MODS_OFF[@]}" -DBUILD_TESTING=OFF -DBUILD_DOCS=OFF \
   -DSWIG_PYTHON=OFF -DSWIG_RUBY=OFF -DSWIG_LUA=OFF -DSWIG_PERL=OFF -DSWIG_PHP=OFF -DSWIG_TCL=OFF \
   -DSWIG_CSHARP=OFF -DSWIG_JAVA=OFF -DSWIG_NODEJS=OFF > "$O/mlt-configure.log" 2>&1 || { tail -30 "$O/mlt-configure.log"; exit 1; }
@@ -99,7 +99,7 @@ echo "built $O/melt,ff8"
 
 # ---- bench (tools/bench.c): pictures made as Reel Edit's player asks for them
 CC="$RISCOS_TOOLCHAIN/bin/arm-riscos-gnueabihf-gcc"
-"$CC" -O2 $CFLAGS_EXTRA -DMLT_STATIC_DEFINE -I"$STAGE/include/mlt-7" "$TOP/tools/bench.c" -o "$O/bench" \
+"$CC" -O2 $CFLAGS_EXTRA -DMLT_STATIC_DEFINE -I"$STAGE/include/mlt-7" -I"$DK/include" "$TOP/tools/bench.c" -o "$O/bench" \
   -static -L"$STAGE/lib" -L"$DK/lib" -lmlt-static-modules -lmltcore -lmltavformat -lmltxml -lmlt-7 -lxml2 \
   $FF_LIBS -lm
 "$RCD_DIR/checks/check-all.sh" "$O/bench" > /dev/null || { "$RCD_DIR/checks/check-all.sh" "$O/bench"; exit 1; }

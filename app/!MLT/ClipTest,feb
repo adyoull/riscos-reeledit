@@ -1,5 +1,10 @@
 | ClipTest for !MLT: run by Test when MLTtest$Clip names a video.
 Echo 5. Your clip: <MLTtest$Clip>
+Echo    its first 10 seconds decoded by FFmpeg alone (no MLT): VideoCore, then ARM
+mltbench -raw <MLTtest$Clip> 250
+Set MLT_AVFORMAT_PREFER none
+mltbench -raw <MLTtest$Clip> 250
+Unset MLT_AVFORMAT_PREFER
 Echo    its first 10 seconds, made as the preview makes them: VideoCore, then ARM
 mltbench <MLTtest$Clip> 250
 Set MLT_AVFORMAT_PREFER none
