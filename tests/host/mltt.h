@@ -31,7 +31,7 @@ typedef struct
 } mltt;
 
 /* service: "xml" for a project, "avformat" for a clip (or NULL: MLT's loader) */
-static int mltt_open(mltt *t, const char *profile, const char *service, const char *resource)
+static inline int mltt_open(mltt *t, const char *profile, const char *service, const char *resource)
 {
     static int initialised = 0;
     if (!initialised) {
@@ -53,7 +53,7 @@ static int mltt_open(mltt *t, const char *profile, const char *service, const ch
     return 1;
 }
 
-static void mltt_close(mltt *t)
+static inline void mltt_close(mltt *t)
 {
     mlt_consumer_close(t->consumer);
     mlt_producer_close(t->producer);
@@ -62,7 +62,7 @@ static void mltt_close(mltt *t)
 
 /* The centre pixel's Y, U and V at a position, with the picture asked for
    as yuv420p or yuv422 (-1 if there was no picture in that format). */
-static int mltt_centre_as(mltt *t, int position, mlt_image_format want, int yuv[3])
+static inline int mltt_centre_as(mltt *t, int position, mlt_image_format want, int yuv[3])
 {
     mlt_producer_seek(t->producer, position);
     mlt_frame frame = mlt_consumer_get_frame(t->consumer);
@@ -90,7 +90,7 @@ static int mltt_centre_as(mltt *t, int position, mlt_image_format want, int yuv[
     return result;
 }
 
-static int mltt_centre(mltt *t, int position, int yuv[3])
+static inline int mltt_centre(mltt *t, int position, int yuv[3])
 {
     return mltt_centre_as(t, position, mlt_image_yuv420p, yuv);
 }

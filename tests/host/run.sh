@@ -73,7 +73,7 @@ echo "== render_test"
 "$O/render_test" project.mlt || bad=1
 echo "== engine_test"
 "$O/engine_test" project.mlt || bad=1
-for m in normal refuse late off lazy max; do
+for m in normal refuse late off lazy max exit; do
   echo "== prefer_test $m"
   "$O/prefer_test" $m numbered.mp4 2>&1 | grep -v "^\[" || bad=1
 done

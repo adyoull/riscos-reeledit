@@ -10,9 +10,10 @@ Run <MLT$Dir>.!Boot
 RMEnsure SharedUnixLibrary 1.16 Error MLT needs SharedUnixLibrary 1.16 or later.
 RMEnsure ARMEABISupport 0 Error MLT needs the ARMEABISupport module.
 CDir <Wimp$ScrapDir>.MLTtest
-Echo MLT engine test 2 (melt 7.42.0, riscos-reeledit test build 2)
+Echo MLT engine test 3 (melt 7.42.0, riscos-reeledit test build 3)
 melt -version
-Echo (1080p on the VideoCore needs gpu_mem=128 or more in config.txt.)
+Echo (1080p on the VideoCore needs gpu_mem=128 or more in config.txt. MLT keeps at most one
+Echo VideoCore decoder open; restart the Pi first if an earlier test left one open.)
 Echo
 Echo 1. Two 10 second 1080p clips, encoded on the VideoCore (h264_encvchiq)
 Echo start <Sys$Time>
@@ -31,21 +32,13 @@ Set MLT_AVFORMAT_PREFER none
 mltbench /<Wimp$ScrapDir>/MLTtest/project.mlt
 Unset MLT_AVFORMAT_PREFER
 Echo
-Echo 4. The project exported: VideoCore decoding and encoding
+Echo 4. The project exported: VideoCore decoding and encoding (-verbose: which clip has the decoder, and when it's handed over)
 Echo start <Sys$Time>
-melt /<Wimp$ScrapDir>/MLTtest/project.mlt -consumer avformat:/<Wimp$ScrapDir>/MLTtest/export.mp4 vcodec=h264_encvchiq vb=8M an=1
+melt -verbose /<Wimp$ScrapDir>/MLTtest/project.mlt -consumer avformat:/<Wimp$ScrapDir>/MLTtest/export.mp4 vcodec=h264_encvchiq vb=8M an=1
 Echo end   <Sys$Time>
-Echo    again, with at most one VideoCore decoder at a time (MLT_AVFORMAT_PREFER_MAX=1)
-Set MLT_AVFORMAT_PREFER_MAX 1
-Echo start <Sys$Time>
-melt /<Wimp$ScrapDir>/MLTtest/project.mlt -consumer avformat:/<Wimp$ScrapDir>/MLTtest/export1.mp4 vcodec=h264_encvchiq vb=8M an=1
-Echo end   <Sys$Time>
-Unset MLT_AVFORMAT_PREFER_MAX
-Echo    the exports: their sizes, then (if !FFmpeg's *ffprobe is set up) their frame counts (450 each)
+Echo    the export: its size, then (if !FFmpeg's *ffprobe is set up) its frame count (450)
 FileInfo <Wimp$ScrapDir>.MLTtest.export/mp4
-FileInfo <Wimp$ScrapDir>.MLTtest.export1/mp4
 If "<Alias$ffprobe>"<>"" Then ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=nb_read_frames -of csv=p=0 /<Wimp$ScrapDir>/MLTtest/export.mp4
-If "<Alias$ffprobe>"<>"" Then ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=nb_read_frames -of csv=p=0 /<Wimp$ScrapDir>/MLTtest/export1.mp4
 Echo
 If "<MLTtest$Clip>"="" Then Echo 5. (skipped: *Set MLTtest$Clip to one of your own videos to try it)
 If "<MLTtest$Clip>"<>"" Then Obey <MLT$Dir>.ClipTest

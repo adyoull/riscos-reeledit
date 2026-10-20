@@ -1,4 +1,4 @@
-From 71966962c8b3e9bcaaf1854dab1efbffb3352c9a Mon Sep 17 00:00:00 2001
+From 3b6be2acf6560272aa86fc47b7a63068a33ff9fa Mon Sep 17 00:00:00 2001
 From: Andrew Youll <andrewyoull86@gmail.com>
 Date: Tue, 20 Oct 2026 20:02:49 +0100
 Subject: [PATCH 5/5] yuv420p video without conversions: playing, dissolving,
@@ -122,10 +122,10 @@ index 3f6690d..e9c57ab 100644
      // Check that we want progressive and we aren't already progressive
      if (deinterlace && *format == mlt_image_yuv422 && *image != NULL
 diff --git a/src/modules/avformat/producer_avformat.c b/src/modules/avformat/producer_avformat.c
-index b0afda9..90d42fd 100644
+index d3cfbff..f82cc06 100644
 --- a/src/modules/avformat/producer_avformat.c
 +++ b/src/modules/avformat/producer_avformat.c
-@@ -2348,14 +2348,29 @@ static mlt_colorspace convert_image_yuvp(producer_avformat self,
+@@ -2357,14 +2357,29 @@ static mlt_colorspace convert_image_yuvp(producer_avformat self,
          src_pix_fmt = intermediate_pix_fmt;
      }
  

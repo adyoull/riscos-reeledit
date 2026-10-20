@@ -111,10 +111,17 @@ else on the desktop moves. These rules keep that time short.
     pictures stay yuv420p from the decoder to the screen or the encoder,
     including through a dissolve. Each conversion of a 1080p picture costs more
     on the ARM than the VideoCore takes to decode it.
-11. **Hardware decoders only while they're used.** A clip's VideoCore decoder
-    is opened when its first picture is needed, not when the project opens
-    (the first Pi test ran out of VideoCore memory for the export's encoder),
-    and `MLT_AVFORMAT_PREFER_MAX` can cap how many are open at once.
+11. **One VideoCore decoder, handed from clip to clip.** On a Pi 4 with
+    `gpu_mem=128` a second `h264_vchiq` decoder opens but never gives a picture,
+    and four or more can stop the VideoCore answering (riscos-reelhwaccel's
+    measurements, 2026-10-20). MLT (patch 0004) opens a clip's decoder only
+    when its first picture is needed, keeps one open, and hands it to another
+    clip once the holder has gone 5 pictures unused, closing the old one
+    first. In a crossfade the incoming clip is decoded on the ARM until the
+    outgoing one finishes. Decoders still open at exit are closed: nothing
+    else would free them before a restart. Reel Edit can do better than this
+    rule, since it knows the timeline: give the decoder to the clip that will
+    play longest, and hand it over at a cut rather than after one.
 
 Targets, to be measured on a Pi 4 (the engine test, `!MLT.Test`, measures
 the first ones):

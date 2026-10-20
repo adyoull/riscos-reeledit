@@ -1,4 +1,4 @@
-From b7de6ba2eaa3119459aae128c82a766a99853351 Mon Sep 17 00:00:00 2001
+From c353dca3564b65d4537740710321b46943ae6f52 Mon Sep 17 00:00:00 2001
 From: Andrew Youll <andrewyoull86@gmail.com>
 Date: Tue, 20 Oct 2026 16:34:57 +0100
 Subject: [PATCH 4/5] avformat producer: preferred decoders, falling back to
@@ -22,15 +22,24 @@ A preferred decoder is opened only when the clip's first picture is
 decoded, not with the clip: opening a project opens every clip, and on
 the Raspberry Pi every clip's hardware decoder then held VideoCore memory
 before any was used, so the hardware encoder couldn't start an export.
+
 MLT_AVFORMAT_PREFER_MAX (or MLT_AVFORMAT_PREFER_MAX_DEFAULT at build
-time) limits how many are open at once across all producers; a clip
-beyond it uses the default decoder. A place is given back when its
-decoder is closed or falls back.
+time) is how many of each preferred decoder may be open at once, across
+all producers. On a Pi 4 with gpu_mem=128 it must be 1: a second
+h264_vchiq decoder opens but never gives a picture, and four or more can
+stop the VideoCore answering. A clip that needs a place while all are
+taken uses the default decoder; once the holder has gone
+MLT_AVFORMAT_PREFER_IDLE pictures (default 5, counted across producers)
+without decoding, the clip takes its place over: the holder's decoder is
+closed first, then the clip's opened and decoding starts again from a
+seek. Two clips both in use, as in a dissolve, keep what they have.
+Places are given back when a decoder is closed or falls back, and any
+still open at exit are closed (on RISC OS nothing else would close them).
 ---
  src/modules/avformat/CMakeLists.txt        |   9 +
- src/modules/avformat/producer_avformat.c   | 245 ++++++++++++++++++++-
- src/modules/avformat/producer_avformat.yml |  16 ++
- 3 files changed, 267 insertions(+), 3 deletions(-)
+ src/modules/avformat/producer_avformat.c   | 389 ++++++++++++++++++++-
+ src/modules/avformat/producer_avformat.yml |  16 +
+ 3 files changed, 411 insertions(+), 3 deletions(-)
 
 diff --git a/src/modules/avformat/CMakeLists.txt b/src/modules/avformat/CMakeLists.txt
 index 8b1bf6c..cbea7bc 100644
@@ -53,31 +62,40 @@ index 8b1bf6c..cbea7bc 100644
  
  target_include_directories(mltavformat SYSTEM PRIVATE ${FFMPEG_INCLUDE_DIRS})
 diff --git a/src/modules/avformat/producer_avformat.c b/src/modules/avformat/producer_avformat.c
-index 62aaaeb..b0afda9 100644
+index 62aaaeb..d3cfbff 100644
 --- a/src/modules/avformat/producer_avformat.c
 +++ b/src/modules/avformat/producer_avformat.c
-@@ -129,6 +129,10 @@ struct producer_avformat_s
+@@ -129,6 +129,12 @@ struct producer_avformat_s
      int packets_thread_stop; // non-zero when packets_thread is to stop
      int is_thread_init;
      int packets_inline; // no packets_thread: packets are read as they're needed (mlt_threads_disabled)
 +    int prefer_active;  // the video decoder is the one asked for by "prefer" (a hardware decoder, say)
 +    int prefer_refused; // that decoder refused this clip: use the default from now on
 +    int prefer_pending; // a preferred decoder is listed for this clip, not yet opened
-+    int prefer_now;     // video_codec_init may open the preferred decoder
++    int prefer_now;     // video_codec_init may open the preferred decoder (a place is claimed)
++    const AVCodec *prefer_codec; // the preferred decoder, looked up as it's opened
++    char prefer_name[64];        // its name, from the prefer list
      AVRational video_time_base;
      mlt_frame last_good_frame; // for video error concealment
      int last_good_position;    // for video error concealment
-@@ -166,6 +170,9 @@ static void producer_set_up_video(producer_avformat self, mlt_frame frame);
+@@ -166,6 +172,16 @@ static void producer_set_up_video(producer_avformat self, mlt_frame frame);
  static void producer_set_up_audio(producer_avformat self, mlt_frame frame);
  static void apply_properties(void *obj, mlt_properties properties, int flags);
  static int video_codec_init(producer_avformat self, int index, mlt_properties properties);
 +static int prefer_fall_back(producer_avformat self, mlt_properties properties, int error);
-+static int prefer_available(void);
++static int prefer_claim(producer_avformat self, const char *name);
++static int holder_index(producer_avformat self);
++static int preferred_listed(producer_avformat self, mlt_properties properties, enum AVCodecID codec_id);
++static void prefer_touch(producer_avformat self);
++static void prefer_give_back(producer_avformat self);
++static const AVCodec *preferred_decoder(producer_avformat self,
++                                        mlt_properties properties,
++                                        enum AVCodecID codec_id);
 +static void free_video_codec(producer_avformat self);
  static void get_audio_streams_info(producer_avformat self);
  static mlt_audio_format pick_audio_format(int sample_fmt);
  static int pick_av_pixel_format(int *pix_fmt, int full_range);
-@@ -1707,7 +1714,7 @@ static void prepare_reopen(producer_avformat self)
+@@ -1707,7 +1723,7 @@ static void prepare_reopen(producer_avformat self)
          self->decode_buffer[i] = NULL;
          avcodec_free_context(&self->audio_codec[i]);
      }
@@ -86,7 +104,7 @@ index 62aaaeb..b0afda9 100644
      av_frame_unref(self->video_frame);
      av_buffer_unref(&self->hwaccel.device_ctx);
      self->hwaccel.device_ctx = NULL;
-@@ -1927,6 +1934,19 @@ static int seek_video(producer_avformat self,
+@@ -1927,6 +1943,19 @@ static int seek_video(producer_avformat self,
              self->last_position = POSITION_INVALID;
              av_frame_unref(self->video_frame);
          }
@@ -106,32 +124,50 @@ index 62aaaeb..b0afda9 100644
      }
      pthread_mutex_unlock(&self->packets_mutex);
      return paused;
-@@ -2899,6 +2919,24 @@ static int producer_get_image(mlt_frame frame,
+@@ -2899,6 +2928,42 @@ static int producer_get_image(mlt_frame frame,
  
      double delay = mlt_properties_get_double(properties, "video_delay");
  
-+    // The first picture to decode: open the preferred decoder now, in place
-+    // of the default one opened with the clip, if there is a place for it
-+    if (self->prefer_pending && !self->prefer_active && !self->prefer_refused
-+        && prefer_available()) {
-+        self->prefer_pending = 0;
-+        pthread_mutex_lock(&self->open_mutex);
-+        free_video_codec(self);
-+        pthread_mutex_unlock(&self->open_mutex);
-+        self->prefer_now = 1;
-+        int opened = video_codec_init(self, self->video_index, properties);
-+        self->prefer_now = 0;
-+        if (!opened || !self->video_codec)
-+            goto exit_get_image;
-+        // decode from a seek, as for a new clip
-+        self->last_position = POSITION_INVALID;
-+        av_frame_unref(self->video_frame);
++    // A decoder closed for another producer: the default one again
++    if (!self->video_codec
++        && (!video_codec_init(self, self->video_index, properties) || !self->video_codec))
++        goto exit_get_image;
++    prefer_touch(self);
++
++    // Open the preferred decoder in place of the default one, when the clip
++    // has one listed and there's a place for it: at the first picture, or
++    // later when a place comes free (then decoding starts again from a seek)
++    if (self->prefer_pending && !self->prefer_active && !self->prefer_refused) {
++        if (!self->prefer_name[0]
++            && !preferred_listed(self, properties, codec_params->codec_id))
++            self->prefer_pending = 0;
++        else if (prefer_claim(self, self->prefer_name)
++                 && !(self->prefer_codec
++                      = preferred_decoder(self, properties, codec_params->codec_id))) {
++            prefer_give_back(self); // (listed, but no such decoder here)
++            self->prefer_pending = 0;
++        } else if (self->prefer_codec && holder_index(self) >= 0) {
++            self->prefer_pending = 0;
++            pthread_mutex_lock(&self->open_mutex);
++            avcodec_free_context(&self->video_codec);
++            pthread_mutex_unlock(&self->open_mutex);
++            self->prefer_now = 1;
++            int opened = video_codec_init(self, self->video_index, properties);
++            self->prefer_now = 0;
++            if (!self->prefer_active)
++                prefer_give_back(self); // (refused at open: video_codec_init gave the default)
++            if (!opened || !self->video_codec)
++                goto exit_get_image;
++            // decode from a seek, as for a new clip
++            self->last_position = POSITION_INVALID;
++            av_frame_unref(self->video_frame);
++        }
 +    }
 +
      // Seek if necessary
      double speed = mlt_producer_get_speed(producer);
      int preseek = must_decode && self->video_codec->has_b_frames && speed >= 0.0 && speed <= 1.0;
-@@ -3056,6 +3094,12 @@ static int producer_get_image(mlt_frame frame,
+@@ -3056,6 +3121,12 @@ static int producer_get_image(mlt_frame frame,
                                    "decoded video packet with size %d => %d\n",
                                    self->pkt.size,
                                    self->video_send_result);
@@ -144,7 +180,7 @@ index 62aaaeb..b0afda9 100644
                      // Note: decode may fail at the beginning of MPEGfile (B-frames referencing before first I-frame), so allow a few errors.
                      if (!ignore_send_packet_result(self->video_send_result)) {
                          mlt_log_warning(MLT_PRODUCER_SERVICE(producer),
-@@ -3063,6 +3107,12 @@ static int producer_get_image(mlt_frame frame,
+@@ -3063,6 +3134,12 @@ static int producer_get_image(mlt_frame frame,
                                          self->video_send_result);
                      } else {
                          int error = avcodec_receive_frame(self->video_codec, self->video_frame);
@@ -157,7 +193,7 @@ index 62aaaeb..b0afda9 100644
                          if (error < 0) {
                              if (error != AVERROR(EAGAIN) && ++decode_errors > 10) {
                                  mlt_log_warning(MLT_PRODUCER_SERVICE(producer),
-@@ -3356,6 +3406,159 @@ static void apply_properties(void *obj, mlt_properties properties, int flags)
+@@ -3356,6 +3433,276 @@ static void apply_properties(void *obj, mlt_properties properties, int flags)
  /** Initialize the video codec context.
   */
  
@@ -176,8 +212,24 @@ index 62aaaeb..b0afda9 100644
 +   MLT_AVFORMAT_PREFER_MAX (0 or unset: no limit). A hardware decoder holds
 +   memory the rest of the hardware (an encoder, the display) also needs. */
 +static pthread_mutex_t prefer_lock = PTHREAD_MUTEX_INITIALIZER;
-+static int prefer_open = 0;
 +
++/* The producers holding a preferred decoder, which decoder, and when each
++   last decoded a picture (prefer_clock counts every producer's pictures). */
++#define PREFER_HOLDERS 64
++static struct
++{
++    producer_avformat self;
++    const char *name; /* the producer's prefer_name */
++    uint64_t last_used;
++} prefer_holders[PREFER_HOLDERS];
++static uint64_t prefer_clock = 0;
++static int prefer_exit_registered = 0;
++
++/* How many of each preferred decoder may be open at once, in all producers
++   (MLT_AVFORMAT_PREFER_MAX, or the build's default; 0: no limit). On the
++   Raspberry Pi 4 with gpu_mem=128, a second h264_vchiq decoder opens but
++   never gives a picture, and four or more can stop the VideoCore answering:
++   there it is 1. */
 +static int prefer_max(void)
 +{
 +    const char *e = getenv("MLT_AVFORMAT_PREFER_MAX");
@@ -188,42 +240,141 @@ index 62aaaeb..b0afda9 100644
 +    return e ? atoi(e) : 0;
 +}
 +
-+/* Take a place for a preferred decoder: 1 if there is one. */
-+static int prefer_take(void)
++/* How many pictures (of any producer) a holder must have gone without
++   decoding before another producer may take its decoder
++   (MLT_AVFORMAT_PREFER_IDLE, default 5). Two clips both in use, as in a
++   dissolve, keep what they have: they don't take the decoder in turns. */
++static int prefer_idle(void)
 +{
-+    int max = prefer_max(), ok;
-+    pthread_mutex_lock(&prefer_lock);
-+    ok = max <= 0 || prefer_open < max;
-+    if (ok)
-+        prefer_open++;
-+    pthread_mutex_unlock(&prefer_lock);
-+    return ok;
++    const char *e = getenv("MLT_AVFORMAT_PREFER_IDLE");
++    return e ? atoi(e) : 5;
 +}
 +
-+static void prefer_give_back(void)
++static int holder_index(producer_avformat self)
++{
++    for (int i = 0; i < PREFER_HOLDERS; i++)
++        if (prefer_holders[i].self == self)
++            return i;
++    return -1;
++}
++
++/* At exit, close every preferred decoder still open: on RISC OS nothing
++   frees a program's VideoCore decoders when it stops, and one left open
++   keeps its memory until the machine is restarted. */
++static void prefer_close_all(void)
 +{
 +    pthread_mutex_lock(&prefer_lock);
-+    if (prefer_open > 0)
-+        prefer_open--;
++    for (int i = 0; i < PREFER_HOLDERS; i++) {
++        producer_avformat h = prefer_holders[i].self;
++        if (h) {
++            prefer_holders[i].self = NULL;
++            h->prefer_active = 0;
++            avcodec_free_context(&h->video_codec);
++        }
++    }
++    pthread_mutex_unlock(&prefer_lock);
++}
++
++/** Claim a place for this producer's preferred decoder.
++ *
++ * If every place for that decoder is taken, the least recently used holder
++ * that has been idle long enough (prefer_idle) gives its place up: its
++ * decoder is closed here, before the caller opens the new one (on the Pi,
++ * opening the new one first stalls it until the old one closes), and it
++ * goes back to the default decoder until it can claim a place again.
++ *
++ * \return 1 if the producer now holds a place (the caller opens the
++ * decoder, or gives the place back with free_video_codec if it fails),
++ * 0 if there is none for it now.
++ */
++
++static int prefer_claim(producer_avformat self, const char *name)
++{
++    int max = prefer_max(), idle = prefer_idle(), n = 0, victim = -1, free_slot = -1;
++    pthread_mutex_lock(&prefer_lock);
++    if (!prefer_exit_registered) {
++        prefer_exit_registered = 1;
++        atexit(prefer_close_all);
++    }
++    for (int i = 0; i < PREFER_HOLDERS; i++) {
++        if (!prefer_holders[i].self) {
++            if (free_slot < 0)
++                free_slot = i;
++        } else if (!strcmp(prefer_holders[i].name, name)) {
++            n++;
++            if (prefer_holders[i].self != self
++                && prefer_clock - prefer_holders[i].last_used >= (uint64_t) idle
++                && (victim < 0 || prefer_holders[i].last_used < prefer_holders[victim].last_used))
++                victim = i;
++        }
++    }
++    producer_avformat evicted = NULL;
++    if (max > 0 && n >= max) {
++        // (another thread may be decoding with it: only if it's free now)
++        if (victim < 0 || pthread_mutex_trylock(&prefer_holders[victim].self->video_mutex)) {
++            pthread_mutex_unlock(&prefer_lock);
++            return 0;
++        }
++        evicted = prefer_holders[victim].self;
++        prefer_holders[victim].self = NULL;
++        free_slot = victim;
++    }
++    if (free_slot < 0) {
++        pthread_mutex_unlock(&prefer_lock);
++        return 0;
++    }
++    if (evicted) {
++        // Close the idle holder's decoder first; it reopens the default
++        // decoder when it next needs a picture, and may claim a place again
++        mlt_log_info(MLT_PRODUCER_SERVICE(self->parent),
++                     "decoder %s handed over from %s\n",
++                     name,
++                     mlt_properties_get(MLT_PRODUCER_PROPERTIES(evicted->parent), "resource"));
++        pthread_mutex_lock(&evicted->open_mutex);
++        evicted->prefer_active = 0;
++        avcodec_free_context(&evicted->video_codec);
++        pthread_mutex_unlock(&evicted->open_mutex);
++        evicted->prefer_pending = 1;
++        evicted->last_position = POSITION_INVALID;
++        pthread_mutex_unlock(&evicted->video_mutex);
++    }
++    prefer_holders[free_slot].self = self;
++    prefer_holders[free_slot].name = self->prefer_name;
++    prefer_holders[free_slot].last_used = prefer_clock;
++    pthread_mutex_unlock(&prefer_lock);
++    return 1;
++}
++
++/* A picture is being decoded: the clock moves on, and a holder is in use. */
++static void prefer_touch(producer_avformat self)
++{
++    pthread_mutex_lock(&prefer_lock);
++    prefer_clock++;
++    if (self->prefer_active) {
++        int i = holder_index(self);
++        if (i >= 0)
++            prefer_holders[i].last_used = prefer_clock;
++    }
++    pthread_mutex_unlock(&prefer_lock);
++}
++
++/* Give back a producer's place (it holds one, or has claimed one). */
++static void prefer_give_back(producer_avformat self)
++{
++    pthread_mutex_lock(&prefer_lock);
++    int i = holder_index(self);
++    if (i >= 0)
++        prefer_holders[i].self = NULL;
 +    pthread_mutex_unlock(&prefer_lock);
 +}
 +
 +/** Free the video decoder, giving back its place if it was a preferred one. */
 +
-+static int prefer_available(void)
-+{
-+    int max = prefer_max(), ok;
-+    pthread_mutex_lock(&prefer_lock);
-+    ok = max <= 0 || prefer_open < max;
-+    pthread_mutex_unlock(&prefer_lock);
-+    return ok;
-+}
-+
 +static void free_video_codec(producer_avformat self)
 +{
 +    if (self->video_codec && self->prefer_active) {
 +        self->prefer_active = 0;
-+        prefer_give_back();
++        prefer_give_back(self);
 +    }
 +    avcodec_free_context(&self->video_codec);
 +}
@@ -240,6 +391,7 @@ index 62aaaeb..b0afda9 100644
 +{
 +    return preferred_decoder_find(self, properties, codec_id, 0) != NULL;
 +}
++/* (preferred_listed and preferred_decoder also keep the name in prefer_name) */
 +
 +static const AVCodec *preferred_decoder(producer_avformat self,
 +                                        mlt_properties properties,
@@ -271,9 +423,10 @@ index 62aaaeb..b0afda9 100644
 +        if (len > codec_len + 1 && !strncmp(p, codec_name, codec_len) && p[codec_len] == '=') {
 +            char name[64];
 +            size_t n = len - codec_len - 1;
-+            if (n < sizeof(name)) {
++            if (n < sizeof(name) && n < sizeof(self->prefer_name)) {
 +                memcpy(name, p + codec_len + 1, n);
 +                name[n] = 0;
++                memcpy(self->prefer_name, name, n + 1);
 +                if (!find)
 +                    return (const AVCodec *) 1; /* (listed: only compared with NULL) */
 +                const AVCodec *codec = avcodec_find_decoder_by_name(name);
@@ -317,7 +470,7 @@ index 62aaaeb..b0afda9 100644
  static int video_codec_init(producer_avformat self, int index, mlt_properties properties)
  {
      // Initialise the codec if necessary
-@@ -3378,6 +3581,24 @@ static int video_codec_init(producer_avformat self, int index, mlt_properties pr
+@@ -3378,6 +3725,24 @@ static int video_codec_init(producer_avformat self, int index, mlt_properties pr
              if (!(codec = avcodec_find_decoder_by_name("libvpx")))
                  codec = avcodec_find_decoder(codec_params->codec_id);
          }
@@ -330,9 +483,9 @@ index 62aaaeb..b0afda9 100644
 +            if (!self->prefer_now) {
 +                self->prefer_pending = preferred_listed(self, properties, codec_params->codec_id);
 +            } else {
-+                const AVCodec *preferred = preferred_decoder(self, properties, codec_params->codec_id);
-+                if (preferred && prefer_take()) {
-+                    codec = preferred;
++                // (producer_get_image has claimed a place for it)
++                if (self->prefer_codec && self->prefer_codec->id == codec_params->codec_id) {
++                    codec = self->prefer_codec;
 +                    self->prefer_active = 1;
 +                }
 +            }
@@ -342,7 +495,7 @@ index 62aaaeb..b0afda9 100644
  
          // Setup the codec context
          AVCodecContext *codec_context = avcodec_alloc_context3(codec);
-@@ -3476,6 +3697,19 @@ static int video_codec_init(producer_avformat self, int index, mlt_properties pr
+@@ -3476,6 +3841,19 @@ static int video_codec_init(producer_avformat self, int index, mlt_properties pr
              }
              // Now store the codec with its destructor
              self->video_codec = codec_context;
@@ -354,7 +507,7 @@ index 62aaaeb..b0afda9 100644
 +            pthread_mutex_unlock(&self->open_mutex);
 +            avcodec_free_context(&codec_context);
 +            self->prefer_active = 0;
-+            prefer_give_back();
++            prefer_give_back(self);
 +            self->prefer_refused = 1;
 +            self->prefer_pending = 0;
 +            codec = avcodec_find_decoder(codec_params->codec_id);
@@ -362,7 +515,7 @@ index 62aaaeb..b0afda9 100644
          } else {
              // Remember that we can't use this later
              self->video_index = -1;
-@@ -3483,6 +3717,11 @@ static int video_codec_init(producer_avformat self, int index, mlt_properties pr
+@@ -3483,6 +3861,11 @@ static int video_codec_init(producer_avformat self, int index, mlt_properties pr
              return 0;
          }
          pthread_mutex_unlock(&self->open_mutex);
@@ -374,7 +527,7 @@ index 62aaaeb..b0afda9 100644
  
          // Process properties as AVOptions
          apply_properties(codec_context,
-@@ -3641,7 +3880,7 @@ static void producer_set_up_video(producer_avformat self, mlt_frame frame)
+@@ -3641,7 +4024,7 @@ static void producer_set_up_video(producer_avformat self, mlt_frame frame)
          self->video_index = index;
          mlt_properties_set_int(properties, "_probe_complete", 0);
          pthread_mutex_lock(&self->open_mutex);
@@ -383,7 +536,7 @@ index 62aaaeb..b0afda9 100644
          set_up_discard(self, self->audio_index, index);
          pthread_mutex_unlock(&self->open_mutex);
      }
-@@ -4634,7 +4873,7 @@ static void producer_avformat_close(producer_avformat self)
+@@ -4634,7 +5017,7 @@ static void producer_avformat_close(producer_avformat self)
          av_free(self->decode_buffer[i]);
          avcodec_free_context(&self->audio_codec[i]);
      }

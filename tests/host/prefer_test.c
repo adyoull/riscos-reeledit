@@ -19,23 +19,38 @@
  *   lazy    it isn't opened with the clip (opening a project opens every
  *           clip), only when the first picture is decoded: the Pi ran out
  *           of VideoCore memory when every clip's decoder was opened at load
- *   max     MLT_AVFORMAT_PREFER_MAX=1 and two clips decoded at once: one
- *           gets it, the other the default decoder; when the first is
- *           closed, its place is free again
+ *   max     one at a time (MLT_AVFORMAT_PREFER_MAX=1, as on the Pi 4, where
+ *           a second h264_vchiq never gives a picture): two clips used in
+ *           turn (a dissolve) never both hold it; once the first is idle the
+ *           second takes it over, the first's closed before the second's
+ *           opens; the first gets it back when it's used again; closing a
+ *           clip frees its place; every picture right throughout
+ *   exit    a program that exits without closing its clips still closes the
+ *           hardware decoder (on RISC OS nothing else would, and it would
+ *           keep its VideoCore memory until a restart)
  * In every mode, every picture must be the right one.
  */
 #include "mltt.h"
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/opt.h>
+#include <unistd.h>
 
 static int pending = 0, asked = 0, opened_preferred = 0, refused = 0, failed_late = 0;
 static int packets_to_preferred = 0;
 static AVCodecContext *preferred_ctx = NULL;
 static int preferred_now = 0, preferred_most = 0; /* open at once, and the most */
+static int opened_beside_another = 0;              /* opened while another was open */
 static const char *mode = "normal";
 static int64_t drop_before = INT64_MIN;
 static int drop_before_sets = 0;
+
+static int is_preferred(AVCodecContext *c)
+{
+    /* (the stand-in is FFmpeg's h264 opened as h264_vchiq: told apart by
+       the opaque pointer set at open) */
+    return c && c->opaque == (void *) &opened_preferred;
+}
 
 const AVCodec *__real_avcodec_find_decoder_by_name(const char *name);
 const AVCodec *__wrap_avcodec_find_decoder_by_name(const char *name)
@@ -60,6 +75,8 @@ int __wrap_avcodec_open2(AVCodecContext *c, const AVCodec *codec, AVDictionary *
         opened_preferred++;
         preferred_ctx = c;
         c->opaque = &opened_preferred;
+        if (preferred_now > 0)
+            opened_beside_another++;
         if (++preferred_now > preferred_most)
             preferred_most = preferred_now;
         packets_to_preferred = 0;
@@ -77,12 +94,6 @@ int __wrap_avcodec_send_packet(AVCodecContext *c, const AVPacket *p)
     return __real_avcodec_send_packet(c, p);
 }
 
-static int is_preferred(AVCodecContext *c)
-{
-    /* (the stand-in is FFmpeg's h264 opened as h264_vchiq: told apart by
-       the opaque pointer set at open) */
-    return c && c->opaque == (void *) &opened_preferred;
-}
 
 void __real_avcodec_free_context(AVCodecContext **c);
 void __wrap_avcodec_free_context(AVCodecContext **c)
@@ -98,12 +109,21 @@ int __real_av_opt_set_int(void *obj, const char *name, int64_t val, int flags);
 int __wrap_av_opt_set_int(void *obj, const char *name, int64_t val, int flags)
 {
     if (!strcmp(name, "drop_before")) {      /* (FFmpeg's h264 has no such option) */
-        CHECK(obj == preferred_ctx, "drop_before given to a decoder that isn't the preferred one");
+        CHECK(is_preferred(obj), "drop_before given to a decoder that isn't a preferred one");
         drop_before = val;
         drop_before_sets++;
         return 0;
     }
     return __real_av_opt_set_int(obj, name, val, flags);
+}
+
+static void check_closed_at_exit(void)
+{
+    if (preferred_now != 0) {
+        fprintf(stderr, "FAIL exit: %d hardware decoder(s) still open at exit\n", preferred_now);
+        _exit(1);
+    }
+    printf("prefer_test exit: %s\n", mltt_failures ? "FAILED" : "passed");
 }
 
 int main(int argc, char **argv)
@@ -128,7 +148,7 @@ int main(int argc, char **argv)
         }
         CHECK(asked == 0 && opened_preferred == 0, "lazy: before any picture, asked for %d times, opened %d",
               asked, opened_preferred);
-        int yuv[3];
+        int yuv[3] = {0};
         CHECK(abs(mltt_centre(&t, 5, yuv) - 26) <= 1, "lazy: frame 5 has luma %d, not 26", yuv[0]);
         CHECK(opened_preferred == 1, "lazy: after the first picture, opened %d times", opened_preferred);
         CHECK(abs(mltt_centre(&t, 6, yuv) - 28) <= 1, "lazy: frame 6 has luma %d, not 28", yuv[0]);
@@ -137,31 +157,53 @@ int main(int argc, char **argv)
         printf("prefer_test %s: %s\n", mode, mltt_failures ? "FAILED" : "passed");
         return mltt_failures != 0;
     }
+    if (!strcmp(mode, "exit")) {
+        atexit(check_closed_at_exit); /* (runs after MLT's own, registered later) */
+        mltt t;
+        if (!mltt_open(&t, "hdv_720_25p", "avformat", argv[2]))
+            return 1;
+        int yuv[3] = {0};
+        CHECK(abs(mltt_centre(&t, 4, yuv) - 24) <= 1, "exit: frame 4 has luma %d", yuv[0]);
+        CHECK(preferred_now == 1, "exit: %d open before exiting", preferred_now);
+        exit(mltt_failures != 0); /* without closing anything */
+    }
     if (!strcmp(mode, "max")) {
         setenv("MLT_AVFORMAT_PREFER_MAX", "1", 1);
         mltt a, b;
         if (!mltt_open(&a, "hdv_720_25p", "avformat", argv[2]) || !mltt_open(&b, "hdv_720_25p", "avformat", argv[2]))
             return 1;
-        int yuv[3];
-        for (int i = 0; i < 6; i++) {
-            CHECK(abs(mltt_centre(&a, i, yuv) - (16 + 2 * i)) <= 1, "max: clip A frame %d has luma %d", i, yuv[0]);
-            CHECK(abs(mltt_centre(&b, 10 + i, yuv) - (36 + 2 * i)) <= 1, "max: clip B frame %d has luma %d", 10 + i, yuv[0]);
+        int yuv[3] = {0}, f;
+#define FRAME(t, n, what) CHECK(abs(mltt_centre(&t, n, yuv) - (16 + 2 * (n))) <= 1, "max: %s frame %d has luma %d", what, n, yuv[0])
+        /* 1: both in use, in turn (a dissolve): A gets it, B keeps the default */
+        for (f = 0; f < 10; f++) {
+            FRAME(a, f, "A (with B)");
+            FRAME(b, 20 + f, "B (with A)");
         }
-        CHECK(opened_preferred == 1 && preferred_most == 1, "max: opened %d times, %d at once (limit 1)",
+        CHECK(opened_preferred == 1 && preferred_most == 1, "max: in turn, opened %d times, %d at once",
               opened_preferred, preferred_most);
-        const char *da = mlt_properties_get(MLT_PRODUCER_PROPERTIES(a.producer), "meta.media.decoder");
-        CHECK(preferred_now == 1, "max: %d open while both clips are", preferred_now);
+        /* 2: A idle, B goes on: B takes it over, A's closed first */
+        for (f = 30; f < 45; f++)
+            FRAME(b, f, "B (alone)");
+        CHECK(opened_preferred == 2, "max: B didn't take it over once A was idle (opened %d times)", opened_preferred);
+        CHECK(preferred_now == 1, "max: %d open after the handover", preferred_now);
+        /* 3: B idle, A again (from where it was): A takes it back */
+        for (f = 10; f < 25; f++)
+            FRAME(a, f, "A (again)");
+        CHECK(opened_preferred == 3, "max: A didn't take it back (opened %d times)", opened_preferred);
+        CHECK(preferred_most == 1 && opened_beside_another == 0,
+              "max: %d at once at most, %d opened while another was open", preferred_most, opened_beside_another);
+        /* 4: closing the holder frees its place: a new clip gets it at once */
         mltt_close(&a);
-        CHECK(preferred_now == 0, "max: %d open after clip A closed", preferred_now);
-        /* a third clip now gets the place clip A gave back */
+        CHECK(preferred_now == 0, "max: %d open after A closed", preferred_now);
         mltt c;
         if (!mltt_open(&c, "hdv_720_25p", "avformat", argv[2]))
             return 1;
-        CHECK(abs(mltt_centre(&c, 3, yuv) - 22) <= 1, "max: clip C frame 3 has luma %d", yuv[0]);
-        CHECK(opened_preferred == 2, "max: the freed place wasn't taken (opened %d times)", opened_preferred);
-        (void) da;
+        FRAME(c, 3, "C");
+        CHECK(opened_preferred == 4, "max: C didn't get the freed place (opened %d times)", opened_preferred);
         mltt_close(&b);
         mltt_close(&c);
+        CHECK(preferred_now == 0, "max: %d still open after closing everything", preferred_now);
+#undef FRAME
         printf("prefer_test %s: %s\n", mode, mltt_failures ? "FAILED" : "passed");
         return mltt_failures != 0;
     }
@@ -180,7 +222,7 @@ int main(int argc, char **argv)
 
     /* forward, a jump forward, back, the end, back again */
     static const int positions[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 40, 41, 42, 10, 74, 30, 31, -1};
-    int yuv[3];
+    int yuv[3] = {0};
     for (int i = 0; positions[i] >= 0; i++) {
         int n = positions[i];
         int y = mltt_centre(&t, n, yuv);

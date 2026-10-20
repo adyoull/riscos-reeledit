@@ -114,7 +114,7 @@ int main(int argc, char **argv)
     mltt t;
     if (!mltt_open(&t, "atsc_1080p_25", "colour", "#ff0000"))
         return 1;
-    int yuv[3];
+    int yuv[3] = {0};
     CHECK(mltt_centre(&t, 0, yuv) >= 0, "no picture from colour");
     CHECK(abs(yuv[0] - 63) <= 1 && abs(yuv[1] - 102) <= 1 && abs(yuv[2] - 240) <= 1,
           "red in an HD profile is %d,%d,%d, not BT.709's 63,102,240", yuv[0], yuv[1], yuv[2]);

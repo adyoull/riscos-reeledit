@@ -1,4 +1,4 @@
-MLT 7.42.0 for RISC OS: engine test 2
+MLT 7.42.0 for RISC OS: engine test 3
 =====================================
 
 This is the engine of Reel Edit, a video editor for RISC OS that is being
@@ -51,6 +51,10 @@ What is different from MLT elsewhere
   That's what lets a desktop program use it without stopping other tasks.
 - The Pi's hardware decoders are tried first for H.264 and HEVC; any clip
   they refuse, at the start or part way through, goes to the ARM decoder.
+  Only one clip at a time has the VideoCore's decoder (a second one never
+  works with gpu_mem=128): when two clips play together, as in a
+  crossfade, the second is decoded on the ARM, and the decoder passes to
+  it once the first has finished.
   *Set MLT_AVFORMAT_PREFER none to decode everything on the ARM.
 - Modules: core, avformat (FFmpeg) and xml. No Qt, GTK, SDL, frei0r or
   OpenGL effects.
