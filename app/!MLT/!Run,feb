@@ -1,0 +1,10 @@
+| !Run for !MLT (the MLT multimedia framework 7.42.0 for RISC OS)
+| Sets up *melt (as !Boot does) and checks the modules it needs. Then
+| run Test (a TaskWindow) to try MLT on this machine.
+Set MLT$Dir <Obey$Dir>
+Run <MLT$Dir>.!Boot
+RMEnsure SharedUnixLibrary 1.16 IfThere System:Modules.SharedULib Then RMLoad System:Modules.SharedULib
+RMEnsure SharedUnixLibrary 1.16 Error MLT needs SharedUnixLibrary 1.16 or later. Install it with PackMan.
+RMEnsure ARMEABISupport 0 IfThere System:Modules.ARMEABISupport Then RMLoad System:Modules.ARMEABISupport
+RMEnsure ARMEABISupport 0 Error MLT needs the ARMEABISupport module. Install it with PackMan.
+Filer_OpenDir <MLT$Dir>

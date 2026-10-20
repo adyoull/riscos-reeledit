@@ -1,0 +1,57 @@
+MLT 7.42.0 for RISC OS: engine test 1
+=====================================
+
+This is the engine of Reel Edit, a video editor for RISC OS that is being
+written: the MLT multimedia framework (https://www.mltframework.org), with
+its command-line player and renderer, melt. It is here so that MLT can be
+tried on real machines before the editor's windows are built on it.
+
+It needs RISC OS 5 on ARMv7 with VFP (Raspberry Pi 2, 3, 4), with
+SharedUnixLibrary and ARMEABISupport loaded (!Run checks). H.264 is
+decoded and encoded on the Pi's VideoCore, and HEVC decoded on the Pi 4's
+HEVC block, through riscos-reelhwaccel, with the ARM taking over for
+anything they refuse. 1080p on the VideoCore needs gpu_mem=128 in
+config.txt.
+
+Trying it
+---------
+Double-click Test. It runs in a TaskWindow, so the desktop keeps
+working: it makes two 10 second 1080p clips with the VideoCore's encoder,
+puts a crossfade between them, plays the result as the editor's preview
+would (decoding and mixing, with nothing shown), and exports it.
+Everything goes in <Wimp$ScrapDir>.MLTtest. Save the TaskWindow's text
+(Menu > Save) and send it back.
+
+To include one of your own videos:
+  *Set MLTtest$Clip SDFS::Pi.$.Videos.clip/mp4
+before double-clicking Test.
+
+melt
+----
+Once !MLT has been seen by the Filer, *melt works in any TaskWindow:
+
+  melt clip/mp4 -consumer null
+      decode the clip as fast as possible (a speed test)
+  melt a/mp4 b/mp4 -mix 25 -mixer luma -consumer avformat:/RAM::RamDisc0/$/out/mp4 vcodec=h264_encvchiq
+      two clips with a one second crossfade, saved as H.264
+  melt a/mp4 b/mp4 -consumer xml:project/mlt
+      the same as an MLT project (XML), which Shotcut and Kdenlive open too
+
+File names are Unix-style when they have a path (UnixLib translates
+them): /SDFS::Pi.$.Videos/clip.mp4 is SDFS::Pi.$.Videos.clip/mp4.
+
+What is different from MLT elsewhere
+------------------------------------
+- No threads: MLT does all its work in the program that asks for it.
+  That's what lets a desktop program use it without stopping other tasks.
+- The Pi's hardware decoders are tried first for H.264 and HEVC; any clip
+  they refuse, at the start or part way through, goes to the ARM decoder.
+  *Set MLT_AVFORMAT_PREFER none to decode everything on the ARM.
+- Modules: core, avformat (FFmpeg) and xml. No Qt, GTK, SDL, frei0r or
+  OpenGL effects.
+
+Licence
+-------
+MLT's framework and modules are LGPL 2.1 or later; FFmpeg as built for
+RISC OS (with the hardware decoders) is GPL version 2, so this program as
+a whole is GPL version 2. Sources: https://github.com/adyoull/riscos-reeledit

@@ -1,0 +1,378 @@
+From 8a109ef46a32d8b636a4d3e33b1d7af41610ec5a Mon Sep 17 00:00:00 2001
+From: Andrew Youll <andrewyoull86@gmail.com>
+Date: Tue, 20 Oct 2026 16:33:34 +0100
+Subject: [PATCH 3/4] MLT_NO_THREADS: the avformat module on the calling thread
+
+Without threads (mlt_threads_disabled):
+- the avformat producer starts no packets_worker; packets_read_inline()
+  reads packets as the decoder needs them, as the worker would have;
+- decoders and encoders whose threads property asks for the default (0)
+  get one thread, not FFmpeg's automatic count, and so do libavfilter
+  graphs (mlt_avformat_thread_count, mlt_avformat_graph_threads);
+- the avformat and null consumers do all their work inside
+  mlt_consumer_start, which returns when they have finished;
+- melt therefore reports progress, and passes on a stop asked for by
+  SIGINT or SIGTERM, from the consumer-frame-show event.
+---
+ src/melt/melt.c                           | 32 +++++++++++++++
+ src/modules/avformat/common.c             | 15 +++++++
+ src/modules/avformat/common.h             |  5 +++
+ src/modules/avformat/consumer_avformat.c  | 12 ++++++
+ src/modules/avformat/filter_avfilter.c    |  6 ++-
+ src/modules/avformat/link_avdeinterlace.c |  1 +
+ src/modules/avformat/link_avfilter.c      |  6 ++-
+ src/modules/avformat/producer_avformat.c  | 48 ++++++++++++++++++++++-
+ src/modules/core/consumer_null.c          |  9 +++++
+ 9 files changed, 128 insertions(+), 6 deletions(-)
+
+diff --git a/src/melt/melt.c b/src/melt/melt.c
+index 23153e6..933665c 100644
+--- a/src/melt/melt.c
++++ b/src/melt/melt.c
+@@ -735,6 +735,24 @@ static void on_fatal_error(mlt_properties owner, mlt_consumer consumer)
+     mlt_properties_set_int(MLT_CONSUMER_PROPERTIES(consumer), "melt_error", 1);
+ }
+ 
++/* A consumer that runs on melt's own thread (mlt_threads_disabled) returns
++   from mlt_consumer_start only when it has finished, so transport() never
++   runs while it works: progress is reported, and a stop requested by a
++   signal is passed on, as each frame is shown. */
++typedef struct
++{
++    mlt_producer producer;
++    int progress, silent, last_position;
++} inline_transport;
++
++static void on_frame_shown(mlt_properties owner, inline_transport *t, mlt_event_data data)
++{
++    (void) data;
++    if (mlt_properties_get_int(MLT_PRODUCER_PROPERTIES(t->producer), "done"))
++        mlt_properties_set_int(owner, "running", 0);
++    report_progress(t->producer, t->progress, &t->last_position, NULL, t->silent);
++}
++
+ static void set_preview_scale(mlt_profile *profile, mlt_profile *backup_profile, double scale)
+ {
+     *backup_profile = mlt_profile_clone(*profile);
+@@ -1113,6 +1131,20 @@ int main(int argc, char **argv)
+                               consumer,
+                               "consumer-fatal-error",
+                               (mlt_listener) on_fatal_error);
++            inline_transport inline_t = {melt,
++                                         mlt_properties_get_int(properties, "progress"),
++                                         mlt_properties_get_int(properties, "silent"),
++                                         0};
++            if (mlt_threads_disabled()) {
++                if (!inline_t.progress && !inline_t.silent)
++                    inline_t.progress = 1;
++                mlt_events_listen(properties,
++                                  &inline_t,
++                                  "consumer-frame-show",
++                                  (mlt_listener) on_frame_shown);
++                signal(SIGINT, stop_handler);
++                signal(SIGTERM, stop_handler);
++            }
+             if (mlt_consumer_start(consumer) == 0) {
+                 // Try to exit gracefully upon these signals
+                 signal(SIGINT, stop_handler);
+diff --git a/src/modules/avformat/common.c b/src/modules/avformat/common.c
+index 96b5988..2799aa7 100644
+--- a/src/modules/avformat/common.c
++++ b/src/modules/avformat/common.c
+@@ -19,6 +19,8 @@
+ 
+ #include "common.h"
+ 
++#include <libavfilter/avfilter.h>
++
+ #include <libavutil/channel_layout.h>
+ #include <libavutil/pixdesc.h>
+ #include <libavutil/samplefmt.h>
+@@ -687,3 +689,16 @@ void avframe_to_mlt_image(AVFrame *avframe, mlt_image image)
+         }
+     }
+ }
++
++int mlt_avformat_thread_count(int requested)
++{
++    if (requested <= 0 && mlt_threads_disabled())
++        return 1;
++    return requested;
++}
++
++void mlt_avformat_graph_threads(struct AVFilterGraph *graph)
++{
++    if (graph && mlt_threads_disabled())
++        graph->nb_threads = 1;
++}
+diff --git a/src/modules/avformat/common.h b/src/modules/avformat/common.h
+index 8f1cf75..2e78f73 100644
+--- a/src/modules/avformat/common.h
++++ b/src/modules/avformat/common.h
+@@ -55,5 +55,10 @@ int mlt_to_av_color_range(int full_range);
+ int av_to_mlt_full_range(int color_range);
+ void mlt_image_to_avframe(mlt_image image, mlt_frame mltframe, AVFrame *avframe);
+ void avframe_to_mlt_image(AVFrame *avframe, mlt_image image);
++struct AVFilterGraph;
++/* Without threads (mlt_threads_disabled): one thread for a codec whose
++   "threads" property asks for the default (0), and for a filter graph. */
++int mlt_avformat_thread_count(int requested);
++void mlt_avformat_graph_threads(struct AVFilterGraph *graph);
+ 
+ #endif // COMMON_H
+diff --git a/src/modules/avformat/consumer_avformat.c b/src/modules/avformat/consumer_avformat.c
+index 030b0b7..8272f4d 100644
+--- a/src/modules/avformat/consumer_avformat.c
++++ b/src/modules/avformat/consumer_avformat.c
+@@ -142,6 +142,7 @@ static int setup_hwupload_filter(mlt_properties properties,
+     AVFilterContext *vfilter_hwupload;
+ 
+     vfilter_graph = avfilter_graph_alloc();
++    mlt_avformat_graph_threads(vfilter_graph);
+     mlt_properties_set_data(properties,
+                             "vfilter_graph",
+                             &vfilter_graph,
+@@ -573,6 +574,16 @@ static int consumer_start(mlt_consumer consumer)
+         if (!mlt_properties_get(properties, "color_primaries"))
+             color_primaries_from_colorspace(properties);
+ 
++        if (mlt_threads_disabled()) {
++            // No threads: encode everything now, on this thread
++            free(thread);
++            mlt_properties_set_int(properties, "running", 1);
++            consumer_thread(consumer);
++            mlt_properties_set_int(properties, "running", 0);
++            mlt_event_unblock(mlt_properties_get_data(properties, "property-changed event", NULL));
++            return error;
++        }
++
+         // Assign the thread to properties
+         mlt_properties_set_data(properties, "thread", thread, sizeof(pthread_t), free, NULL);
+ 
+@@ -954,6 +965,7 @@ static AVStream *add_video_stream(mlt_consumer consumer,
+         int thread_count = mlt_properties_get_int(properties, "threads");
+         if (thread_count == 0 && getenv("MLT_AVFORMAT_THREADS"))
+             thread_count = atoi(getenv("MLT_AVFORMAT_THREADS"));
++        thread_count = mlt_avformat_thread_count(thread_count);
+         if (thread_count >= 0)
+             c->thread_count = thread_count;
+ 
+diff --git a/src/modules/avformat/filter_avfilter.c b/src/modules/avformat/filter_avfilter.c
+index 7de4c59..f414d06 100644
+--- a/src/modules/avformat/filter_avfilter.c
++++ b/src/modules/avformat/filter_avfilter.c
+@@ -221,6 +221,7 @@ static void init_audio_filtergraph(mlt_filter filter,
+ 
+     // Create the new filter graph
+     pdata->avfilter_graph = avfilter_graph_alloc();
++    mlt_avformat_graph_threads(pdata->avfilter_graph);
+     if (!pdata->avfilter_graph) {
+         mlt_log_error(filter, "Cannot create filter graph\n");
+         goto fail;
+@@ -230,7 +231,7 @@ static void init_audio_filtergraph(mlt_filter filter,
+     if (pdata->avfilter->flags & AVFILTER_FLAG_SLICE_THREADS) {
+         av_opt_set_int(pdata->avfilter_graph,
+                        "threads",
+-                       FFMAX(0, mlt_properties_get_int(MLT_FILTER_PROPERTIES(filter), "av.threads")),
++                       mlt_avformat_thread_count(FFMAX(0, mlt_properties_get_int(MLT_FILTER_PROPERTIES(filter), "av.threads"))),
+                        0);
+     }
+ 
+@@ -451,6 +452,7 @@ static void init_image_filtergraph(mlt_filter filter,
+ 
+     // Create the new filter graph
+     pdata->avfilter_graph = avfilter_graph_alloc();
++    mlt_avformat_graph_threads(pdata->avfilter_graph);
+     if (!pdata->avfilter_graph) {
+         mlt_log_error(filter, "Cannot create filter graph\n");
+         goto fail;
+@@ -461,7 +463,7 @@ static void init_image_filtergraph(mlt_filter filter,
+     if (pdata->avfilter->flags & AVFILTER_FLAG_SLICE_THREADS) {
+         av_opt_set_int(pdata->avfilter_graph,
+                        "threads",
+-                       FFMAX(0, mlt_properties_get_int(MLT_FILTER_PROPERTIES(filter), "av.threads")),
++                       mlt_avformat_thread_count(FFMAX(0, mlt_properties_get_int(MLT_FILTER_PROPERTIES(filter), "av.threads"))),
+                        0);
+     }
+ 
+diff --git a/src/modules/avformat/link_avdeinterlace.c b/src/modules/avformat/link_avdeinterlace.c
+index c945603..bb60a11 100644
+--- a/src/modules/avformat/link_avdeinterlace.c
++++ b/src/modules/avformat/link_avdeinterlace.c
+@@ -112,6 +112,7 @@ static void init_image_filtergraph(mlt_link self, AVRational sar)
+ 
+     // Create the new filter graph
+     fdata->avfilter_graph = avfilter_graph_alloc();
++    mlt_avformat_graph_threads(fdata->avfilter_graph);
+     if (!fdata->avfilter_graph) {
+         mlt_log_error(self, "Cannot create filter graph\n");
+         goto fail;
+diff --git a/src/modules/avformat/link_avfilter.c b/src/modules/avformat/link_avfilter.c
+index c1d383a..8e61023 100644
+--- a/src/modules/avformat/link_avfilter.c
++++ b/src/modules/avformat/link_avfilter.c
+@@ -238,6 +238,7 @@ static void init_audio_filtergraph(mlt_link self,
+ 
+     // Create the new filter graph
+     pdata->avfilter_graph = avfilter_graph_alloc();
++    mlt_avformat_graph_threads(pdata->avfilter_graph);
+     if (!pdata->avfilter_graph) {
+         mlt_log_error(self, "Cannot create filter graph\n");
+         goto fail;
+@@ -247,7 +248,7 @@ static void init_audio_filtergraph(mlt_link self,
+     if (pdata->avfilter->flags & AVFILTER_FLAG_SLICE_THREADS) {
+         av_opt_set_int(pdata->avfilter_graph,
+                        "threads",
+-                       FFMAX(0, mlt_properties_get_int(MLT_LINK_PROPERTIES(self), "av.threads")),
++                       mlt_avformat_thread_count(FFMAX(0, mlt_properties_get_int(MLT_LINK_PROPERTIES(self), "av.threads"))),
+                        0);
+     }
+ 
+@@ -467,6 +468,7 @@ static void init_image_filtergraph(mlt_link self,
+ 
+     // Create the new filter graph
+     pdata->avfilter_graph = avfilter_graph_alloc();
++    mlt_avformat_graph_threads(pdata->avfilter_graph);
+     if (!pdata->avfilter_graph) {
+         mlt_log_error(self, "Cannot create filter graph\n");
+         goto fail;
+@@ -477,7 +479,7 @@ static void init_image_filtergraph(mlt_link self,
+     if (pdata->avfilter->flags & AVFILTER_FLAG_SLICE_THREADS) {
+         av_opt_set_int(pdata->avfilter_graph,
+                        "threads",
+-                       FFMAX(0, mlt_properties_get_int(MLT_LINK_PROPERTIES(self), "av.threads")),
++                       mlt_avformat_thread_count(FFMAX(0, mlt_properties_get_int(MLT_LINK_PROPERTIES(self), "av.threads"))),
+                        0);
+     }
+ 
+diff --git a/src/modules/avformat/producer_avformat.c b/src/modules/avformat/producer_avformat.c
+index 669d865..62aaaeb 100644
+--- a/src/modules/avformat/producer_avformat.c
++++ b/src/modules/avformat/producer_avformat.c
+@@ -128,6 +128,7 @@ struct producer_avformat_s
+     int packets_thread_ret; // latest non-zero non-EGAIN return on av_read_frame() in packets_thread
+     int packets_thread_stop; // non-zero when packets_thread is to stop
+     int is_thread_init;
++    int packets_inline; // no packets_thread: packets are read as they're needed (mlt_threads_disabled)
+     AVRational video_time_base;
+     mlt_frame last_good_frame; // for video error concealment
+     int last_good_position;    // for video error concealment
+@@ -1031,6 +1032,7 @@ static int setup_hwaccel_filters(producer_avformat self,
+                     scaled_height);
+ 
+     self->hwaccel.filter_graph = avfilter_graph_alloc();
++    mlt_avformat_graph_threads(self->hwaccel.filter_graph);
+     if (!self->hwaccel.filter_graph) {
+         mlt_log_error(MLT_PRODUCER_SERVICE(producer), "Failed to allocate filter graph\n");
+         return -1;
+@@ -1298,6 +1300,7 @@ static int setup_video_filters(producer_avformat self)
+         pix_fmt = self->video_frame->format;
+     }
+     self->vfilter_graph = avfilter_graph_alloc();
++    mlt_avformat_graph_threads(self->vfilter_graph);
+ 
+     // From ffplay.c:configure_video_filters().
+     char buffersrc_args[256];
+@@ -2725,6 +2728,41 @@ static void *packets_worker(void *param)
+     }
+ }
+ 
++/** Read packets until there is one for the video, or a read fails.
++ *
++ * What packets_worker does, on the calling thread, for when there are no
++ * threads (mlt_threads_disabled). Called with packets_mutex held.
++ */
++
++static void packets_read_inline(producer_avformat self)
++{
++    AVPacket *pkt = av_packet_alloc();
++    if (!pkt) {
++        self->packets_thread_ret = AVERROR(ENOMEM);
++        return;
++    }
++    while (mlt_deque_count(self->vpackets) == 0 && self->packets_thread_ret == 0) {
++        int ret = av_read_frame(self->video_format, pkt);
++        if (ret == AVERROR(EAGAIN))
++            continue;
++        self->packets_thread_ret = ret;
++        if (ret == 0) {
++            if (pkt->stream_index == self->video_index) {
++                mlt_deque_push_back(self->vpackets, av_packet_clone(pkt));
++            } else if (!self->video_seekable && pkt->stream_index == self->audio_index
++                       && !is_album_art(self)) {
++                mlt_deque_push_back(self->apackets, av_packet_clone(pkt));
++            }
++            av_packet_unref(pkt);
++        } else if (ret != AVERROR_EOF) {
++            mlt_log_verbose(MLT_PRODUCER_SERVICE(self->parent),
++                            "av_read_frame returned error %d inside packets_read_inline\n",
++                            ret);
++        }
++    }
++    av_packet_free(&pkt);
++}
++
+ static void init_cache(mlt_properties properties, mlt_cache *cache)
+ {
+     // if cache size supplied by environment variable
+@@ -2908,7 +2946,9 @@ static int producer_get_image(mlt_frame frame,
+ 
+         if (!self->is_thread_init) {
+             pthread_cond_init(&self->packets_cond, NULL);
+-            pthread_create(&self->packets_thread, NULL, packets_worker, self);
++            self->packets_inline = mlt_threads_disabled();
++            if (!self->packets_inline)
++                pthread_create(&self->packets_thread, NULL, packets_worker, self);
+             self->is_thread_init = 1;
+         }
+ 
+@@ -2919,6 +2959,8 @@ static int producer_get_image(mlt_frame frame,
+                     av_packet_unref(&self->pkt);
+                 av_init_packet(&self->pkt);
+                 pthread_mutex_lock(&self->packets_mutex);
++                if (self->packets_inline)
++                    packets_read_inline(self);
+                 while (mlt_deque_count(self->vpackets) == 0 && self->packets_thread_ret == 0) {
+                     pthread_cond_wait(&self->packets_cond, &self->packets_mutex);
+                 }
+@@ -3360,6 +3402,7 @@ static int video_codec_init(producer_avformat self, int index, mlt_properties pr
+         int thread_count = mlt_properties_get_int(properties, "threads");
+         if (thread_count == 0 && getenv("MLT_AVFORMAT_THREADS"))
+             thread_count = atoi(getenv("MLT_AVFORMAT_THREADS"));
++        thread_count = mlt_avformat_thread_count(thread_count);
+         if (thread_count >= 0)
+             codec_context->thread_count = thread_count;
+ 
+@@ -4598,7 +4641,8 @@ static void producer_avformat_close(producer_avformat self)
+         self->packets_thread_stop = 1;
+         pthread_cond_signal(&self->packets_cond);
+         pthread_mutex_unlock(&self->packets_mutex);
+-        pthread_join(self->packets_thread, NULL);
++        if (!self->packets_inline)
++            pthread_join(self->packets_thread, NULL);
+         pthread_cond_destroy(&self->packets_cond);
+     }
+     if (self->dummy_context)
+diff --git a/src/modules/core/consumer_null.c b/src/modules/core/consumer_null.c
+index 9a3904c..9d107e7 100644
+--- a/src/modules/core/consumer_null.c
++++ b/src/modules/core/consumer_null.c
+@@ -73,6 +73,15 @@ static int consumer_start(mlt_consumer consumer)
+ 
+     // Check that we're not already running
+     if (!mlt_properties_get_int(properties, "running")) {
++        if (mlt_threads_disabled()) {
++            // No threads: render everything now, on this thread
++            mlt_properties_set_int(properties, "running", 1);
++            mlt_properties_set_int(properties, "joined", 1);
++            consumer_thread(consumer);
++            mlt_properties_set_int(properties, "running", 0);
++            return 0;
++        }
++
+         // Allocate a thread
+         pthread_t *thread = calloc(1, sizeof(pthread_t));
+ 
+-- 
+2.43.0
+

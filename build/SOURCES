@@ -1,0 +1,8 @@
+# The sources this build fetches into dl/ (build/fetch-sources.sh): file,
+# sha256, URL. Each is checked before it's used.
+mlt-7.42.0.tar.gz 8800e343f43aaa885bd5d9d23553030fa220aa3e2f0c94d9fd6a936d41638cdd https://github.com/mltframework/mlt/releases/download/v7.42.0/mlt-7.42.0.tar.gz
+libxml2_2.14.5+dfsg.orig.tar.xz 3965d68e430ce35260177f31664313a80d31877082bb4e25168e292ac3e8420e http://archive.ubuntu.com/ubuntu/pool/main/libx/libxml2/libxml2_2.14.5+dfsg.orig.tar.xz
+riscos-ffmpeg-devkit-5.1.10-riscos22.tgz bc6f16afadced0f1aec7398a8a1792afa3332a4b33e30cd9993b0df25e285c65 https://github.com/adyoull/riscos-ffmpeg/releases/download/v5.1.10-riscos22/riscos-ffmpeg-devkit-5.1.10-riscos22.tgz
+riscos-mesa-devkit-20.3.5-16.tgz 069de4126d43b055d9712325d5727e336c03ce084ad87a495ccff79ed26956a4 https://github.com/adyoull/riscos-mesa/releases/download/v20.3.5-16/riscos-mesa-devkit-20.3.5-16.tgz
+# For the Linux tests only: FFmpeg 5.1.10, the version riscos-ffmpeg uses
+ffmpeg-5.1.10.tar.xz 208592f16306932ffced4ab8baff3fb9eb05430cf9f897e05308f4b2d35c4c24 https://github.com/adyoull/riscos-ffmpeg/releases/download/sources/ffmpeg-5.1.10.tar.xz

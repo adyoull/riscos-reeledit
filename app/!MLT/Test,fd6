@@ -1,0 +1,49 @@
+| Test for !MLT: tries MLT on this machine, in a TaskWindow (the desktop
+| keeps running). Double-click it. Everything it makes goes in
+| <Wimp$ScrapDir>.MLTtest (about 30MB); delete it afterwards.
+| Each step shows the time it starts and ends (Sys$Time). Save the
+| TaskWindow's text (Menu > Save) and send it back.
+| To try one of your own videos too, first:
+|   *Set MLTtest$Clip SDFS::Pi.$.Videos.clip/mp4
+If "<MLT$Dir>"="" Then Set MLT$Dir <Obey$Dir>
+Run <MLT$Dir>.!Boot
+RMEnsure SharedUnixLibrary 1.16 Error MLT needs SharedUnixLibrary 1.16 or later.
+RMEnsure ARMEABISupport 0 Error MLT needs the ARMEABISupport module.
+CDir <Wimp$ScrapDir>.MLTtest
+Echo MLT engine test (melt 7.42.0, riscos-reeledit test build)
+melt -version
+Echo
+Echo 1. Two 10 second 1080p clips, encoded on the VideoCore (h264_encvchiq)
+Echo start <Sys$Time>
+melt -profile atsc_1080p_25 colour:red out=249 -consumer avformat:/<Wimp$ScrapDir>/MLTtest/red.mp4 vcodec=h264_encvchiq vb=8M an=1
+melt -profile atsc_1080p_25 colour:blue out=249 -consumer avformat:/<Wimp$ScrapDir>/MLTtest/blue.mp4 vcodec=h264_encvchiq vb=8M an=1
+Echo end   <Sys$Time>
+Echo
+Echo 2. A 2 second crossfade between them, saved as a project (MLT XML)
+melt -profile atsc_1080p_25 /<Wimp$ScrapDir>/MLTtest/red.mp4 /<Wimp$ScrapDir>/MLTtest/blue.mp4 -mix 50 -mixer luma -consumer xml:/<Wimp$ScrapDir>/MLTtest/project.mlt
+Echo
+Echo 3. The project played as the editor's preview plays it (decode + mix, no display):
+Echo    VideoCore decoding (h264_vchiq)
+Echo start <Sys$Time>
+melt /<Wimp$ScrapDir>/MLTtest/project.mlt -consumer null
+Echo end   <Sys$Time>
+Echo    ARM decoding
+Set MLT_AVFORMAT_PREFER none
+Echo start <Sys$Time>
+melt /<Wimp$ScrapDir>/MLTtest/project.mlt -consumer null
+Echo end   <Sys$Time>
+Unset MLT_AVFORMAT_PREFER
+Echo
+Echo 4. The project at 720p (the size a preview window is likely to be)
+Echo start <Sys$Time>
+melt -profile atsc_720p_25 /<Wimp$ScrapDir>/MLTtest/project.mlt -consumer null
+Echo end   <Sys$Time>
+Echo
+Echo 5. The project exported: VideoCore decoding and encoding
+Echo start <Sys$Time>
+melt /<Wimp$ScrapDir>/MLTtest/project.mlt -consumer avformat:/<Wimp$ScrapDir>/MLTtest/export.mp4 vcodec=h264_encvchiq vb=8M an=1
+Echo end   <Sys$Time>
+Echo
+If "<MLTtest$Clip>"="" Then Echo 6. (skipped: *Set MLTtest$Clip to one of your own videos to try it)
+If "<MLTtest$Clip>"<>"" Then Obey <MLT$Dir>.ClipTest
+Echo Done.

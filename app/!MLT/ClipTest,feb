@@ -1,0 +1,15 @@
+| ClipTest for !MLT: run by Test when MLTtest$Clip names a video. The
+| first second with -verbose (which decoder MLT used, and why), then the
+| first 10 seconds decoded with MLT's choice of decoder and on the ARM.
+Echo 6. Your clip: <MLTtest$Clip>
+melt -verbose <MLTtest$Clip> out=24 -consumer null
+Echo    the first 10 seconds (250 frames at 25 fps), MLT's choice of decoder
+Echo start <Sys$Time>
+melt <MLTtest$Clip> out=249 -consumer null
+Echo end   <Sys$Time>
+Echo    the same, decoded on the ARM
+Set MLT_AVFORMAT_PREFER none
+Echo start <Sys$Time>
+melt <MLTtest$Clip> out=249 -consumer null
+Echo end   <Sys$Time>
+Unset MLT_AVFORMAT_PREFER

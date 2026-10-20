@@ -1,0 +1,436 @@
+From 11580cb9d5b328ca7420bc4c63de850edc7b0c7f Mon Sep 17 00:00:00 2001
+From: Andrew Youll <andrewyoull86@gmail.com>
+Date: Tue, 20 Oct 2026 16:31:54 +0100
+Subject: [PATCH 1/4] Static builds: MLT_STATIC builds the framework and
+ modules as static libraries, registered at link time
+
+Systems without dlopen (RISC OS) need every module linked into the
+program. With -DMLT_STATIC=ON the framework and the core, avformat, xml
+and plus modules are static libraries; each module's mlt_register is
+renamed after it, and the generated mlt-static-modules library has
+mlt_static_modules_register(), which adds them with the new
+mlt_repository_add_static(). mlt_repository_init then registers those
+instead of scanning its directory, and a static build has no dlopen at
+all. melt calls mlt_static_modules_register() before mlt_factory_init.
+
+Programs using a static MLT are compiled with MLT_STATIC_DEFINE: CMake's
+exported target carries it, and mlt-framework-7.pc's Cflags have it.
+mlt++ follows the framework's library type, and a static build links
+no libdl.
+---
+ CMakeLists.txt                      | 19 ++++++++
+ src/framework/CMakeLists.txt        | 18 ++++++--
+ src/framework/mlt-framework.pc.in   |  2 +-
+ src/framework/mlt_repository.c      | 71 +++++++++++++++++++++++++++--
+ src/framework/mlt_repository.h      |  6 +++
+ src/melt/CMakeLists.txt             |  3 ++
+ src/melt/melt.c                     |  3 ++
+ src/mlt++/CMakeLists.txt            |  4 +-
+ src/modules/CMakeLists.txt          | 21 +++++++++
+ src/modules/avformat/CMakeLists.txt |  5 +-
+ src/modules/core/CMakeLists.txt     |  5 +-
+ src/modules/plus/CMakeLists.txt     |  5 +-
+ src/modules/xml/CMakeLists.txt      |  5 +-
+ 13 files changed, 147 insertions(+), 20 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 08b550c..249068c 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -55,6 +55,25 @@ option(MOD_VIDSTAB "Enable vid.stab module (GPL)" ON)
+ option(MOD_VORBIS "Enable Vorbis module" ON)
+ option(MOD_XINE "Enable XINE module (GPL)" ON)
+ option(MOD_XML "Enable XML module" ON)
++option(MLT_STATIC "Build the framework and modules as static libraries, with the modules registered at link time instead of loaded with dlopen (for systems without dlopen)" OFF)
++if(MLT_STATIC)
++  set(MLT_LIBRARY_TYPE STATIC)
++  set(MLT_MODULE_TYPE STATIC)
++else()
++  set(MLT_LIBRARY_TYPE SHARED)
++  set(MLT_MODULE_TYPE MODULE)
++endif()
++
++# A module built into a static MLT: its mlt_register is renamed after it, and
++# it is listed so that mlt_static_modules_register() can register it.
++function(mlt_module_static target)
++  if(MLT_STATIC)
++    string(TOUPPER ${target} _upper)
++    string(REGEX REPLACE "^mlt" "" _name ${target})
++    target_compile_definitions(${target} PRIVATE ${_upper}_STATIC_DEFINE mlt_register=mlt_register_${_name})
++    set_property(GLOBAL APPEND PROPERTY MLT_STATIC_MODULES ${_name})
++  endif()
++endfunction()
+ 
+ option(SWIG_CSHARP "Enable SWIG C# bindings" OFF)
+ option(SWIG_JAVA "Enable SWIG Java bindings" OFF)
+diff --git a/src/framework/CMakeLists.txt b/src/framework/CMakeLists.txt
+index a4b4d06..64c1a25 100644
+--- a/src/framework/CMakeLists.txt
++++ b/src/framework/CMakeLists.txt
+@@ -33,7 +33,7 @@ set(MLT_PUBLIC_HEADERS
+   mlt_version.h
+ )
+ 
+-add_library(mlt SHARED
++add_library(mlt ${MLT_LIBRARY_TYPE}
+   mlt_animation.c
+   mlt_audio.c
+   mlt_cache.c
+@@ -106,12 +106,20 @@ endforeach()
+ 
+ include(GenerateExportHeader)
+ generate_export_header(mlt)
++if(MLT_STATIC)
++  target_compile_definitions(mlt PUBLIC MLT_STATIC_DEFINE)
++  set(MLT_PC_CFLAGS "-DMLT_STATIC_DEFINE")
++endif()
+ 
+ target_sources(mlt PRIVATE ${MLT_PUBLIC_HEADERS})
+ 
+ target_compile_options(mlt PRIVATE ${MLT_COMPILE_OPTIONS})
+ 
+-target_link_libraries(mlt PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
++if(MLT_STATIC)
++  target_link_libraries(mlt PRIVATE Threads::Threads)
++else()
++  target_link_libraries(mlt PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
++endif()
+ 
+ if(MSVC)
+   target_link_libraries(mlt PRIVATE msvccompat PThreads4W::PThreads4W dirent)
+@@ -150,8 +158,10 @@ if(NOT (WIN32 OR RELOCATABLE))
+     target_compile_definitions(mlt PRIVATE PREFIX_DATA="${CMAKE_INSTALL_FULL_DATADIR}/mlt" PREFIX_LIB="${CMAKE_INSTALL_FULL_LIBDIR}/mlt")
+   else()
+     target_compile_definitions(mlt PRIVATE PREFIX_DATA="${CMAKE_INSTALL_FULL_DATADIR}/mlt-${MLT_VERSION_MAJOR}" PREFIX_LIB="${CMAKE_INSTALL_FULL_LIBDIR}/mlt-${MLT_VERSION_MAJOR}")
+-    target_link_options(mlt PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/mlt.vers)
+-    set_target_properties(mlt PROPERTIES LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/mlt.vers)
++    if(NOT MLT_STATIC)
++      target_link_options(mlt PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/mlt.vers)
++      set_target_properties(mlt PROPERTIES LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/mlt.vers)
++    endif()
+   endif()
+ elseif(RELOCATABLE)
+   target_compile_definitions(mlt PRIVATE RELOCATABLE)
+diff --git a/src/framework/mlt-framework.pc.in b/src/framework/mlt-framework.pc.in
+index baa81da..9514e2f 100644
+--- a/src/framework/mlt-framework.pc.in
++++ b/src/framework/mlt-framework.pc.in
+@@ -12,4 +12,4 @@ Description: MLT multimedia framework
+ Version: @MLT_VERSION@
+ Requires:
+ Libs: -L${libdir} -lmlt-@MLT_VERSION_MAJOR@
+-Cflags: -I${includedir}/mlt-@MLT_VERSION_MAJOR@
++Cflags: -I${includedir}/mlt-@MLT_VERSION_MAJOR@ @MLT_PC_CFLAGS@
+diff --git a/src/framework/mlt_repository.c b/src/framework/mlt_repository.c
+index b82a347..5cad8be 100644
+--- a/src/framework/mlt_repository.c
++++ b/src/framework/mlt_repository.c
+@@ -27,7 +27,9 @@
+ #include "mlt_tokeniser.h"
+ 
+ #include <dirent.h>
++#ifndef MLT_STATIC_DEFINE
+ #include <dlfcn.h>
++#endif
+ #include <limits.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -59,13 +61,41 @@ struct mlt_repository_s
+  * \return a new repository or NULL if failed
+  */
+ 
+-mlt_repository mlt_repository_init(const char *directory)
++#define MLT_STATIC_MAX 32
++static struct
+ {
+-    // Safety check
+-    if (directory == NULL || strcmp(directory, "") == 0)
+-        return NULL;
++    const char *name;
++    mlt_repository_callback callback;
++} static_modules[MLT_STATIC_MAX];
++static int static_count = 0;
+ 
+-    // Construct the repository
++/** Add a module built into the program, for a static MLT.
++ *
++ * Every later mlt_repository_init registers the modules added here, in the
++ * order they were added, and doesn't look in its directory.
++ *
++ * \public \memberof mlt_repository_s
++ * \param name the module's name, for messages
++ * \param callback its registration function (its mlt_register, renamed)
++ */
++
++void mlt_repository_add_static(const char *name, mlt_repository_callback callback)
++{
++    int i;
++    for (i = 0; i < static_count; i++)
++        if (static_modules[i].callback == callback)
++            return;
++    if (static_count < MLT_STATIC_MAX) {
++        static_modules[static_count].name = name;
++        static_modules[static_count].callback = callback;
++        static_count++;
++    } else {
++        mlt_log_error(NULL, "%s: too many static modules (%s)\n", __FUNCTION__, name);
++    }
++}
++
++static mlt_repository repository_new(void)
++{
+     mlt_repository self = calloc(1, sizeof(struct mlt_repository_s));
+     mlt_properties_init(&self->parent, self);
+     self->consumers = mlt_properties_new();
+@@ -73,6 +103,36 @@ mlt_repository mlt_repository_init(const char *directory)
+     self->links = mlt_properties_new();
+     self->producers = mlt_properties_new();
+     self->transitions = mlt_properties_new();
++    return self;
++}
++
++mlt_repository mlt_repository_init(const char *directory)
++{
++    // Modules built into the program take the place of the directory's
++    if (static_count > 0) {
++        mlt_repository self = repository_new();
++        int i;
++        for (i = 0; i < static_count; i++) {
++            mlt_log_debug(NULL, "%s: registering built-in module %s\n", __FUNCTION__, static_modules[i].name);
++            static_modules[i].callback(self);
++        }
++        return self;
++    }
++
++#ifdef MLT_STATIC_DEFINE
++    mlt_log_error(NULL,
++                  "%s: no modules: a static MLT needs mlt_static_modules_register() "
++                  "before mlt_factory_init()\n",
++                  __FUNCTION__);
++    (void) directory;
++    return NULL;
++#else
++    // Safety check
++    if (directory == NULL || strcmp(directory, "") == 0)
++        return NULL;
++
++    // Construct the repository
++    mlt_repository self = repository_new();
+ 
+     // Get the directory list
+     mlt_properties dir = mlt_properties_new();
+@@ -198,6 +258,7 @@ mlt_repository mlt_repository_init(const char *directory)
+     mlt_tokeniser_close(tokeniser);
+ 
+     return self;
++#endif
+ }
+ 
+ /** Create a properties list for a service holding a function pointer to its constructor function.
+diff --git a/src/framework/mlt_repository.h b/src/framework/mlt_repository.h
+index 6522188..1706f9d 100644
+--- a/src/framework/mlt_repository.h
++++ b/src/framework/mlt_repository.h
+@@ -65,6 +65,12 @@ typedef mlt_properties (*mlt_metadata_callback)(mlt_service_type,
+                                       (data)))
+ 
+ MLT_EXPORT mlt_repository mlt_repository_init(const char *directory);
++/** Add a module built into the program (a static MLT), registered by every
++ *  later mlt_repository_init instead of the modules found in its directory. */
++MLT_EXPORT void mlt_repository_add_static(const char *name, mlt_repository_callback callback);
++/** In a static MLT (MLT_STATIC_DEFINE), the mlt-static-modules library
++ *  provides this: it adds every module built in. Call it before mlt_factory_init. */
++MLT_EXPORT void mlt_static_modules_register(void);
+ MLT_EXPORT void mlt_repository_register(mlt_repository self,
+                                         mlt_service_type service_type,
+                                         const char *service,
+diff --git a/src/melt/CMakeLists.txt b/src/melt/CMakeLists.txt
+index 557bac7..f68755f 100644
+--- a/src/melt/CMakeLists.txt
++++ b/src/melt/CMakeLists.txt
+@@ -3,6 +3,9 @@ add_executable(melt melt.c io.c io.h)
+ target_compile_options(melt PRIVATE ${MLT_COMPILE_OPTIONS})
+ 
+ target_link_libraries(melt PRIVATE mlt Threads::Threads)
++if(MLT_STATIC)
++  target_link_libraries(melt PRIVATE mlt-static-modules)
++endif()
+ 
+ target_compile_definitions(melt PRIVATE VERSION="${MLT_VERSION}")
+ 
+diff --git a/src/melt/melt.c b/src/melt/melt.c
+index 4a0a304..23153e6 100644
+--- a/src/melt/melt.c
++++ b/src/melt/melt.c
+@@ -751,6 +751,9 @@ static void set_preview_scale(mlt_profile *profile, mlt_profile *backup_profile,
+ 
+ static mlt_repository setup_factory(const char *repo_path, int set_locale)
+ {
++#ifdef MLT_STATIC_DEFINE
++    mlt_static_modules_register();
++#endif
+     mlt_repository repo = mlt_factory_init(repo_path);
+     if (repo && set_locale) {
+         // Load the system locales
+diff --git a/src/mlt++/CMakeLists.txt b/src/mlt++/CMakeLists.txt
+index c39ae90..aa47fc1 100644
+--- a/src/mlt++/CMakeLists.txt
++++ b/src/mlt++/CMakeLists.txt
+@@ -29,7 +29,7 @@ set(MLTPP_PUBLIC_HEADERS
+   MltTransition.h
+ )
+ 
+-add_library(mlt++ SHARED
++add_library(mlt++ ${MLT_LIBRARY_TYPE}
+   MltAnimation.cpp
+   MltAudio.cpp
+   MltChain.cpp
+@@ -95,7 +95,7 @@ if(WIN32)
+   target_compile_definitions(mlt++ PRIVATE MLTPP_EXPORTS)
+ endif()
+ 
+-if(NOT (WIN32 OR APPLE OR ANDROID))
++if(NOT (WIN32 OR APPLE OR ANDROID OR MLT_STATIC))
+   target_link_options(mlt++ PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/mlt++.vers)
+   set_target_properties(mlt++ PROPERTIES LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/mlt++.vers)
+ endif()
+diff --git a/src/modules/CMakeLists.txt b/src/modules/CMakeLists.txt
+index afc8709..422dd4e 100644
+--- a/src/modules/CMakeLists.txt
++++ b/src/modules/CMakeLists.txt
+@@ -115,3 +115,24 @@ endif()
+ if(MOD_XML)
+   add_subdirectory(xml)
+ endif()
++
++# A static MLT: one library that registers every module built into it.
++if(MLT_STATIC)
++  get_property(_mlt_static_modules GLOBAL PROPERTY MLT_STATIC_MODULES)
++  set(_decls "")
++  set(_calls "")
++  set(_targets "")
++  foreach(_m ${_mlt_static_modules})
++    string(APPEND _decls "void mlt_register_${_m}(mlt_repository repository);\n")
++    string(APPEND _calls "    mlt_repository_add_static(\"${_m}\", mlt_register_${_m});\n")
++    list(APPEND _targets mlt${_m})
++  endforeach()
++  file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/mlt_static_modules.c
++    "/* Generated by src/modules/CMakeLists.txt: the modules built into this static MLT. */\n"
++    "#include <framework/mlt_repository.h>\n\n"
++    "${_decls}\n"
++    "void mlt_static_modules_register(void)\n{\n${_calls}}\n")
++  add_library(mlt-static-modules STATIC ${CMAKE_CURRENT_BINARY_DIR}/mlt_static_modules.c)
++  target_link_libraries(mlt-static-modules PUBLIC ${_targets} mlt)
++  install(TARGETS mlt-static-modules ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
++endif()
+diff --git a/src/modules/avformat/CMakeLists.txt b/src/modules/avformat/CMakeLists.txt
+index 3b197da..8b1bf6c 100644
+--- a/src/modules/avformat/CMakeLists.txt
++++ b/src/modules/avformat/CMakeLists.txt
+@@ -1,4 +1,4 @@
+-add_library(mltavformat MODULE
++add_library(mltavformat ${MLT_MODULE_TYPE}
+   common.c common.h
+   factory.c
+   filter_avcolour_space.c
+@@ -28,6 +28,7 @@ add_custom_target(Other_avformat_Files SOURCES
+ 
+ include(GenerateExportHeader)
+ generate_export_header(mltavformat)
++mlt_module_static(mltavformat)
+ target_compile_options(mltavformat PRIVATE ${MLT_COMPILE_OPTIONS})
+ 
+ target_include_directories(mltavformat SYSTEM PRIVATE ${FFMPEG_INCLUDE_DIRS})
+@@ -61,7 +62,7 @@ endif()
+ 
+ set_target_properties(mltavformat PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${MLT_MODULE_OUTPUT_DIRECTORY}")
+ 
+-install(TARGETS mltavformat LIBRARY DESTINATION ${MLT_INSTALL_MODULE_DIR})
++install(TARGETS mltavformat LIBRARY DESTINATION ${MLT_INSTALL_MODULE_DIR} ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+ 
+ install(FILES
+   consumer_avformat.yml
+diff --git a/src/modules/core/CMakeLists.txt b/src/modules/core/CMakeLists.txt
+index 383efd0..fe8eeee 100644
+--- a/src/modules/core/CMakeLists.txt
++++ b/src/modules/core/CMakeLists.txt
+@@ -1,4 +1,4 @@
+-add_library(mltcore MODULE
++add_library(mltcore ${MLT_MODULE_TYPE}
+   consumer_multi.c
+   consumer_null.c
+   factory.c
+@@ -55,6 +55,7 @@ add_custom_target(Other_core_Files SOURCES
+ )
+ include(GenerateExportHeader)
+ generate_export_header(mltcore)
++mlt_module_static(mltcore)
+ target_compile_options(mltcore PRIVATE ${MLT_COMPILE_OPTIONS})
+ 
+ target_link_libraries(mltcore PRIVATE mlt Threads::Threads)
+@@ -82,7 +83,7 @@ endif()
+ 
+ set_target_properties(mltcore PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${MLT_MODULE_OUTPUT_DIRECTORY}")
+ 
+-install(TARGETS mltcore LIBRARY DESTINATION ${MLT_INSTALL_MODULE_DIR})
++install(TARGETS mltcore LIBRARY DESTINATION ${MLT_INSTALL_MODULE_DIR} ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+ 
+ install(FILES
+   ${YML}
+diff --git a/src/modules/plus/CMakeLists.txt b/src/modules/plus/CMakeLists.txt
+index 2ed613f..7bee527 100644
+--- a/src/modules/plus/CMakeLists.txt
++++ b/src/modules/plus/CMakeLists.txt
+@@ -1,4 +1,4 @@
+-add_library(mltplus MODULE
++add_library(mltplus ${MLT_MODULE_TYPE}
+   subtitles/subtitles.cpp
+   consumer_blipflash.c
+   factory.c
+@@ -40,6 +40,7 @@ add_custom_target(Other_plus_Files SOURCES
+ )
+ include(GenerateExportHeader)
+ generate_export_header(mltplus)
++mlt_module_static(mltplus)
+ target_compile_options(mltplus PRIVATE ${MLT_COMPILE_OPTIONS})
+ target_include_directories(mltplus PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+ target_link_libraries(mltplus PRIVATE mlt Threads::Threads)
+@@ -66,7 +67,7 @@ endif()
+ 
+ set_target_properties(mltplus PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${MLT_MODULE_OUTPUT_DIRECTORY}")
+ 
+-install(TARGETS mltplus LIBRARY DESTINATION ${MLT_INSTALL_MODULE_DIR})
++install(TARGETS mltplus LIBRARY DESTINATION ${MLT_INSTALL_MODULE_DIR} ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+ 
+ install(FILES
+   consumer_blipflash.yml
+diff --git a/src/modules/xml/CMakeLists.txt b/src/modules/xml/CMakeLists.txt
+index f9b9e74..bf0ed7c 100644
+--- a/src/modules/xml/CMakeLists.txt
++++ b/src/modules/xml/CMakeLists.txt
+@@ -1,4 +1,4 @@
+-add_library(mltxml MODULE
++add_library(mltxml ${MLT_MODULE_TYPE}
+   common.c common.h
+   consumer_xml.c
+   factory.c
+@@ -13,6 +13,7 @@ add_custom_target(Other_xml_Files SOURCES
+ )
+ include(GenerateExportHeader)
+ generate_export_header(mltxml)
++mlt_module_static(mltxml)
+ target_compile_options(mltxml PRIVATE ${MLT_COMPILE_OPTIONS})
+ target_include_directories(mltxml PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+ target_link_libraries(mltxml PRIVATE mlt Threads::Threads PkgConfig::xml)
+@@ -24,7 +25,7 @@ endif()
+ 
+ set_target_properties(mltxml PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${MLT_MODULE_OUTPUT_DIRECTORY}")
+ 
+-install(TARGETS mltxml LIBRARY DESTINATION ${MLT_INSTALL_MODULE_DIR})
++install(TARGETS mltxml LIBRARY DESTINATION ${MLT_INSTALL_MODULE_DIR} ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+ 
+ install(FILES
+   consumer_xml.yml
+-- 
+2.43.0
+

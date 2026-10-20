@@ -1,0 +1,5 @@
+^src/framework/mlt_image\.c:.*uint16_t \*
+^src/modules/core/(filter_autofade|filter_brightness|filter_mirror|filter_pillar_echo|filter_resize|image_proc|link_timeremap|producer_colour|transition_luma)\.c:.*uint16_t \*
+^src/modules/core/filter_audiochannels\.c:.*(int16_t|int32_t|float) \*
+^src/modules/avformat/filter_avcolour_space\.c:.*uint16_t \*
+^src/modules/avformat/producer_avformat\.c:.*(AVSphericalMapping|int32_t \*\) displaymatrix|AVHWFramesContext)

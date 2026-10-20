@@ -1,0 +1,198 @@
+From 330da3661e304cb3fd4f9fa6168716f2d2a950a5 Mon Sep 17 00:00:00 2001
+From: Andrew Youll <andrewyoull86@gmail.com>
+Date: Tue, 20 Oct 2026 16:32:26 +0100
+Subject: [PATCH 2/4] MLT_NO_THREADS: slices and consumers on the calling
+ thread
+
+mlt_threads_disabled() says whether MLT should do all its work on the
+calling thread: MLT_NO_THREADS in the environment (1 or 0), or the
+default chosen when MLT is built (-DMLT_NO_THREADS=ON). It is for
+systems where threads are expensive or unsafe, such as RISC OS, whose
+threads are switched by a ticker and whose Wimp tasks share one CPU.
+
+With it, mlt_slices creates no workers and runs every job on the
+caller, and mlt_consumer_start turns real_time off, so frames are
+rendered when they're asked for instead of by read-ahead threads.
+
+Also exports mlt_repository_add_static (previous commit) in mlt.vers.
+---
+ CMakeLists.txt               |  1 +
+ src/framework/CMakeLists.txt |  3 +++
+ src/framework/mlt.vers       |  2 ++
+ src/framework/mlt_consumer.c |  7 ++++++
+ src/framework/mlt_slices.c   | 46 ++++++++++++++++++++++++++++++++++++
+ src/framework/mlt_slices.h   |  5 ++++
+ 6 files changed, 64 insertions(+)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 249068c..48921e3 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -55,6 +55,7 @@ option(MOD_VIDSTAB "Enable vid.stab module (GPL)" ON)
+ option(MOD_VORBIS "Enable Vorbis module" ON)
+ option(MOD_XINE "Enable XINE module (GPL)" ON)
+ option(MOD_XML "Enable XML module" ON)
++option(MLT_NO_THREADS "Do all of MLT's work on the calling thread by default: no slice workers, no packet reader, no consumer threads (MLT_NO_THREADS=0 in the environment turns threads back on)" OFF)
+ option(MLT_STATIC "Build the framework and modules as static libraries, with the modules registered at link time instead of loaded with dlopen (for systems without dlopen)" OFF)
+ if(MLT_STATIC)
+   set(MLT_LIBRARY_TYPE STATIC)
+diff --git a/src/framework/CMakeLists.txt b/src/framework/CMakeLists.txt
+index 64c1a25..1593fb0 100644
+--- a/src/framework/CMakeLists.txt
++++ b/src/framework/CMakeLists.txt
+@@ -110,6 +110,9 @@ if(MLT_STATIC)
+   target_compile_definitions(mlt PUBLIC MLT_STATIC_DEFINE)
+   set(MLT_PC_CFLAGS "-DMLT_STATIC_DEFINE")
+ endif()
++if(MLT_NO_THREADS)
++  target_compile_definitions(mlt PRIVATE MLT_NO_THREADS_DEFAULT=1)
++endif()
+ 
+ target_sources(mlt PRIVATE ${MLT_PUBLIC_HEADERS})
+ 
+diff --git a/src/framework/mlt.vers b/src/framework/mlt.vers
+index b0ee6cb..64f6a9f 100644
+--- a/src/framework/mlt.vers
++++ b/src/framework/mlt.vers
+@@ -704,4 +704,6 @@ MLT_7.42.0 {
+     mlt_frame_prepend_image_from_service;
+     mlt_frame_push_image_with_fx_cut;
+     mlt_producer_pass_frame_properties;
++    mlt_repository_add_static;
++    mlt_threads_disabled;
+ } MLT_7.40.0;
+diff --git a/src/framework/mlt_consumer.c b/src/framework/mlt_consumer.c
+index d8b851e..dd3cabd 100644
+--- a/src/framework/mlt_consumer.c
++++ b/src/framework/mlt_consumer.c
+@@ -26,6 +26,7 @@
+ #include "mlt_log.h"
+ #include "mlt_producer.h"
+ #include "mlt_profile.h"
++#include "mlt_slices.h"
+ 
+ #include <stdatomic.h>
+ #include <stdio.h>
+@@ -567,6 +568,12 @@ int mlt_consumer_start(mlt_consumer self)
+     // Set the real_time preference
+     priv->real_time = mlt_properties_get_int(properties, "real_time");
+ 
++    // Without threads, frames are rendered when they're asked for
++    if (priv->real_time && mlt_threads_disabled()) {
++        priv->real_time = 0;
++        mlt_properties_set_int(properties, "real_time", 0);
++    }
++
+     // For worker threads implementation, buffer must be at least # threads
+     if (abs(priv->real_time) > 1
+         && mlt_properties_get_int(properties, "buffer") <= abs(priv->real_time))
+diff --git a/src/framework/mlt_slices.c b/src/framework/mlt_slices.c
+index ed508f5..8c6ddb3 100644
+--- a/src/framework/mlt_slices.c
++++ b/src/framework/mlt_slices.c
+@@ -59,6 +59,7 @@ struct mlt_slices_runtime_s
+ 
+ struct mlt_slices_s
+ {
++    int inline_run; /* no workers: every job runs on the caller */
+     int f_exit;
+     int count;
+     int readys;
+@@ -71,6 +72,30 @@ struct mlt_slices_s
+     const char *name;
+ };
+ 
++/** Whether MLT should do all its work on the calling thread.
++ *
++ * For systems where threads are expensive or unsafe (RISC OS, where they are
++ * switched by a ticker and every Wimp task shares one CPU). When this is
++ * true, slices run on the caller, the avformat producer reads packets as it
++ * needs them and consumers run on the thread that starts them.
++ *
++ * \public \memberof mlt_slices_s
++ * \return 1 if MLT_NO_THREADS is set to a non-zero value in the
++ * environment, or is not set and MLT was built with MLT_NO_THREADS on
++ */
++
++int mlt_threads_disabled(void)
++{
++    const char *e = getenv("MLT_NO_THREADS");
++    if (e && *e)
++        return atoi(e) != 0;
++#ifdef MLT_NO_THREADS_DEFAULT
++    return 1;
++#else
++    return 0;
++#endif
++}
++
+ static void *mlt_slices_worker(void *p)
+ {
+     int id, idx;
+@@ -192,6 +217,12 @@ static mlt_slices mlt_slices_init(int threads, int policy, int priority)
+     if (threads > MAX_SLICES)
+         threads = MAX_SLICES;
+ 
++    if (mlt_threads_disabled()) {
++        ctx->count = 1;
++        ctx->inline_run = 1;
++        return ctx;
++    }
++
+     ctx->count = threads;
+ 
+     /* init attributes */
+@@ -248,6 +279,11 @@ static void mlt_slices_close(mlt_slices ctx)
+     }
+     pthread_mutex_unlock(&g_lock);
+ 
++    if (ctx->inline_run) {
++        free(ctx);
++        return;
++    }
++
+     /* notify to exit */
+     ctx->f_exit = 1;
+     pthread_mutex_lock(&ctx->cond_mutex);
+@@ -283,6 +319,16 @@ static void mlt_slices_run(mlt_slices ctx, int jobs, mlt_slices_proc proc, void
+         proc(0, 0, 1, cookie);
+         return;
+     }
++    if (ctx->inline_run) {
++        int idx;
++        if (jobs < 0)
++            jobs = (-jobs) * ctx->count;
++        if (!jobs)
++            jobs = ctx->count;
++        for (idx = 0; idx < jobs; idx++)
++            proc(0, idx, jobs, cookie);
++        return;
++    }
+     struct mlt_slices_runtime_s runtime, *r = &runtime;
+ 
+     /* lock */
+diff --git a/src/framework/mlt_slices.h b/src/framework/mlt_slices.h
+index 29d46af..68ea736 100644
+--- a/src/framework/mlt_slices.h
++++ b/src/framework/mlt_slices.h
+@@ -28,12 +28,17 @@
+ /**
+  * \envvar \em MLT_SLICES_COUNT Set the number of slices to use, which
+  * defaults to number of CPUs found.
++ * \envvar \em MLT_NO_THREADS 1 to do all of MLT's work on the calling
++ * thread, 0 to allow threads; the default is set when MLT is built
++ * (MLT_NO_THREADS in CMake; threads allowed otherwise).
+  */
+ 
+ struct mlt_slices_s;
+ 
+ typedef int (*mlt_slices_proc)(int id, int idx, int jobs, void *cookie);
+ 
++MLT_EXPORT int mlt_threads_disabled(void);
++
+ MLT_EXPORT int mlt_slices_count_normal();
+ 
+ MLT_EXPORT int mlt_slices_count_rr();
+-- 
+2.43.0
+

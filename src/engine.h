@@ -1,0 +1,95 @@
+/* engine.h - Reel Edit's player: a project (MLT XML) or a clip, played from
+ * the Wimp's null events.
+ *
+ * It makes at most one picture each time it's called, and says how long the
+ * caller may wait before calling it again, so the rest of the desktop keeps
+ * running (docs/DESIGN.md, "Keeping the desktop running"). It makes no
+ * RISC OS calls: the picture, the sound and the clock go through callbacks,
+ * so it can be tested on Linux.
+ *
+ *   re_engine *e = re_engine_open("project.mlt", 0.5, &io);
+ *   re_engine_play(e, 1.0);
+ *   for (;;) {                    // the Wimp_Poll loop
+ *       int wait = re_engine_poll(e);
+ *       // wait < 0: no null events needed; else Wimp_PollIdle until now + wait cs
+ *   }
+ *
+ * Part of riscos-reeledit. GPL version 2 or later.
+ */
+#ifndef RE_ENGINE_H
+#define RE_ENGINE_H
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct re_engine re_engine;
+
+/* A picture to show: yuv420p, three planes. Valid only during show(). */
+typedef struct
+{
+    const uint8_t *planes[3];
+    int strides[3];
+    int width, height;
+    int position; /* the frame's position in the project */
+    int colorspace; /* 601 or 709 */
+    int full_range; /* 1: 0-255, 0: video range (16-235) */
+} re_picture;
+
+typedef struct
+{
+    /* Show this picture now. */
+    void (*show)(void *ctx, const re_picture *picture);
+    /* Sound for the frames played, interleaved signed 16-bit, at the rate and
+       channels given to re_engine_open; NULL: no sound. */
+    void (*sound)(void *ctx, const int16_t *samples, int frames);
+    /* A monotonic clock in centiseconds (OS_ReadMonotonicTime). */
+    unsigned (*clock_cs)(void *ctx);
+    void *ctx;
+    int sound_rate;     /* samples a second (default 48000) */
+    int sound_channels; /* default 2 */
+} re_engine_io;
+
+typedef struct
+{
+    int rendered;       /* pictures made */
+    int skipped;        /* pictures left out to keep up with the clock */
+    int resyncs;        /* times it fell so far behind that the clock was moved on */
+    int sound_frames;   /* sample frames given to sound() */
+} re_engine_stats;
+
+/* Open a project or clip, at the project's own size and frame rate (a
+   clip's: the clip's). preview_scale: the pictures' size against that (1
+   full size, 0.5 half). NULL on failure. */
+re_engine *re_engine_open(const char *file, double preview_scale, const re_engine_io *io);
+void re_engine_close(re_engine *e);
+
+int re_engine_length(re_engine *e);  /* frames */
+double re_engine_fps(re_engine *e);
+int re_engine_width(re_engine *e);   /* the pictures' size (after preview_scale) */
+int re_engine_height(re_engine *e);
+
+/* Play at a speed (1 normal, 2 twice as fast, -1 backwards; 0 stops). Sound
+   only at 1. */
+void re_engine_play(re_engine *e, double speed);
+double re_engine_speed(re_engine *e);
+
+/* Go to a frame. Seeks asked for before the next poll replace each other:
+   only the last one is drawn. */
+void re_engine_seek(re_engine *e, int position);
+
+/* The frame on show (or about to be, after a seek). */
+int re_engine_position(re_engine *e);
+
+/* Do some work: at most one picture. Returns the centiseconds the caller may
+   wait before calling again (0: at once), or -1 when nothing will happen
+   until play or seek is called. */
+int re_engine_poll(re_engine *e);
+
+void re_engine_get_stats(re_engine *e, re_engine_stats *stats);
+
+#ifdef __cplusplus
+}
+#endif
+#endif
