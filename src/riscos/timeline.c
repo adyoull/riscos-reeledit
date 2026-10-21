@@ -37,7 +37,8 @@ static struct
 
 static int x_of(int frame)
 {
-    return LEFT + (int) (frame * T.scale);
+    double x = LEFT + frame * T.scale; /* (kept in range: an endless clip would wrap round) */
+    return x > 0x3FFFFFFF ? 0x3FFFFFFF : (int) x;
 }
 
 static int frame_of(int wx)

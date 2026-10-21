@@ -15,6 +15,7 @@
  */
 #include "engine.h"
 #include "project.h"
+#include "measure.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -65,8 +66,8 @@ static const char *name_of(re_project *p, int i)
 
 int main(int argc, char **argv)
 {
-    if (argc != 5) {
-        fprintf(stderr, "usage: project_test a.mp4 b.mp4 numbered.mp4 out.mlt\n");
+    if (argc != 6) {
+        fprintf(stderr, "usage: project_test a.mp4 b.mp4 numbered.mp4 out.mlt numbered.m2v\n");
         return 2;
     }
     const char *a = argv[1], *b = argv[2], *n = argv[3], *out = argv[4];
@@ -206,6 +207,37 @@ int main(int argc, char **argv)
     re_project_undo(p);
     re_project_split(p, 10);
     CHECK(!re_project_can_redo(p), "an edit after undo left something to redo");
+    re_project_close(p);
+
+    /* ---- a file that doesn't say how long it is (raw MPEG-2): measured */
+    const char *m2v = argv[5];
+    p = re_project_new();
+    CHECK(re_project_add(p, m2v, -1) == RE_ADD_MEASURE && re_project_items(p) == 0,
+          "a raw .m2v not sent to be measured (%s)", layout(p));
+    re_measure *ms = re_measure_open(m2v);
+    CHECK(ms != NULL, "can't measure %s", m2v);
+    int r = 0, steps = 0;
+    while (ms && (r = re_measure_step(ms, 10)) == 0)
+        steps++;
+    CHECK(r == 1 && steps >= 5, "measuring: %d after %d steps (of 10 packets)", r, steps);
+    int len = ms ? re_project_frames(p, re_measure_seconds(ms)) : 0;
+    CHECK(len == 75 && (!ms || re_measure_progress(ms) > 0.99), "measured %d frames (%.3f s), not 75", len,
+          ms ? re_measure_seconds(ms) : 0);
+    re_measure_close(ms);
+    CHECK(re_measure_open("no-such-file.m2v") == NULL, "measured a missing file");
+    CHECK(re_project_add_length(p, m2v, -1, len) == 0 && !strcmp(layout(p), "c75") && re_project_length(p) == 75,
+          "added measured: %s", layout(p));
+    e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    CHECK(e && re_engine_length(e) == 75, "engine: length %d", e ? re_engine_length(e) : -1);
+    re_engine_seek(e, 74);
+    re_engine_poll(e);
+    CHECK(shown_pos == 74 && abs(shown_y - (16 + 2 * 74)) <= 3, "the .m2v's last frame: %d, luma %d", shown_pos,
+          shown_y);
+    re_engine_close(e);
+    CHECK(re_project_save(p, out) == 0, "saving with the .m2v");
+    re_project_close(p);
+    p = re_project_open(out, 1);
+    CHECK(p && !strcmp(layout(p), "c75"), "the .m2v's length not kept: %s", p ? layout(p) : "(not opened)");
     re_project_close(p);
 
     printf("project_test: %s\n", fails ? "FAILED" : "passed");

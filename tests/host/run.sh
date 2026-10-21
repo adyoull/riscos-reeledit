@@ -34,6 +34,8 @@ mk -f lavfi -i color=c=gray:s=320x180:r=25:d=3 -vf "geq=lum='16+2*N':cb=128:cr=1
 mk -f lavfi -i color=c=gray:s=320x180:r=25:d=3 -f lavfi -i sine=frequency=440:sample_rate=44100:duration=3 \
   -vf "geq=lum='16+2*N':cb=128:cr=128" -c:v libx264 -qp 0 -bf 0 -g 25 -pix_fmt yuv420p -c:a aac -shortest \
   "$O/numbered-snd.mp4"
+# (raw MPEG-2 video: no container, so no length; MLT takes it to be endless)
+mk -i "$O/numbered.mp4" -c:v mpeg2video -q:v 2 -f mpeg2video "$O/numbered.m2v"
 
 # ---- the test programs, linked as Reel Edit will be: every module built in
 export PKG_CONFIG_PATH="$H/ffmpeg/lib/pkgconfig"
@@ -48,10 +50,10 @@ $CC $CFLAGS -I"$TOP/src" "$TOP/src/engine.c" "$HERE/engine_test.c" -o "$O/engine
   -Wl,--wrap=pthread_create $MLTLIBS $FFLIBS -lpthread -lm || bad=1
 $CC $CFLAGS "$HERE/convert_test.c" -o "$O/convert_test" -Wl,--wrap=sws_scale,--wrap=mlt_frame_clone,--wrap=mlt_frame_clone_image,--wrap=avcodec_receive_frame $MLTLIBS $FFLIBS -lpthread -lm || bad=1
 $CC $CFLAGS "$HERE/render_test.c" -o "$O/render_test" $MLTLIBS $FFLIBS -lpthread -lm || bad=1
-$CC $CFLAGS -DRE_TEST -I"$HERE/fake" -I"$TOP/src" "$TOP/src/engine.c" "$TOP/src/project.c" "$TOP/src/riscos/viewer.c" \
+$CC $CFLAGS -DRE_TEST -I"$HERE/fake" -I"$TOP/src" "$TOP/src/engine.c" "$TOP/src/project.c" "$TOP/src/measure.c" "$TOP/src/riscos/viewer.c" \
   "$TOP/src/riscos/timeline.c" "$TOP/src/riscos/savebox.c" "$TOP/src/riscos/info.c" "$TOP/src/riscos/display.c" \
   "$TOP/src/riscos/sound.c" "$HERE/editor_test.c" -o "$O/editor_test" $MLTLIBS $FFLIBS -lpthread -lm || bad=1
-$CC $CFLAGS -I"$TOP/src" "$TOP/src/engine.c" "$TOP/src/project.c" "$HERE/project_test.c" -o "$O/project_test" \
+$CC $CFLAGS -I"$TOP/src" "$TOP/src/engine.c" "$TOP/src/project.c" "$TOP/src/measure.c" "$HERE/project_test.c" -o "$O/project_test" \
   $MLTLIBS $FFLIBS -lpthread -lm || bad=1
 $CC -shared -fPIC "$HERE/count_threads.c" -o "$O/count_threads.so" -ldl || bad=1
 
@@ -86,9 +88,9 @@ echo "== render_test"
 echo "== engine_test"
 "$O/engine_test" project.mlt || bad=1
 echo "== project_test"
-"$O/project_test" a.mp4 b.mp4 numbered.mp4 project_test.mlt 2>&1 | grep -v "^\[" || bad=1
+"$O/project_test" a.mp4 b.mp4 numbered.mp4 project_test.mlt numbered.m2v 2>&1 | grep -v "^\[" || bad=1
 echo "== editor_test"
-"$O/editor_test" numbered-snd.mp4 numbered.mp4 2>&1 | grep -v "^\[" || bad=1
+"$O/editor_test" numbered-snd.mp4 numbered.mp4 numbered.m2v 2>&1 | grep -v "^\[" || bad=1
 for m in normal refuse late off lazy max exit; do
   echo "== prefer_test $m"
   "$O/prefer_test" $m numbered.mp4 2>&1 | grep -v "^\[" || bad=1

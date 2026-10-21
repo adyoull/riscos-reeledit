@@ -1,4 +1,4 @@
-Reel Edit 0.2 (test 3)
+Reel Edit 0.2 (test 4)
 ======================
 
 Reel Edit is a video editor for RISC OS that is being written, on the MLT
@@ -25,6 +25,14 @@ Adding clips: drag video files from a directory display to the Timeline
 dropped nearer its end), or to the Viewer or the icon bar icon (at the
 end). An MLT project (from Reel Edit, Shotcut, Kdenlive or melt) dropped
 is opened.
+
+Files that don't say how long they are (raw MPEG-2 video, .m2v, and raw
+H.264) are read through first to find their length: "Measuring" and how
+far it's got show beside the transport, the desktop going on meanwhile,
+and the clip goes in when it's done (files dropped meanwhile follow it).
+Escape stops it. An .m2v file holds only the pictures: its sound, if it
+has any, is in a file of its own (.mp2, .ac3, .wav), which will go on an
+audio track when Reel Edit has them.
 
 The Timeline: click the ruler to move the playhead (the Viewer shows that
 frame), or drag along it, or drag the playhead itself, to scrub; its

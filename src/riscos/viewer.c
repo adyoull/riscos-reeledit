@@ -26,6 +26,7 @@
  * Part of riscos-reeledit. GPL version 2 or later.
  */
 #include "app.h"
+#include "../measure.h"
 #include "display.h"
 #include "sound.h"
 
@@ -110,6 +111,14 @@ static struct
     int log_nulls;
     unsigned changes;     /* the project's, last seen */
     FILE *log;
+    /* A clip that doesn't say how long it is, being measured (null events),
+       and the files dropped meanwhile, to be loaded after it */
+    re_measure *ms;
+    char ms_path[256], ms_name[512];
+    int ms_frame;
+    unsigned ms_cs;
+    struct { char path[256]; int filetype, frame; } queue[16];
+    int queued;
 } V;
 
 /* (&88 and &89: the left and right arrows of RISC OS's character set) */
@@ -413,7 +422,9 @@ static void update_controls(int force)
     }
     app_timecode(pos, sizeof(pos), p);
     app_timecode(len, sizeof(len), n);
-    if (sp != 0 && sp != 1)
+    if (V.ms)
+        snprintf(text, sizeof(text), "Measuring: %d%%", (int) (re_measure_progress(V.ms) * 100));
+    else if (sp != 0 && sp != 1)
         snprintf(text, sizeof(text), "%s / %s %dx", pos, len, (int) sp);
     else
         snprintf(text, sizeof(text), "%s / %s", pos, len);
@@ -716,6 +727,8 @@ static void open_editor(void)
 }
 
 /* Closes the project and its windows. 0 if the user wants to keep it. */
+static void measure_cancel(void);
+
 static int close_editor(void)
 {
     if (A.proj && re_project_modified(A.proj)) {
@@ -723,6 +736,7 @@ static int close_editor(void)
         if (r != 3)
             return 0;
     }
+    measure_cancel();
     engine_close();
     if (V.win) {
         _kernel_swi_regs r;
@@ -746,9 +760,80 @@ static int is_project(const char *path, int filetype)
     return filetype == FILETYPE_MLT || (n > 4 && (!strcmp(path + n - 4, "/mlt") || !strcmp(path + n - 4, ".mlt")));
 }
 
+static void measure_cancel(void)
+{
+    if (V.ms)
+        app_log("measuring %s: cancelled", V.ms_path);
+    re_measure_close(V.ms);
+    V.ms = NULL;
+    V.queued = 0;
+    update_controls(1);
+}
+
+/* A clip in the project: selected, shown */
+static void added(int at)
+{
+    A.sel = at;
+    int first = !A.e;
+    app_edited();
+    if (first)
+        open_editor(); /* (the Viewer the project's shape now) */
+    re_item it;
+    re_project_item(A.proj, at, &it);
+    app_seek(it.start);
+}
+
+/* Measuring: a few packets each null event, for up to 4 cs; then the clip
+   added, and what was dropped meanwhile loaded */
+static void measure_tick(void)
+{
+    unsigned t0 = ro_now_cs();
+    int r, n = 0;
+    do
+        r = re_measure_step(V.ms, 8);
+    while (r == 0 && ++n < 64 && ro_now_cs() - t0 < 4);
+    if (ro_now_cs() - V.ms_cs >= 25 || r != 0) {
+        V.ms_cs = ro_now_cs();
+        update_controls(0);
+    }
+    if (r == 0)
+        return;
+    double sec = re_measure_seconds(V.ms);
+    re_measure_close(V.ms);
+    V.ms = NULL;
+    int frames = A.proj ? re_project_frames(A.proj, sec) : 0;
+    app_log("measured %s: %.3f s, %d frames", V.ms_path, sec, frames);
+    int at = r > 0 && frames > 0 ? re_project_add_length(A.proj, V.ms_name, V.ms_frame, frames) : -1;
+    if (at < 0) {
+        char t[300];
+        snprintf(t, sizeof(t), "Reel Edit couldn't find how long %s is.", leaf(V.ms_path));
+        app_report(t);
+        update_controls(1);
+    } else {
+        added(at);
+    }
+    while (V.queued > 0 && !V.ms) { /* (each may start another measuring) */
+        char path[256];
+        int ft = V.queue[0].filetype, fr = V.queue[0].frame;
+        snprintf(path, sizeof(path), "%s", V.queue[0].path);
+        V.queued--;
+        memmove(&V.queue[0], &V.queue[1], sizeof(V.queue[0]) * (size_t) V.queued);
+        app_load(path, ft, fr);
+    }
+}
+
 void app_load(const char *path, int filetype, int frame)
 {
     char unix_name[512];
+    if (V.ms) { /* (after the clip being measured) */
+        if (V.queued < (int) (sizeof(V.queue) / sizeof(V.queue[0]))) {
+            snprintf(V.queue[V.queued].path, sizeof(V.queue[0].path), "%s", path);
+            V.queue[V.queued].filetype = filetype;
+            V.queue[V.queued].frame = frame;
+            V.queued++;
+        }
+        return;
+    }
     const char *name = app_mlt_name(path, unix_name, sizeof(unix_name));
     if (is_project(path, filetype)) {
         if (A.proj && !close_editor())
@@ -773,20 +858,25 @@ void app_load(const char *path, int filetype, int frame)
         return;
     app_log("adding %s (%s) at %d", path, name, frame);
     int at = re_project_add(A.proj, name, frame);
+    if (at == RE_ADD_MEASURE) { /* (raw MPEG-2 and the like: read through for the length) */
+        V.ms = re_measure_open(name);
+        if (V.ms) {
+            app_log("measuring %s", path);
+            snprintf(V.ms_path, sizeof(V.ms_path), "%s", path);
+            snprintf(V.ms_name, sizeof(V.ms_name), "%s", name);
+            V.ms_frame = frame;
+            V.ms_cs = ro_now_cs();
+            update_controls(1);
+            return;
+        }
+    }
     if (at < 0) {
         char t[300];
         snprintf(t, sizeof(t), "Reel Edit can't open %s: is it a video?", leaf(path));
         app_report(t);
         return;
     }
-    A.sel = at;
-    int first = !A.e;
-    app_edited();
-    if (first)
-        open_editor(); /* (the Viewer the project's shape now) */
-    re_item it;
-    re_project_item(A.proj, at, &it);
-    app_seek(it.start);
+    added(at);
 }
 
 /* ---- editing ------------------------------------------------------------------------------------ */
@@ -1037,7 +1127,12 @@ int app_key(int k)
     double sp = A.e ? re_engine_speed(A.e) : 0;
     switch (k) {
     case ' ': app_set_speed(sp != 0 ? 0 : 1); return 1;
-    case 'k': case 'K': case 27: app_set_speed(0); return 1;
+    case 27: /* Escape: stop (and stop measuring) */
+        if (V.ms)
+            measure_cancel();
+        app_set_speed(0);
+        return 1;
+    case 'k': case 'K': app_set_speed(0); return 1;
     case 'l': case 'L':
         /* (playing already at 1 counts as the first press) */
         V.shuttle = sp > 0 ? (V.shuttle < 1 ? 2 : V.shuttle < 3 ? V.shuttle + 1 : 3) : 1;
@@ -1368,6 +1463,7 @@ int re_test_open(void) { return A.e != NULL; }
 re_project *re_test_project(void) { return A.proj; }
 int re_test_selected(void) { return A.sel; }
 int re_test_snap(void) { return A.snap; }
+int re_test_measuring(void) { return V.ms != NULL; }
 int re_test_busy(void) { return A.e && re_engine_busy(A.e); }
 const char *re_test_title(void) { return V.title; }
 #endif
@@ -1400,7 +1496,7 @@ int reeledit_main(int argc, char **argv)
            playing at the next picture's time; else none at all. */
         if (A.proj && re_project_changes(A.proj) != V.changes)
             app_edited();
-        int ev, busy = (A.e && re_engine_busy(A.e)) || tl_scrubbing(); /* (scrubbing: the pointer followed) */
+        int ev, busy = (A.e && re_engine_busy(A.e)) || tl_scrubbing() || V.ms; /* (scrubbing: the pointer followed) */
         unsigned before = ro_now_cs();
         r.r[0] = busy ? 0 : 1;
         r.r[1] = (intptr_t) block;
@@ -1418,6 +1514,8 @@ int reeledit_main(int argc, char **argv)
         case 0:
             if (tl_scrubbing())
                 tl_scrub_tick();
+            if (V.ms)
+                measure_tick();
             if (A.e)
                 tick();
             break;

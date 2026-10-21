@@ -53,6 +53,7 @@ int re_test_open(void);
 re_project *re_test_project(void);
 int re_test_selected(void);
 int re_test_snap(void);
+int re_test_measuring(void);
 int re_test_busy(void);
 const char *re_test_title(void);
 char *re_test_savebox_name(void);
@@ -69,7 +70,7 @@ static int phase, phase_cs;
         }                                                                                                          \
     } while (0)
 
-static const char *clip, *clip2;
+static const char *clip, *clip2, *clip3;
 static char typed_path[300], dragged_path[300];
 
 /* ---- the fake machine ------------------------------------------------------- */
@@ -877,6 +878,58 @@ static int script(int *b, int mask)
     case 91:
         ctrl_key = 0;
         CHECK(W[1].extent_w == mark, "Ctrl+wheel didn't zoom out again (extent %d, was %d)", W[1].extent_w, mark);
+        next(92);
+        data_load(b, VIEWER, W[0].box[0] + 50, 0xBF8, clip3); /* raw MPEG-2: no length */
+        return 17;
+    /* ---- a clip that doesn't say how long it is: measured, then added ---- */
+    case 92:
+        CHECK(re_test_measuring() && !strcmp(layout(), "c30 c75"), "the .m2v: measuring %d, %s", re_test_measuring(),
+              layout());
+        next(93);
+        data_load(b, VIEWER, W[0].box[0] + 50, 0xFFD, clip2); /* (dropped meanwhile: after it) */
+        return 17;
+    case 93:
+        if (re_test_measuring()) {
+            if (!nulls)
+                fail_quit("no null events while measuring");
+            if (fake_cs - phase_cs > 300)
+                fail_quit("still measuring after 3 s");
+            return 0;
+        }
+        if (nulls)
+            return 0;
+        CHECK(!strcmp(layout(), "c30 c75 c75 c75"), "the .m2v measured (75 frames) and the clip dropped meanwhile: %s",
+              layout());
+        {
+            re_item i2, i3;
+            re_project *pj = re_test_project();
+            CHECK(!re_project_item(pj, 2, &i2) && !re_project_item(pj, 3, &i3) && strstr(i2.name, ".m2v") &&
+                      strstr(i3.name, ".mp4"),
+                  "the clip dropped while measuring didn't follow the .m2v");
+        }
+        next(94);
+        return key(b, 0x188);
+    case 94:
+        if (nulls)
+            return 0;
+        next(95);
+        return key(b, 0x188);
+    case 95:
+        if (nulls)
+            return 0;
+        CHECK(!strcmp(layout(), "c30 c75"), "the two undone: %s", layout());
+        next(96);
+        data_load(b, VIEWER, W[0].box[0] + 50, 0xBF8, clip3);
+        return 17;
+    case 96:
+        CHECK(re_test_measuring(), "not measuring the .m2v again");
+        next(97);
+        return key(b, 27); /* Escape: measuring stopped */
+    case 97:
+        if (nulls && fake_cs - phase_cs < 20)
+            return 0;
+        CHECK(!re_test_measuring() && !strcmp(layout(), "c30 c75"), "Escape while measuring: %d, %s",
+              re_test_measuring(), layout());
         next(24);
         b[0] = W[0].box[0] + 50; b[1] = W[0].box[3] - 50; b[2] = 2; b[3] = VIEWER; b[4] = -1;
         return 6; /* Menu */
@@ -1089,12 +1142,13 @@ static int script(int *b, int mask)
 int main(int argc, char **argv)
 {
     char cwd[256];
-    if (argc != 3) {
-        fprintf(stderr, "usage: editor_test numbered-snd.mp4 numbered.mp4\n");
+    if (argc != 4) {
+        fprintf(stderr, "usage: editor_test numbered-snd.mp4 numbered.mp4 numbered.m2v\n");
         return 2;
     }
     clip = argv[1];
     clip2 = argv[2];
+    clip3 = argv[3];
     if (!getcwd(cwd, sizeof(cwd)))
         return 2;
     snprintf(typed_path, sizeof(typed_path), "%s/typed.mlt", cwd);

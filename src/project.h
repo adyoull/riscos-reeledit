@@ -51,6 +51,14 @@ int re_project_item_at(re_project *p, int frame);
    that item's end, after it). The item index it became, or -1 if the file
    can't be opened. */
 int re_project_add(re_project *p, const char *file, int frame);
+/* re_project_add's answer for a file that doesn't say how long it is (raw
+   MPEG-2 or H.264 video): nothing added; measure it (measure.h) and add it
+   with its length */
+#define RE_ADD_MEASURE (-2)
+/* A clip added, its length (frames of the project) given (0: the file's) */
+int re_project_add_length(re_project *p, const char *file, int frame, int length);
+/* Seconds as frames of the project */
+int re_project_frames(re_project *p, double seconds);
 /* Splits the item at a frame in two (nothing at either end of an item).
    1 split, 0 not. */
 int re_project_split(re_project *p, int frame);

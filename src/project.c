@@ -10,6 +10,8 @@
 #include "project.h"
 #include "engine.h"
 
+#include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -400,9 +402,30 @@ int re_project_item_at(re_project *p, int frame)
 
 int re_project_add(re_project *p, const char *file, int frame)
 {
+    return re_project_add_length(p, file, frame, 0);
+}
+
+int re_project_frames(re_project *p, double seconds)
+{
+    return (int) lrint(seconds * mlt_profile_fps(p->profile));
+}
+
+int re_project_add_length(re_project *p, const char *file, int frame, int length)
+{
     mlt_producer clip = open_clip(p, file);
     if (!clip)
         return -1;
+    mlt_properties cp = MLT_PRODUCER_PROPERTIES(clip);
+    if (length > 0) {
+        /* (saved with the clip: opened again, MLT takes these) */
+        mlt_properties_set_position(cp, "length", length);
+        mlt_properties_set_position(cp, "out", length - 1);
+        mlt_properties_set(cp, "eof", "pause");
+        mlt_producer_set_in_and_out(clip, 0, length - 1);
+    } else if (mlt_producer_get_length(clip) >= INT_MAX / 2) {
+        mlt_producer_close(clip); /* (endless to MLT: its length to be found) */
+        return RE_ADD_MEASURE;
+    }
     checkpoint(p);
     if (make_tracks(p) < 0) {
         no_edit(p);
