@@ -58,6 +58,30 @@ int re_project_split(re_project *p, int frame);
    A gap removed is always closed up. 1 done, 0 not. */
 int re_project_remove(re_project *p, int item, int ripple);
 
+/* Ripple trims (Premiere's Q and W): the clip at a frame trimmed so it
+   starts there (end 0: the frames before it go) or ends just before it
+   (end 1: it and those after go); what follows moves up. 1 done, 0 not. */
+int re_project_trim(re_project *p, int frame, int end);
+/* The cut (an item's start, or the end) before (dir -1) or after (dir 1) a
+   frame; -1 if none. */
+int re_project_cut(re_project *p, int frame, int dir);
+
+/* Undo and redo (up to 100 edits): the project as it was before the last
+   edit, and back. 1 done, 0 nothing to do. The producer changes: an
+   engine playing it must be opened again. */
+int re_project_undo(re_project *p);
+int re_project_redo(re_project *p);
+int re_project_can_undo(re_project *p);
+int re_project_can_redo(re_project *p);
+
+/* What's known of an item's file, for an information window: lines of
+   "Label\tValue\n" (File, Length, Video: codec, size, frame rate, colours,
+   the decoder in use; Sound: codec, rate, channels). Its length (as
+   snprintf), or -1 for a gap or no item. */
+int re_project_item_info(re_project *p, int item, char *buf, int size);
+/* The project's: its size, frame rate, length, clips. */
+int re_project_info(re_project *p, char *buf, int size);
+
 /* Saves as MLT XML. 0, or -1. Saved: not modified. */
 int re_project_save(re_project *p, const char *file);
 

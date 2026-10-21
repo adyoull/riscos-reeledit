@@ -1,12 +1,12 @@
-Reel Edit 0.2 (test 1)
+Reel Edit 0.2 (test 2)
 ======================
 
 Reel Edit is a video editor for RISC OS that is being written, on the MLT
 multimedia framework (the engine of Shotcut and Kdenlive), with the
 Raspberry Pi's video hardware through riscos-reelhwaccel. This test build
 has the Viewer and a first Timeline: one video track (V1), with cutting,
-deleting and saving. Dissolves, trimming, more tracks, titles and export
-come next.
+trimming, deleting, undo and saving. Dissolves, dragging clips, more
+tracks, titles and export come next.
 
 It needs RISC OS 5 on ARMv7 with VFP (Raspberry Pi 2, 3, 4), with
 SharedUnixLibrary and ARMEABISupport (!Run checks). H.264 is decoded on
@@ -27,26 +27,45 @@ end). An MLT project (from Reel Edit, Shotcut, Kdenlive or melt) dropped
 is opened.
 
 The Timeline: click the ruler to move the playhead (the Viewer shows that
-frame); click a clip to select it (Adjust: select or not).
+frame), or drag along it, or drag the playhead itself, to scrub; its
+timecode is shown beside it. Click a clip to select it (Adjust: select or
+not); click an empty part to clear the selection. With snapping on (N, or
+the Snap button), the playhead snaps to the cuts near it. The scroll
+wheel scrolls the Timeline; Ctrl and the wheel zoom it, about the
+pointer. The Timeline is attached under the Viewer: move or resize either
+and the other follows (View > Attach the Timeline turns that off, and on
+again).
 
 The toolbar: Split (at the playhead), Delete (the selected clip; the
-clips after it close up; Adjust: leave a gap), Zoom - and Zoom + (the
-Timeline), Save.
+clips after it close up; Adjust: leave a gap), Undo, Redo, Snap; then
+"Timeline zoom" - + Fit (these zoom the Timeline, never the picture), and
+Save. Interactive help (!Help) says what each does.
 
 The menu (Menu over the Viewer or the Timeline):
   File  New, Save (F3), Save as...
-  Edit  Split, Delete, Leave gap, Clear selection
+  Edit  Undo, Redo, Split, Trim the start, Trim the end, Delete,
+        Leave gap, Clear selection
   Play  Play/Stop, Start, End
-  View  Zoom in, Zoom out, Whole (the whole project in the Timeline)
+  View  Zoom the Timeline in, out, the whole project; Attach the
+        Timeline; Snapping
+  Video information...  the selected clip (or the one at the playhead):
+        its file, length, codecs, size, frame rate, sound, and whether
+        the VideoCore is decoding it; and the project's size and length
 
 Keys (with the Viewer or the Timeline in front, clicked on):
   Space        play / stop
   J  K  L      play backwards, stop, play forwards; J or L again: faster (x2, x4)
   Left Right   a frame back, forwards (Shift: a second)
+  Up Down      the cut before, after
   Home  Copy   the start, the end
   S            split at the playhead
+  Q  W         trim the clip at the playhead: its start to it, its end to
+               it (the clips after close up)
   Delete       delete the selected clip (Shift-Delete: leave a gap)
+  F8  F9       undo, redo (100 steps)
+  N            snapping on / off
   +  -         zoom the Timeline in, out
+  Shift-Z  \   the whole project in the Timeline
   Ctrl-Z       clear the selection
   F3           save
   Escape       stop

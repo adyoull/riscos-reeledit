@@ -49,8 +49,8 @@ $CC $CFLAGS -I"$TOP/src" "$TOP/src/engine.c" "$HERE/engine_test.c" -o "$O/engine
 $CC $CFLAGS "$HERE/convert_test.c" -o "$O/convert_test" -Wl,--wrap=sws_scale,--wrap=mlt_frame_clone,--wrap=mlt_frame_clone_image,--wrap=avcodec_receive_frame $MLTLIBS $FFLIBS -lpthread -lm || bad=1
 $CC $CFLAGS "$HERE/render_test.c" -o "$O/render_test" $MLTLIBS $FFLIBS -lpthread -lm || bad=1
 $CC $CFLAGS -DRE_TEST -I"$HERE/fake" -I"$TOP/src" "$TOP/src/engine.c" "$TOP/src/project.c" "$TOP/src/riscos/viewer.c" \
-  "$TOP/src/riscos/timeline.c" "$TOP/src/riscos/savebox.c" "$TOP/src/riscos/display.c" "$TOP/src/riscos/sound.c" \
-  "$HERE/editor_test.c" -o "$O/editor_test" $MLTLIBS $FFLIBS -lpthread -lm || bad=1
+  "$TOP/src/riscos/timeline.c" "$TOP/src/riscos/savebox.c" "$TOP/src/riscos/info.c" "$TOP/src/riscos/display.c" \
+  "$TOP/src/riscos/sound.c" "$HERE/editor_test.c" -o "$O/editor_test" $MLTLIBS $FFLIBS -lpthread -lm || bad=1
 $CC $CFLAGS -I"$TOP/src" "$TOP/src/engine.c" "$TOP/src/project.c" "$HERE/project_test.c" -o "$O/project_test" \
   $MLTLIBS $FFLIBS -lpthread -lm || bad=1
 $CC -shared -fPIC "$HERE/count_threads.c" -o "$O/count_threads.so" -ldl || bad=1

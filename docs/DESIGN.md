@@ -76,6 +76,65 @@ they disagree.
 
   No Alt shortcuts (the Style Guide reserves Alt).
 
+## Working fast: the editing UX
+
+Reel Edit should feel like the editors people already know (Final Cut Pro,
+Premiere Pro, DaVinci Resolve, Shotcut), be quick to drive from the
+keyboard, and still be a RISC OS program. Where those editors agree, Reel
+Edit does the same; where RISC OS's Style Guide says otherwise (^Z, F8/F9,
+the save box, Menu for menus), the Style Guide wins.
+
+**Principles**
+
+1. **The playhead is always where the action is.** Split, ripple trims,
+   inserts and the Viewer all work at the playhead. Moving it must be easy
+   everywhere: click or drag the ruler, grab the playhead line itself, click
+   empty track space, Up/Down to the previous/next cut, Left/Right a frame,
+   J/K/L.
+2. **Every action three ways**: a key (shown in the menu beside it), the
+   menu, and for the common ones a toolbar button. Interactive help
+   (`Message_HelpRequest`, shown by !Help) on every button and window part,
+   which is RISC OS's tooltip.
+3. **Direct manipulation on the Timeline**: drag clips to move them (an
+   insertion line shows where they'll land), drag a clip's edge to trim it
+   (the Viewer shows the frame at the edge), drop files where they should go.
+   The pointer shape says what a drag will do (move, trim, scrub).
+4. **Snapping** (N, toolbar toggle, Adjust-drag to override): the playhead,
+   clip edges and drops snap to cuts and to the playhead.
+5. **Magnetic V1** (Final Cut): deleting or trimming on V1 closes the gap;
+   Shift-Delete lifts and leaves one.
+6. **Undo everything** (F8, redo F9; many levels), so trying things is safe.
+7. **Clear selection display**: a selected clip keeps its colour with a bright
+   outline (filling it orange hid its name and its neighbours, Pi test).
+8. **Readable time**: the ruler's marks never overlap; the playhead's
+   timecode shown on the ruler beside it; clips show name and thumbnails (at
+   their start, then along them when there's room), audio its waveform.
+9. **Zoom that keeps your place**: + and - zoom about the playhead,
+   Shift-Z (and `\`) fits the project, Ctrl with the scroll wheel zooms about the
+   pointer, the wheel alone scrolls.
+10. **Never lose work**: autosave to Choices every few minutes while changed;
+   after a crash, offered back at the next start.
+
+**Keys** (beyond the table above; the same in the Viewer and the Timeline)
+
+| Key | Does | Like |
+|---|---|---|
+| Up, Down | Previous / next cut (edit point) | Premiere, Final Cut, Resolve, Shotcut |
+| Shift-Left, Shift-Right | One second back / forward | |
+| Q, W | Ripple trim the clip's start / end to the playhead | Premiere |
+| N | Snapping on / off | Final Cut, Resolve |
+| Shift-Z, `\` | Zoom the Timeline to the whole project | Final Cut, Premiere |
+| +, - | Zoom the Timeline in / out about the playhead | |
+| I, O; Shift-I, Shift-O | Mark in / out; go to them | everywhere |
+| Return | Play from the in mark to the out mark | |
+
+**Order of work** (each a test build): undo/redo, Up/Down, Q/W, playhead
+grab, selection outline, snapping, interactive help, wheel zoom (0.2, done
+in 0.2 test 2); trimming by dragging edges with the Viewer showing the edge
+frame, moving clips by dragging, dissolves by overlap (0.3); thumbnails and waveforms, the
+Clips window, autosave (0.4); then audio tracks, V2 and overlays, titles,
+export.
+
 ## Keeping the desktop running
 
 RISC OS multitasks co-operatively: while Reel Edit holds the CPU, nothing

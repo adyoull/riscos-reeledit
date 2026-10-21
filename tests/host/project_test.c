@@ -170,6 +170,44 @@ int main(int argc, char **argv)
           p ? layout(p) : "none");
     re_project_close(p);
 
+    /* ripple trims, cuts, undo and redo */
+    p = re_project_new();
+    re_project_add(p, a, -1);
+    re_project_add(p, b, -1);
+    re_project_split(p, 30);
+    CHECK(!strcmp(layout(p), "c30 c45 c75"), "undo set-up: %s", layout(p));
+    CHECK(re_project_trim(p, 40, 0) == 1 && !strcmp(layout(p), "c30 c35 c75"), "Q at 40: %s", layout(p));
+    re_project_item(p, 1, &it);
+    CHECK(it.in == 40, "Q: the piece starts at %d in the clip, not 40", it.in);
+    CHECK(re_project_trim(p, 100, 1) == 1 && !strcmp(layout(p), "c30 c35 c35"), "W at 100: %s", layout(p));
+    CHECK(re_project_trim(p, 30, 0) == 0 && re_project_trim(p, 500, 1) == 0, "a trim at a cut or past the end");
+    CHECK(re_project_cut(p, 50, -1) == 30 && re_project_cut(p, 50, 1) == 65 && re_project_cut(p, 65, 1) == 100
+              && re_project_cut(p, 0, -1) == -1 && re_project_cut(p, 100, 1) == -1,
+          "cuts: %d %d %d", re_project_cut(p, 50, -1), re_project_cut(p, 50, 1), re_project_cut(p, 65, 1));
+    CHECK(re_project_save(p, out) == 0 && !re_project_modified(p), "saved");
+    CHECK(re_project_undo(p) && !strcmp(layout(p), "c30 c35 c75") && re_project_modified(p), "undo W: %s",
+          layout(p));
+    CHECK(re_project_redo(p) && !strcmp(layout(p), "c30 c35 c35") && !re_project_modified(p),
+          "redo W: %s (modified %d)", layout(p), re_project_modified(p));
+    CHECK(re_project_undo(p) && re_project_undo(p) && re_project_undo(p) && !strcmp(layout(p), "c75 c75"),
+          "undo three: %s", layout(p));
+    e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    re_engine_seek(e, 80);
+    re_engine_poll(e);
+    CHECK(shown_y < 50, "after undoing, frame 80 is b's (blue), luma %d", shown_y);
+    re_engine_close(e);
+    CHECK(re_project_undo(p) && re_project_undo(p) && re_project_items(p) == 0 && !re_project_producer(p),
+          "undone to empty: %s", layout(p));
+    CHECK(!re_project_undo(p) && !re_project_can_undo(p) && re_project_can_redo(p), "undo past the start");
+    for (int i = 0; i < 5; i++)
+        re_project_redo(p);
+    CHECK(!strcmp(layout(p), "c30 c35 c35") && !re_project_modified(p) && !re_project_can_redo(p),
+          "redone all: %s", layout(p));
+    re_project_undo(p);
+    re_project_split(p, 10);
+    CHECK(!re_project_can_redo(p), "an edit after undo left something to redo");
+    re_project_close(p);
+
     printf("project_test: %s\n", fails ? "FAILED" : "passed");
     return fails != 0;
 }

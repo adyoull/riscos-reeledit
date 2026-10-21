@@ -52,6 +52,8 @@ double re_test_speed(void);
 int re_test_open(void);
 re_project *re_test_project(void);
 int re_test_selected(void);
+int re_test_snap(void);
+int re_test_busy(void);
 const char *re_test_title(void);
 char *re_test_savebox_name(void);
 
@@ -74,7 +76,8 @@ static char typed_path[300], dragged_path[300];
 
 #define VIEWER 0x1000 /* the windows, in the order the program makes them */
 #define TL     0x1100
-#define SAVEB  0x1200
+#define INFO   0x1200 /* (made before the save box in this script) */
+#define SAVEB  0x1300
 #define COVER  0x2000
 #define FILER  0x3000 /* a directory display */
 #define TASK   0x4321
@@ -89,21 +92,22 @@ typedef struct
 {
     int open, box[4], scroll_x, behind, redraw, extent_w;
 } fwin;
-static fwin W[3]; /* VIEWER, TL, SAVEB */
+static fwin W[4]; /* VIEWER, TL, INFO, SAVEB */
 static int windows_made;
 static fwin *win(int h)
 {
     int i = (h - VIEWER) / 0x100;
-    return h >= VIEWER && i < 3 && (h - VIEWER) % 0x100 == 0 ? &W[i] : NULL;
+    return h >= VIEWER && i < 4 && (h - VIEWER) % 0x100 == 0 ? &W[i] : NULL;
 }
 
 static unsigned fake_cs = 1000;
 static unsigned slept;
 static int polls, idle_polls, null_events, last_mask;
-static int covered, shift_key;
+static int covered, shift_key, ctrl_key;
+static char help_text[256];
 static int plots, reports, questions, answer = 3, closedown, acks, menus, savebox_opens, drags;
 static int filetypes_set, dataloads_sent, plots_tl, prequit_acks, key_sent;
-static char last_text[128], filetype_path[300];
+static char last_text[128], filetype_path[300], all_text[16384];
 static unsigned colours_seen; /* bit 0: the selected clip's orange set */
 static int ptr[5];            /* Wimp_GetPointerInfo */
 static int datasave_ref, ref_next = 900;
@@ -207,7 +211,7 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
         if (r->r[0] == 176)
             r->r[1] = (fake_cs / 2) & 0xFF;
         else if (r->r[0] == 121)
-            r->r[1] = shift_key ? 0xFF : 0;
+            r->r[1] = ((r->r[1] & 0x7F) == 0 ? shift_key : (r->r[1] & 0x7F) == 1 ? ctrl_key : 0) ? 0xFF : 0;
         break;
     case 0x08: /* OS_File 18: a filetype set */
         if (r->r[0] == 18) {
@@ -265,8 +269,8 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
     case 0x57288: r->r[0] = ssb_added; r->r[1] = ssb_heard(); break;
     case 0x400C0: r->r[0] = 380; r->r[1] = TASK; break;
     case 0x400C1:                                                   /* CreateWindow */
-        if (windows_made >= 3)
-            fail_quit("more than three windows made");
+        if (windows_made >= 4)
+            fail_quit("more than four windows made");
         r->r[0] = VIEWER + 0x100 * windows_made++;
         break;
     case 0x400C2: r->r[0] = BAR_ICON; break;
@@ -295,8 +299,8 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
         last_mask = (int) r->r[0];
         if (++polls > 40000)
             fail_quit("too many polls: the script is stuck");
-        for (int i = 0; i < 2; i++)
-            if (W[i].redraw && W[i].open) {
+        for (int i = 0; i < 4; i++)
+            if (W[i].redraw && W[i].open && i != 3) { /* (the save box is drawn by the Wimp) */
                 W[i].redraw = 0;
                 b[0] = VIEWER + 0x100 * i;
                 r->r[0] = 1;
@@ -333,9 +337,9 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
     case 0x400D4:                                                   /* CreateMenu */
         if (r->r[1] == SAVEB) {
             savebox_opens++;
-            W[2].open = 1;
+            W[3].open = 1;
         } else if (r->r[1] == -1) {
-            W[2].open = 0;
+            W[3].open = 0;
         } else {
             menus++;
         }
@@ -349,9 +353,22 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
     }
     case 0x400CD: case 0x400D2: case 0x400DC: case 0x400FC: break;
     case 0x400F9:                                                   /* Wimp_TextOp: 2 plots */
-        if ((r->r[0] & 0xFF) == 2)
+        if ((r->r[0] & 0xFF) == 2) {
             snprintf(last_text, sizeof(last_text), "%s", (const char *) r->r[1]);
+            if (strlen(all_text) + strlen(last_text) + 2 < sizeof(all_text)) {
+                strcat(all_text, last_text);
+                strcat(all_text, "|");
+            }
+        }
         break;
+    case 0x400E0: {                                                 /* GetWindowOutline: a 40 title bar */
+        int *b = (int *) r->r[1];
+        fwin *w = win(b[0]);
+        if (w) {
+            b[1] = w->box[0]; b[2] = w->box[1] - (b[0] == TL ? 40 : 0); b[3] = w->box[2]; b[4] = w->box[3] + 40;
+        }
+        break;
+    }
     case 0x400DD: closedown++; break;
     case 0x400DF:                                                   /* ReportError */
         if (r->r[5]) {
@@ -374,7 +391,9 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
             break;
         }
         b[2] = ++ref_next;
-        if (b[4] == 4)
+        if (b[4] == 0x503)
+            snprintf(help_text, sizeof(help_text), "%s", (char *) &b[5]);
+        else if (b[4] == 4)
             acks++;
         else if (b[4] == 1) {
             datasave_ref = b[2];
@@ -474,7 +493,7 @@ static void next(int p)
 }
 
 static char saved_layout[256];
-static int plots_mark, ovd_mark, ssb_mark, closes_mark, pos_mark, pos_min = 1000, mark;
+static int plots_mark, ovd_mark, ssb_mark, closes_mark, pos_mark, pos_min = 1000, mark, scroll_mark;
 
 static int script(int *b, int mask)
 {
@@ -495,7 +514,18 @@ static int script(int *b, int mask)
         CHECK(!re_test_open(), "an engine with nothing to play");
         CHECK(!strcmp(re_test_title(), "<Untitled>"), "title \"%s\"", re_test_title());
         CHECK(!nulls, "null events with nothing to play");
-        CHECK(W[1].box[3] <= W[0].box[1], "the Timeline isn't under the Viewer");
+        CHECK(W[1].box[3] + 40 == W[0].box[1] && W[1].box[0] == W[0].box[0] && W[1].box[2] == W[0].box[2],
+              "the Timeline isn't attached under the Viewer (%d,%d,%d,%d under %d,%d,%d,%d)", W[1].box[0], W[1].box[1],
+              W[1].box[2], W[1].box[3], W[0].box[0], W[0].box[1], W[0].box[2], W[0].box[3]);
+        next(60);
+        /* the user drags the Timeline: the Viewer comes with it */
+        b[0] = TL; b[1] = W[1].box[0] + 100; b[2] = W[1].box[1] - 50; b[3] = W[1].box[2] + 100; b[4] = W[1].box[3] - 50;
+        b[5] = 0; b[6] = 0; b[7] = -1;
+        mark = W[0].box[0];
+        return 2;
+    case 60:
+        CHECK(W[0].box[0] == mark + 100 && W[1].box[3] + 40 == W[0].box[1] && W[1].box[0] == W[0].box[0],
+              "dragging the Timeline didn't bring the Viewer (Viewer x %d, was %d)", W[0].box[0], mark);
         next(3);
         data_load(b, TL, W[1].box[0] + 100, 0xFFD, clip);
         return 17;
@@ -520,8 +550,9 @@ static int script(int *b, int mask)
                 CHECK(0, "null events still asked for while stopped");
             return 0;
         }
-        CHECK(plots_tl > 0 && strstr(last_text, "numbered") != NULL, "the Timeline didn't draw the clip (\"%s\")",
-              last_text);
+        CHECK(plots_tl > 0 && strstr(all_text, "numbered") != NULL, "the Timeline didn't draw the clip (\"%s\")",
+              all_text);
+        CHECK(strstr(all_text, "0:00:00") != NULL, "no timecode beside the playhead (\"%s\")", all_text);
         plots_mark = plots;
         next(5);
         return key(b, 0x18D);
@@ -662,6 +693,33 @@ static int script(int *b, int mask)
             return 0;
         CHECK(pos == 30, "a click on the ruler at frame 30: at %d", pos);
         CHECK(abs(sprite_middle() - grey(30)) <= 2, "frame 30 drawn as %d", sprite_middle());
+        next(61);
+        return click_tl(b, 30, 1, 0x40); /* a drag on the ruler: the playhead follows the pointer */
+    case 61:
+        CHECK(drags == 1, "dragging on the ruler didn't start a drag");
+        ptr[0] = W[1].box[0] - W[1].scroll_x + 16 + 60 * 4; ptr[1] = W[1].box[3] - 10;
+        next(62);
+        return script(b, mask);
+    case 62:
+        if (pos == 60 && !re_test_busy()) {
+            CHECK(nulls, "no null events while dragging the playhead");
+            next(63);
+            return 7; /* the drag ends */
+        }
+        if (fake_cs - phase_cs > 100)
+            fail_quit("the playhead didn't follow the pointer to frame 60");
+        return nulls ? 0 : (fail_quit("null events masked while dragging the playhead"), 0);
+    case 63:
+        if (nulls)
+            return 0;
+        CHECK(pos == 60 && abs(sprite_middle() - grey(60)) <= 2, "after the drag: at %d, drawn as %d", pos,
+              sprite_middle());
+        next(64);
+        return click_tl(b, 30, 1, 0x400); /* back to 30 */
+    case 64:
+        if (nulls)
+            return 0;
+        CHECK(pos == 30, "back to 30: %d", pos);
         next(21);
         return key_to(b, TL, 's');
     case 21:
@@ -682,10 +740,154 @@ static int script(int *b, int mask)
             return 0;
         CHECK(!strcmp(layout(), "c30 c75"), "Delete: %s", layout());
         CHECK(re_test_selected() == -1, "still selected after Delete");
+        CHECK(pos == 30, "after Delete: at %d, not 30", pos);
+        plots_mark = plots;
+        next(70);
+        return key_to(b, TL, 0x188); /* F8: undo */
+    /* ---- undo, redo, cuts, trims, snapping, help, the wheel ---- */
+    case 70:
+        if (nulls)
+            return 0;
+        if (plots == plots_mark) { /* (the picture made again: the old sprite's gone) */
+            if (fake_cs - phase_cs > 100)
+                fail_quit("after undo, the Viewer isn't drawn");
+            return 0;
+        }
+        CHECK(!strcmp(layout(), "c30 c45 c75") && pos == 30, "F8 (undo the Delete): %s, at %d", layout(), pos);
+        CHECK(abs(sprite_middle() - grey(30)) <= 2, "after undo, frame 30 drawn as %d", sprite_middle());
+        next(71);
+        return key_to(b, TL, 0x189); /* F9: redo */
+    case 71:
+        if (nulls)
+            return 0;
+        CHECK(!strcmp(layout(), "c30 c75") && pos == 30, "F9 (redo the Delete): %s, at %d", layout(), pos);
+        next(72);
+        return key(b, 0x18F); /* Up: the cut before */
+    case 72:
+        if (nulls)
+            return 0;
+        CHECK(pos == 0, "Up from 30: at %d, not 0", pos);
+        next(73);
+        return key(b, 0x18E); /* Down */
+    case 73:
+        if (nulls)
+            return 0;
+        CHECK(pos == 30, "Down from 0: at %d, not 30", pos);
+        next(74);
+        return key(b, 0x18E);
+    case 74:
+        if (nulls)
+            return 0;
+        CHECK(pos == 104, "Down from 30: at %d, not the last frame (104)", pos);
+        next(75);
+        return click_tl(b, 40, 1, 0x400);
+    case 75:
+        if (nulls)
+            return 0;
+        CHECK(pos == 40, "the ruler at 40: %d", pos);
+        next(76);
+        return key_to(b, TL, 'q'); /* Q: the start trimmed to the playhead */
+    case 76:
+        if (nulls)
+            return 0;
+        CHECK(!strcmp(layout(), "c30 c65") && pos == 30, "Q at 40: %s, at %d", layout(), pos);
+        next(77);
+        return key_to(b, TL, 0x188);
+    case 77:
+        if (nulls)
+            return 0;
+        CHECK(!strcmp(layout(), "c30 c75"), "undo Q: %s", layout());
+        next(78);
+        return click_tl(b, 40, 1, 0x400);
+    case 78:
+        if (nulls)
+            return 0;
+        next(79);
+        return key_to(b, TL, 'W'); /* W: the end trimmed to the playhead */
+    case 79:
+        if (nulls)
+            return 0;
+        CHECK(!strcmp(layout(), "c30 c10") && (pos == 39 || pos == 40), "W at 40: %s, at %d", layout(), pos);
+        next(80);
+        return key_to(b, TL, 0x188);
+    case 80:
+        if (nulls)
+            return 0;
+        CHECK(!strcmp(layout(), "c30 c75"), "undo W: %s", layout());
+        CHECK(re_test_snap() == 1, "snapping not on to start with");
+        next(81);
+        return click_tl(b, 32, 1, 0x400); /* 8 OS units from the cut at 30 */
+    case 81:
+        if (nulls)
+            return 0;
+        CHECK(pos == 30, "snapping: the ruler at 32 gave %d, not the cut at 30", pos);
+        next(82);
+        return key_to(b, TL, 'n');
+    case 82:
+        CHECK(re_test_snap() == 0, "N didn't turn snapping off");
+        next(83);
+        return click_tl(b, 32, 1, 0x400);
+    case 83:
+        if (nulls)
+            return 0;
+        CHECK(pos == 32, "not snapping: the ruler at 32 gave %d", pos);
+        next(84);
+        return click_icon(b, 16); /* the Snap button */
+    case 84:
+        CHECK(re_test_snap() == 1, "the Snap button didn't turn snapping on");
+        help_text[0] = 0;
+        memset(b, 0, 256);
+        b[0] = 40; b[1] = 0x555; b[2] = 55; b[4] = 0x502; b[8] = VIEWER; b[9] = 9; /* help on Split */
+        next(85);
+        return 17;
+    case 85:
+        CHECK(strstr(help_text, "split") != NULL, "help on Split: \"%s\"", help_text);
+        help_text[0] = 0;
+        b[8] = TL; b[9] = -1;
+        b[0] = 40; b[1] = 0x555; b[2] = 56; b[4] = 0x502;
+        next(86);
+        return 17;
+    case 86:
+        CHECK(strstr(help_text, "Timeline") != NULL, "help on the Timeline: \"%s\"", help_text);
         mark = W[1].extent_w;
+        ctrl_key = 1;
+        ptr[0] = W[1].box[0] + 100; ptr[1] = W[1].box[3] - 60; ptr[2] = 0; ptr[3] = TL; ptr[4] = -1;
+        next(87);
+        goto wheel_up;
+    case 87:
+        next(88);
+        goto wheel_up;
+    case 88:
+        CHECK(W[1].extent_w > mark, "Ctrl+wheel didn't zoom in (extent %d, was %d)", W[1].extent_w, mark);
+        ctrl_key = 0;
+        scroll_mark = W[1].scroll_x;
+        next(89);
+        b[0] = TL; window_state(b);
+        b[8] = 0; b[9] = -1; /* the wheel down: on in time */
+        return 10;
+    case 89:
+        CHECK(W[1].scroll_x > scroll_mark, "the wheel didn't scroll the Timeline (%d, was %d)", W[1].scroll_x,
+              scroll_mark);
+        ctrl_key = 1;
+        next(90);
+        goto wheel_down;
+    case 90:
+        next(91);
+        goto wheel_down;
+    case 91:
+        ctrl_key = 0;
+        CHECK(W[1].extent_w == mark, "Ctrl+wheel didn't zoom out again (extent %d, was %d)", W[1].extent_w, mark);
         next(24);
         b[0] = W[0].box[0] + 50; b[1] = W[0].box[3] - 50; b[2] = 2; b[3] = VIEWER; b[4] = -1;
         return 6; /* Menu */
+    wheel_up:
+        b[0] = TL; window_state(b);
+        b[8] = 0; b[9] = 1;
+        return 10;
+    wheel_down:
+        b[0] = TL; window_state(b);
+        b[8] = 0; b[9] = -1;
+        return 10;
     case 24:
         CHECK(menus >= 1, "Menu didn't open the menu");
         next(25);
@@ -693,17 +895,38 @@ static int script(int *b, int mask)
         return 9;
     case 25:
         tl_scale = 8; /* (zoomed in: the clicks from now on show it) */
-        (void) mark;
+        all_text[0] = 0;
+        next(66);
+        b[0] = 4; b[1] = -1; /* Video information */
+        return 9;
+    case 66:
+        if (W[2].redraw)
+            return nulls ? 0 : 1;
+        CHECK(windows_made == 3 && W[2].open, "Video information didn't open");
+        CHECK(strstr(all_text, "H.264") && strstr(all_text, "Decoded by") && strstr(all_text, "320x180") &&
+                  strstr(all_text, "AAC"),
+              "Video information: \"%.300s\"", all_text);
+        next(67);
+        b[0] = 3; b[1] = 3; b[2] = -1; /* View > Attach the Timeline: off */
+        return 9;
+    case 67:
+        mark = W[0].box[0];
+        next(68);
+        b[0] = TL; b[1] = W[1].box[0] + 60; b[2] = W[1].box[1]; b[3] = W[1].box[2] + 60; b[4] = W[1].box[3];
+        b[5] = W[1].scroll_x; b[6] = 0; b[7] = -1;
+        return 2;
+    case 68:
+        CHECK(W[0].box[0] == mark, "detached, the Viewer still moved with the Timeline");
         next(26);
         return key(b, 0x183); /* F3 */
     /* ---- saving ---- */
     case 26:
-        CHECK(savebox_opens == 1 && W[2].open, "F3 didn't open the save box");
+        CHECK(savebox_opens == 1 && W[3].open, "F3 didn't open the save box");
         snprintf(re_test_savebox_name(), 256, "%.255s", typed_path);
         next(27);
         return key_to(b, SAVEB, 13);
     case 27: {
-        CHECK(!W[2].open, "the save box still open after saving");
+        CHECK(!W[3].open, "the save box still open after saving");
         FILE *f = fopen(typed_path, "r");
         char x[8192] = "";
         if (f) {
@@ -751,13 +974,13 @@ static int script(int *b, int mask)
         b[0] = 0; b[1] = 2; b[2] = -1;
         return 9;
     case 35:
-        CHECK(savebox_opens == 2 && W[2].open && !strcmp(re_test_savebox_name(), typed_path),
+        CHECK(savebox_opens == 2 && W[3].open && !strcmp(re_test_savebox_name(), typed_path),
               "File > Save as: the box (%d) with \"%s\"", savebox_opens, re_test_savebox_name());
         next(36);
         b[0] = 0; b[1] = 0; b[2] = 0x40; b[3] = SAVEB; b[4] = 0; /* a drag of the file icon */
         return 6;
     case 36:
-        CHECK(drags == 1, "no drag started");
+        CHECK(drags == 2, "no drag started");
         ptr[0] = 500; ptr[1] = 500; ptr[2] = 0; ptr[3] = FILER; ptr[4] = 0;
         next(37);
         return 7; /* the drag ends over a directory display */

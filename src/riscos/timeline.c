@@ -15,11 +15,14 @@
 #define ColourTrans_SetGCOL 0x40743
 #define OS_Plot             0x45
 #define Wimp_TextOp         0x400F9
+#define Wimp_DragBox        0x400D0
 
 #define RULER_H 48   /* OS units */
 #define TRACK_H 96
 #define LEFT    16   /* frame 0's x */
 #define MIN_W   640
+#define LABEL_W 200  /* the playhead's timecode, beside it on the ruler */
+#define SNAP    12   /* OS units: the playhead snaps to a cut this near */
 
 static struct
 {
@@ -29,7 +32,8 @@ static struct
     int playhead;     /* the frame it's drawn at */
     int extent_w;
     char title[32];
-} T = {0, 4.0, 0, 0, 0, 0, 0, "Timeline"};
+    int scrubbing;    /* the playhead being dragged along the ruler */
+} T = {0, 4.0, 0, 0, 0, 0, 0, "Timeline", 0};
 
 static int x_of(int frame)
 {
@@ -48,6 +52,8 @@ int tl_window(void)
 }
 
 /* ---- the window --------------------------------------------------------- */
+
+static int snapped(int f);
 
 static int create(void)
 {
@@ -72,7 +78,7 @@ static int create(void)
     w.vis.x1 = 1000; w.vis.y1 = RULER_H + TRACK_H + 16;
     w.behind = -1;
     /* new format, back, close, title, toggle, horizontal scroll, adjust size, moveable */
-    w.flags = (int) 0xEF000002u;
+    w.flags = (int) 0xEF000102u; /* (bit 8: Scroll_Request for the arrows and the wheel) */
     w.tfg = 7; w.tbg = 2; w.wfg = 7; w.wbg = 1;
     w.sofg = 3; w.sibg = 1; w.tfocus = 12;
     w.ext.x0 = 0; w.ext.y0 = -(RULER_H + TRACK_H + 16); w.ext.x1 = 4096; w.ext.y1 = 0;
@@ -192,9 +198,10 @@ void tl_playhead(int frame)
         return;
     int old = x_of(T.playhead), now = x_of(frame);
     T.playhead = frame;
-    r.r[0] = T.win; r.r[1] = old - 4; r.r[2] = -(RULER_H + TRACK_H + 16); r.r[3] = old + 4; r.r[4] = 0;
+    /* (the line, its handle, and the timecode to its right) */
+    r.r[0] = T.win; r.r[1] = old - 8; r.r[2] = -(RULER_H + TRACK_H + 16); r.r[3] = old + LABEL_W + 4; r.r[4] = 0;
     ro_swi(Wimp_ForceRedraw, &r);
-    r.r[0] = T.win; r.r[1] = now - 4; r.r[2] = -(RULER_H + TRACK_H + 16); r.r[3] = now + 4; r.r[4] = 0;
+    r.r[0] = T.win; r.r[1] = now - 8; r.r[2] = -(RULER_H + TRACK_H + 16); r.r[3] = now + LABEL_W + 4; r.r[4] = 0;
     ro_swi(Wimp_ForceRedraw, &r);
     /* kept in view: a quarter of the way in when it goes off either side */
     if (now < T.scroll_x || now > T.scroll_x + T.vis_w - 16)
@@ -277,19 +284,36 @@ static void clip(int x0, int y0, int x1, int y1) /* inclusive */
     ro_swi(OS_WriteN, &r);
 }
 
-/* The ruler's marks: a step in frames giving marks at least 80 OS units apart */
+/* The ruler's marks: a step in frames giving marks far enough apart for
+   their labels (Pi test: a full timecode a second ran together) */
+#define MARK_GAP 180
 static int ruler_step(double fps)
 {
-    static const double seconds[] = {1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800, 3600};
+    static const double seconds[] = {1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200};
     int f1 = (int) (fps + 0.5);
-    if (T.scale * 1 >= 80)
+    if (T.scale * 1 >= MARK_GAP)
         return 1;
-    if (T.scale * 5 >= 80)
+    if (T.scale * 5 >= MARK_GAP && f1 > 5)
         return 5;
     for (unsigned i = 0; i < sizeof(seconds) / sizeof(seconds[0]); i++)
-        if (T.scale * seconds[i] * f1 >= 80)
+        if (T.scale * seconds[i] * f1 >= MARK_GAP)
             return (int) (seconds[i] * f1);
-    return 3600 * f1;
+    return 7200 * f1;
+}
+
+/* A mark's label: m:ss (h:mm:ss over an hour); within a second, m:ss.ff */
+static void mark_label(char *buf, int size, int f, double fps)
+{
+    int f1 = (int) (fps + 0.5);
+    if (f1 < 1)
+        f1 = 1;
+    int s = f / f1;
+    if (f % f1)
+        snprintf(buf, size, "%d:%02d.%02d", s / 60, s % 60, f % f1);
+    else if (s >= 3600)
+        snprintf(buf, size, "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60);
+    else
+        snprintf(buf, size, "%d:%02d", s / 60, s % 60);
 }
 
 static void draw(int *b)
@@ -309,8 +333,8 @@ static void draw(int *b)
         for (int f = (f0 < 0 ? 0 : f0) / step * step; f <= f1 && f <= len; f += step) {
             int x = ox + x_of(f);
             rect(x, ruler_y0, x + 1, ruler_y0 + 16);
-            char tc[24];
-            app_timecode(tc, sizeof(tc), f);
+            char tc[40];
+            mark_label(tc, sizeof(tc), f, fps);
             text(tc, x + 6, ruler_y0 + 20, 0x00000000, 0xDDDDDD00);
         }
     }
@@ -326,25 +350,40 @@ static void draw(int *b)
             int x0 = ox + x_of(it.start), x1 = ox + x_of(it.start + it.length) - 2;
             if (x1 < x0)
                 x1 = x0;
-            colour(0x20202000);
+            /* selected: the clip's own colour inside a bright outline (a fill
+               hid its name, Pi test) */
+            unsigned fill = 0xC0905000;
+            colour(i == A.sel ? 0x2080F000 : 0x20202000); /* (BBGGRR: amber) */
             rect(x0, track_y0, x1, track_y1);
-            unsigned fill = i == A.sel ? 0x2080F000 : 0xC0905000; /* selected: orange; else blue */
+            int inset = i == A.sel ? 6 : 2;
             colour(fill);
-            rect(x0 + 2, track_y0 + 2, x1 - 2, track_y1 - 2);
+            rect(x0 + inset, track_y0 + inset, x1 - inset, track_y1 - inset);
             /* the name, clipped to the clip */
             int c0 = x0 + 2 > cx0 ? x0 + 2 : cx0, c1 = x1 - 2 < cx1 ? x1 - 2 : cx1;
             int r0 = track_y0 > cy0 ? track_y0 : cy0, r1 = track_y1 < cy1 ? track_y1 : cy1;
             if (c1 > c0 && r1 > r0) {
                 clip(c0, r0, c1, r1);
-                text(it.name, x0 + 10, track_y1 - 36, i == A.sel ? 0x00000000 : 0xFFFFFF00, fill);
+                /* the name at the start, and again along a long clip (so
+                   it's in view however it's scrolled) */
+                for (int nx = x0 + 10; nx == x0 + 10 || nx < x1 - 200; nx += 1000)
+                    if (nx < c1 && nx + 1000 > c0)
+                        text(it.name, nx, track_y1 - 36, 0xFFFFFF00, fill);
                 clip(cx0, cy0, cx1, cy1);
             }
         }
     }
-    /* the playhead */
+    /* the playhead: a line, a handle on the ruler, and its timecode beside it */
     colour(0x0000E000);
     int px = ox + x_of(T.playhead);
     rect(px - 1, track_y0 - 8, px + 1, oy);
+    rect(px - 6, oy - 12, px + 6, oy);
+    if (A.proj && re_project_length(A.proj) > 0) {
+        char tc[24];
+        app_timecode(tc, sizeof(tc), T.playhead);
+        colour(0x0000E000);
+        rect(px + 2, oy - 44, px + LABEL_W, oy - 14);
+        text(tc, px + 8, oy - 40, 0xFFFFFF00, 0x0000E000);
+    }
 }
 
 void tl_redraw(int *b)
@@ -370,7 +409,8 @@ void tl_click(int *b)
         app_menu(b[0], b[1]);
         return;
     }
-    if (!(buttons & (0x400 | 0x100))) /* (single clicks only: no drags yet; a double click's second report ignored) */
+    /* single clicks, and drags (on the ruler); a double click's second report ignored */
+    if (!(buttons & (0x400 | 0x100 | 0x40 | 0x10)))
         return;
     int adjust = buttons & (0x100 | 0x1);
     st[0] = T.win;
@@ -383,16 +423,126 @@ void tl_click(int *b)
     if (!A.proj)
         return;
     int f = frame_of(wx);
-    if (wy > -RULER_H) { /* the ruler: the playhead there */
-        app_seek(f);
+    int drag = buttons & (0x40 | 0x10);
+    int on_playhead = wx > x_of(T.playhead) - 12 && wx < x_of(T.playhead) + 12;
+    if (wy > -RULER_H || (drag && on_playhead)) {
+        /* the ruler, or the playhead line grabbed: the playhead there;
+           dragged, it follows the pointer */
+        if (!(drag && on_playhead))
+            app_seek(snapped(f));
+        if (drag) {
+            /* the pointer kept to the ruler's visible part while dragging */
+            int d[10];
+            d[0] = T.win;
+            d[1] = 7; /* a point, nothing drawn */
+            d[2] = d[4] = b[0];
+            d[3] = d[5] = b[1];
+            d[6] = st[1]; d[7] = st[4] - RULER_H + 4; d[8] = st[3] - 1; d[9] = st[4] - 4;
+            r.r[1] = (intptr_t) d;
+            if (!ro_swi(Wimp_DragBox, &r))
+                T.scrubbing = 1;
+        }
         return;
     }
+    if (drag) /* (dragging clips: to come) */
+        return;
     int i = re_project_item_at(A.proj, f);
     re_item it;
     if (i >= 0 && !re_project_item(A.proj, i, &it) && it.gap)
         i = -1;
+    if (i < 0) { /* empty track space: the playhead there, nothing selected */
+        if (!adjust)
+            tl_select(-1);
+        app_seek(snapped(f));
+        return;
+    }
     if (adjust)
         tl_select(A.sel == i ? -1 : i);
     else
         tl_select(i);
+}
+
+/* Scroll_Request (the window asks for them): the scroll bar's arrows and
+   the scroll wheel scroll sideways; with Ctrl, the wheel zooms about the
+   pointer */
+void tl_scroll(int *b)
+{
+    _kernel_swi_regs r;
+    int dx = b[8], dy = b[9];
+    r.r[0] = 121; r.r[1] = 1 ^ 0x80; /* OS_Byte 121: Ctrl down? */
+    int ctrl = !ro_swi(OS_Byte, &r) && (r.r[1] & 0xFF) == 0xFF;
+    if (ctrl && dy) {
+        int p[5];
+        r.r[1] = (intptr_t) p;
+        ro_swi(Wimp_GetPointerInfo, &r);
+        int sx_screen = p[0] - b[1];                   /* the pointer from the window's left */
+        int f = frame_of(p[0] - (b[1] - b[5]));       /* the frame under it */
+        double old = T.scale;
+        T.scale = dy > 0 ? T.scale * 2 : T.scale / 2;
+        if (T.scale > 64) T.scale = 64;
+        if (T.scale < 0.01) T.scale = 0.01;
+        if (T.scale != old) {
+            set_extent();
+            scroll_to(x_of(f) - sx_screen);           /* (that frame kept under the pointer) */
+            redraw_all();
+        }
+        return;
+    }
+    int step = 0, page = T.vis_w * 3 / 4;
+    if (dx)
+        step = (dx == 2 || dx == -2) ? (dx > 0 ? page : -page) : dx * 80;
+    else if (dy) /* (the wheel: up is back) */
+        step = (dy == 2 || dy == -2) ? (dy > 0 ? -page : page) : -dy * 120;
+    if (step)
+        scroll_to(T.scroll_x + step);
+}
+
+/* A frame snapped to a cut (or the start or end) within SNAP OS units,
+   when snapping is on */
+static int snapped(int f)
+{
+    if (!A.snap || !A.proj)
+        return f;
+    int best = f, bd = SNAP + 1;
+    int c[2] = {re_project_cut(A.proj, f + 1, -1), re_project_cut(A.proj, f - 1, 1)};
+    for (int k = 0; k < 2; k++) {
+        if (c[k] < 0)
+            continue;
+        int d = (int) ((c[k] > f ? c[k] - f : f - c[k]) * T.scale);
+        if (d < bd) {
+            bd = d;
+            best = c[k];
+        }
+    }
+    return best;
+}
+
+int tl_scrubbing(void)
+{
+    return T.scrubbing;
+}
+
+void tl_scrub_tick(void)
+{
+    int p[5], st[9];
+    _kernel_swi_regs r;
+    r.r[1] = (intptr_t) p;
+    if (ro_swi(Wimp_GetPointerInfo, &r))
+        return;
+    st[0] = T.win;
+    r.r[1] = (intptr_t) st;
+    if (ro_swi(Wimp_GetWindowState, &r))
+        return;
+    int f = snapped(frame_of(p[0] - (st[1] - st[5])));
+    if (f != app_position())
+        app_seek(f); /* (seeks before the next picture replace each other: the newest is drawn) */
+}
+
+void tl_drag_end(int *b)
+{
+    (void) b;
+    if (!T.scrubbing)
+        return;
+    tl_scrub_tick();
+    T.scrubbing = 0;
 }

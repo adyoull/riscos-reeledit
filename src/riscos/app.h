@@ -25,6 +25,8 @@ typedef struct
     re_engine *e;       /* NULL while the project is empty */
     char path[256];     /* where the project was saved or opened from ("": nowhere yet) */
     int sel;            /* the selected item on V1 (-1: none) */
+    int attached;       /* the Timeline moves with the Viewer (View > Attach Timeline) */
+    int snap;           /* the playhead snaps to cuts (N) */
 } re_app;
 extern re_app A;
 
@@ -61,6 +63,21 @@ void tl_playhead(int frame);   /* the playhead moved (playing: kept in view) */
 int tl_frame_at(int screen_x); /* for a drop */
 void tl_zoom(int in);          /* 1 in, 0 out, -1 the whole project */
 void tl_select(int item);      /* -1: none */
+/* The playhead dragged along the ruler: null events while it lasts, each
+   moving the playhead to the pointer */
+int tl_scrubbing(void);
+void tl_scrub_tick(void);
+void tl_drag_end(int *block);
+/* Scroll_Request: the wheel scrolls the Timeline sideways; Ctrl+wheel zooms
+   about the pointer */
+void tl_scroll(int *block);
+
+/* ---- info.c ---- */
+void info_open(void);          /* Video information: the selected clip (or the one at the playhead), the project */
+void info_edited(void);        /* (made again if it's open) */
+void info_close(void);
+int info_window(void);
+void info_redraw(int *block);
 
 /* ---- savebox.c ---- */
 void sb_open(int x, int y);    /* as a menu, at x, y */

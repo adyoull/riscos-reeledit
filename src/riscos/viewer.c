@@ -51,6 +51,8 @@ int __dynamic_da_max_size = 128 << 20;
 #define MSG_DATALOADACK 4
 #define MSG_PREQUIT     8
 #define MSG_MODECHANGE  0x400C1
+#define MSG_HELPREQUEST 0x502
+#define MSG_HELPREPLY   0x503
 
 #define SOUND_RATE 48000
 
@@ -61,10 +63,10 @@ int __dynamic_da_max_size = 128 << 20;
 #define W_PLAY 112
 #define W_TIME 360
 #define W_TOOL 136
-#define MIN_W  (GAP * 8 + W_BTN * 4 + W_PLAY + 200 + W_TIME)
+#define MIN_W  1400 /* (the toolbar's width) */
 
 enum { I_BAR, I_START, I_BACK, I_PLAY, I_FWD, I_END, I_TRACK, I_FILL, I_TIME,
-       I_SPLIT, I_DELETE, I_ZOOMOUT, I_ZOOMIN, I_SAVE, N_ICONS };
+       I_SPLIT, I_DELETE, I_ZOOMOUT, I_ZOOMIN, I_SAVE, I_UNDO, I_REDO, I_SNAP, I_ZLABEL, I_FIT, N_ICONS };
 
 typedef struct
 {
@@ -90,13 +92,13 @@ typedef struct
 #define IF_CLICK  (3 << 12)
 #define IF_COL(fg, bg) (((fg) << 24) | ((bg) << 28))
 
-re_app A = {0, NULL, NULL, "", -1};
+re_app A = {0, NULL, NULL, "", -1, 1, 1};
 
 static struct
 {
     int bar_icon, win, quit;
     re_sound *snd;
-    char title[300], time_text[64], play_text[8];
+    char title[300], time_text[64], play_text[8], snap_text[16];
     int vis_w, vis_h;
     ro_box pic;
     int fill_x1;
@@ -110,9 +112,11 @@ static struct
     FILE *log;
 } V;
 
-static char empty_text[] = "", start_text[] = "|\x8b", back_text[] = "\x8b", fwd_text[] = "\x8a",
-            end_text[] = "\x8a|", split_text[] = "Split", delete_text[] = "Delete", zoomout_text[] = "Zoom -",
-            zoomin_text[] = "Zoom +", save_text[] = "Save";
+/* (&88 and &89: the left and right arrows of RISC OS's character set) */
+static char empty_text[] = "", start_text[] = "|\x88", back_text[] = "\x88", fwd_text[] = "\x89",
+            end_text[] = "\x89|", split_text[] = "Split", delete_text[] = "Delete", zoomout_text[] = "-",
+            zoomin_text[] = "+", undo_text[] = "Undo", redo_text[] = "Redo", zlabel_text[] = "Timeline zoom",
+            fit_text[] = "Fit", save_text[] = "Save";
 
 /* ---- the log, reports ---------------------------------------------------------- */
 
@@ -318,6 +322,12 @@ static int create_window(void)
     icon_def(&w.icon[I_ZOOMOUT], button, zoomout_text, "R5,3", sizeof(zoomout_text));
     icon_def(&w.icon[I_ZOOMIN], button, zoomin_text, "R5,3", sizeof(zoomin_text));
     icon_def(&w.icon[I_SAVE], button, save_text, "R5,3", sizeof(save_text));
+    icon_def(&w.icon[I_UNDO], button, undo_text, "R5,3", sizeof(undo_text));
+    icon_def(&w.icon[I_REDO], button, redo_text, "R5,3", sizeof(redo_text));
+    icon_def(&w.icon[I_SNAP], button, V.snap_text, "R5,3", sizeof(V.snap_text));
+    icon_def(&w.icon[I_ZLABEL], IF_TEXT | IF_VCENT | IF_INDIR | 0x200 | IF_COL(7, 1),
+             zlabel_text, (const char *) -1, sizeof(zlabel_text));
+    icon_def(&w.icon[I_FIT], button, fit_text, "R5,3", sizeof(fit_text));
     r.r[1] = (intptr_t) &w;
     if (ro_swi(Wimp_CreateWindow, &r))
         return -1;
@@ -354,13 +364,15 @@ static void layout(int vw, int vh)
     y0 = -vh + GAP;
     y1 = -vh + CH - GAP;
     x = GAP;
-    static const int tools[] = {I_SPLIT, I_DELETE, I_ZOOMOUT, I_ZOOMIN, I_SAVE};
-    for (int i = 0; i < 5; i++) {
-        if (tools[i] == I_SAVE)
-            x = vw - GAP - W_TOOL;
-        resize_icon(tools[i], x, y0, x + W_TOOL, y1);
-        x += W_TOOL + GAP;
+    /* edit tools | Timeline zoom - + Fit | ... Save */
+    static const struct { int icon, w, gap_after; } tools[] = {
+        {I_SPLIT, W_TOOL, 0}, {I_DELETE, W_TOOL, 0}, {I_UNDO, W_TOOL, 0}, {I_REDO, W_TOOL, 0},
+        {I_SNAP, W_TOOL + 24, 24}, {I_ZLABEL, 200, 8}, {I_ZOOMOUT, 64, 0}, {I_ZOOMIN, 64, 0}, {I_FIT, 80, 0}};
+    for (unsigned i = 0; i < sizeof(tools) / sizeof(tools[0]); i++) {
+        resize_icon(tools[i].icon, x, y0, x + tools[i].w, y1);
+        x += tools[i].w + GAP + tools[i].gap_after;
     }
+    resize_icon(I_SAVE, vw - GAP - W_TOOL, y0, vw - GAP, y1);
     re_display_place(V.win, V.pic);
 }
 
@@ -387,6 +399,11 @@ static void update_controls(int force)
         return;
     int p = A.e ? re_engine_position(A.e) : 0, n = A.e ? re_engine_length(A.e) : 0;
     double sp = A.e ? re_engine_speed(A.e) : 0;
+    const char *snap = A.snap ? "Snap: on" : "Snap: off";
+    if (force || strcmp(snap, V.snap_text)) {
+        snprintf(V.snap_text, sizeof(V.snap_text), "%s", snap);
+        icon_refresh(I_SNAP);
+    }
     const char *play = sp != 0 ? "Stop" : "Play";
     if (force || strcmp(play, V.play_text)) {
         snprintf(V.play_text, sizeof(V.play_text), "%s", play);
@@ -415,6 +432,61 @@ static void update_controls(int force)
     tl_playhead(p);
 }
 
+#define Wimp_GetWindowOutline 0x400E0
+
+static void open_window(int *b);
+
+/* The Timeline attached: kept under the Viewer, as wide, just behind it
+   in the window stack */
+static void place_timeline(void)
+{
+    int vs[9], vo[5], ts[9], to[5];
+    _kernel_swi_regs r;
+    if (!A.attached || !tl_window() || !V.win)
+        return;
+    window_state(V.win, vs);
+    window_state(tl_window(), ts);
+    if (!(vs[8] & (1 << 16)) || !(ts[8] & (1 << 16)))
+        return;
+    vo[0] = V.win;
+    r.r[1] = (intptr_t) vo;
+    ro_swi(Wimp_GetWindowOutline, &r);
+    to[0] = tl_window();
+    r.r[1] = (intptr_t) to;
+    ro_swi(Wimp_GetWindowOutline, &r);
+    int top = to[4] - ts[4], h = ts[4] - ts[2]; /* (its title bar, and its height) */
+    int b[9] = {tl_window(), vs[1], vo[2] - top - h, vs[3], vo[2] - top, ts[5], ts[6], V.win, 0};
+    if (b[1] == ts[1] && b[2] == ts[2] && b[3] == ts[3] && b[4] == ts[4] && ts[7] == V.win)
+        return;
+    tl_open_request(b);
+}
+
+/* The Timeline moved or resized by the user while attached: the Viewer
+   comes with it (the same width, its own height, just above) */
+static void timeline_moved(int *b)
+{
+    int vs[9], vo[5], to[5];
+    _kernel_swi_regs r;
+    tl_open_request(b);
+    if (!A.attached || !V.win)
+        return;
+    window_state(V.win, vs);
+    vo[0] = V.win;
+    r.r[1] = (intptr_t) vo;
+    ro_swi(Wimp_GetWindowOutline, &r);
+    to[0] = tl_window();
+    r.r[1] = (intptr_t) to;
+    ro_swi(Wimp_GetWindowOutline, &r);
+    int ts[9];
+    window_state(tl_window(), ts);
+    int bottom = vs[2] - vo[2];          /* the Viewer's border below its work area */
+    int y0 = to[4] + bottom, h = vs[4] - vs[2];
+    int nb[9] = {V.win, ts[1], y0, ts[3], y0 + h, vs[5], vs[6], b[7] == V.win ? -1 : b[7], 0};
+    if (nb[1] != vs[1] || nb[2] != vs[2] || nb[3] != vs[3] || nb[4] != vs[4] || b[7] != ts[7])
+        open_window(nb);
+    place_timeline();
+}
+
 static void open_window(int *b)
 {
     _kernel_swi_regs r;
@@ -435,6 +507,7 @@ static void open_window(int *b)
         update_controls(1);
     }
     re_display_check_covered();
+    place_timeline();
 }
 
 /* ---- playing -------------------------------------------------------------------------- */
@@ -564,6 +637,8 @@ static void engine_open(void)
                 re_engine_width(A.e), re_engine_height(A.e));
     V.log_cs = ro_now_cs();
     memset(&V.log_st, 0, sizeof(V.log_st));
+    if (V.win) /* (re_display_close forgot the window: an undo, or a clip into an emptied project) */
+        re_display_place(V.win, V.pic);
 }
 
 void app_edited(void)
@@ -581,6 +656,7 @@ void app_edited(void)
     if (A.sel >= re_project_items(A.proj))
         A.sel = -1;
     tl_edited();
+    info_edited();
     update_title();
     update_controls(1);
 }
@@ -630,6 +706,7 @@ static void open_editor(void)
     update_title();
     open_window(b);
     tl_open(b[1], b[2] - 40, pw);
+    place_timeline();
     set_caret(V.win);
     if (A.e)
         re_engine_seek(A.e, re_engine_position(A.e));
@@ -651,6 +728,7 @@ static int close_editor(void)
         ro_swi(Wimp_CloseWindow, &r);
     }
     tl_close();
+    info_close();
     sb_forget();
     re_project_close(A.proj);
     A.proj = NULL;
@@ -711,6 +789,51 @@ void app_load(const char *path, int filetype, int frame)
 
 /* ---- editing ------------------------------------------------------------------------------------ */
 
+/* Undo and redo: the project is made again, so the engine with it */
+static void undo(int redo)
+{
+    if (!A.proj)
+        return;
+    int pos = app_position();
+    app_set_speed(0);
+    engine_close();
+    int done = redo ? re_project_redo(A.proj) : re_project_undo(A.proj);
+    app_log("%s: %s", redo ? "redo" : "undo", done ? "done" : "nothing");
+    A.sel = -1;
+    app_edited();
+    app_seek(pos);
+}
+
+/* Q and W: the clip at the playhead trimmed to it, its start or its end */
+static void trim(int end)
+{
+    if (!A.proj)
+        return;
+    int pos = app_position(), i = re_project_item_at(A.proj, pos);
+    re_item it;
+    if (i < 0 || re_project_item(A.proj, i, &it))
+        return;
+    if (re_project_trim(A.proj, pos, end)) {
+        app_edited();
+        app_seek(end ? pos : it.start); /* (Q: the clip now starts where it did, at the frame that was here) */
+    }
+}
+
+static void to_cut(int dir)
+{
+    if (!A.proj)
+        return;
+    int f = re_project_cut(A.proj, app_position(), dir);
+    if (f >= 0)
+        app_seek(f >= re_project_length(A.proj) ? re_project_length(A.proj) - 1 : f);
+}
+
+static void snap_toggle(void)
+{
+    A.snap = !A.snap;
+    update_controls(1);
+}
+
 static void split(void)
 {
     if (A.proj && re_project_split(A.proj, app_position()))
@@ -753,39 +876,48 @@ static void save(int x, int y)
 
 /* ---- the menu ------------------------------------------------------------------------------------ */
 
+/* Menus: indirected items (the texts longer than 12 characters) */
+typedef struct
+{
+    int flags;          /* bit 0 ticked, bit 7 the last */
+    intptr_t sub;       /* a submenu, or -1 */
+    int iflags;
+    const char *text;
+    const char *valid;
+    int len;
+} menu_item;
 #define MENU(n)                                                                                                    \
     struct                                                                                                         \
     {                                                                                                              \
         char title[12];                                                                                            \
         unsigned char tfg, tbg, wfg, wbg;                                                                          \
         int w, h, gap;                                                                                             \
-        struct                                                                                                     \
-        {                                                                                                          \
-            int flags;                                                                                             \
-            intptr_t sub;                                                                                          \
-            int iflags;                                                                                            \
-            char text[12];                                                                                         \
-        } item[n];                                                                                                 \
+        menu_item item[n];                                                                                         \
     }
-#define ITEM_FLAGS 0x07000021 /* text, filled, black on white */
+#define ITEM_FLAGS 0x07000121 /* text, filled, indirected, black on white */
 #define SHADED     (1 << 22)
+#define IT(t) ITEM_FLAGS, t, (const char *) -1, sizeof(t)
 
-static MENU(3) m_file = {"File", 7, 2, 7, 0, 200, 44, 0,
-                         {{0, -1, ITEM_FLAGS, "New"}, {0, -1, ITEM_FLAGS, "Save    F3"}, {0x80, -1, ITEM_FLAGS, "Save as..."}}};
-static MENU(4) m_edit = {"Edit", 7, 2, 7, 0, 300, 44, 0,
-                         {{0, -1, ITEM_FLAGS, "Split     S"}, {0, -1, ITEM_FLAGS, "Delete"},
-                          {0, -1, ITEM_FLAGS, "Leave gap"}, {0x80, -1, ITEM_FLAGS, "Clear sel ^Z"}}};
-static MENU(3) m_play = {"Play", 7, 2, 7, 0, 260, 44, 0,
-                         {{0, -1, ITEM_FLAGS, "Play  Space"}, {0, -1, ITEM_FLAGS, "Start  Home"},
-                          {0x80, -1, ITEM_FLAGS, "End    Copy"}}};
-static MENU(3) m_view = {"View", 7, 2, 7, 0, 260, 44, 0,
-                         {{0, -1, ITEM_FLAGS, "Zoom in   +"}, {0, -1, ITEM_FLAGS, "Zoom out  -"},
-                          {0x80, -1, ITEM_FLAGS, "Whole"}}};
-static MENU(4) m_main = {"Reel Edit", 7, 2, 7, 0, 200, 44, 0,
-                         {{0, 0, ITEM_FLAGS, "File"}, {0, 0, ITEM_FLAGS, "Edit"}, {0, 0, ITEM_FLAGS, "Play"},
-                          {0x80, 0, ITEM_FLAGS, "View"}}};
+static MENU(3) m_file = {"File", 7, 2, 7, 0, 280, 44, 0,
+                         {{0, -1, IT("New")}, {0, -1, IT("Save          F3")}, {0x80, -1, IT("Save as...")}}};
+static MENU(8) m_edit = {"Edit", 7, 2, 7, 0, 520, 44, 0,
+                         {{0, -1, IT("Undo                     F8")}, {2, -1, IT("Redo                     F9")},
+                          {0, -1, IT("Split at the playhead     S")}, {0, -1, IT("Trim the start to it      Q")},
+                          {2, -1, IT("Trim the end to it        W")}, {0, -1, IT("Delete               Delete")},
+                          {0, -1, IT("Delete, leaving a gap   \x8b" "Del")}, {0x80, -1, IT("Clear the selection      ^Z")}}};
+static char play_item[24] = "Play           Space";
+static MENU(3) m_play = {"Play", 7, 2, 7, 0, 340, 44, 0,
+                         {{0, -1, ITEM_FLAGS, play_item, (const char *) -1, sizeof(play_item)},
+                          {0, -1, IT("To the start   Home")}, {0x80, -1, IT("To the end     Copy")}}};
+static MENU(5) m_view = {"View", 7, 2, 7, 0, 520, 44, 0,
+                         {{0, -1, IT("Zoom the Timeline in       +")}, {0, -1, IT("Zoom the Timeline out      -")},
+                          {2, -1, IT("The whole project     \x8bZ")}, {0, -1, IT("Attach the Timeline")},
+                          {0x80, -1, IT("Snapping                   N")}}};
+static MENU(5) m_main = {"Reel Edit", 7, 2, 7, 0, 340, 44, 0,
+                         {{0, 0, IT("File")}, {0, 0, IT("Edit")}, {0, 0, IT("Play")}, {0, 0, IT("View")},
+                          {0x80, -1, IT("Video information...")}}};
 static MENU(2) m_bar = {"Reel Edit", 7, 2, 7, 0, 160, 44, 0,
-                        {{0, -1, ITEM_FLAGS, "Info"}, {0x80, -1, ITEM_FLAGS, "Quit"}}};
+                        {{0, -1, IT("Info")}, {0x80, -1, IT("Quit")}}};
 static int menu_is; /* 0 none, 1 the icon bar's, 2 the editor's */
 static int menu_x, menu_y;
 
@@ -804,13 +936,21 @@ void app_menu(int x, int y)
     int has = A.proj && re_project_length(A.proj) > 0;
     shade(&m_file.item[1].iflags, !has);
     shade(&m_file.item[2].iflags, !has);
-    shade(&m_edit.item[0].iflags, !has);
-    shade(&m_edit.item[1].iflags, A.sel < 0);
-    shade(&m_edit.item[2].iflags, A.sel < 0);
-    shade(&m_edit.item[3].iflags, A.sel < 0);
+    shade(&m_edit.item[0].iflags, !A.proj || !re_project_can_undo(A.proj));
+    shade(&m_edit.item[1].iflags, !A.proj || !re_project_can_redo(A.proj));
+    for (int i = 2; i <= 4; i++)
+        shade(&m_edit.item[i].iflags, !has);
+    for (int i = 5; i <= 7; i++)
+        shade(&m_edit.item[i].iflags, A.sel < 0);
+    m_view.item[4].flags = (m_view.item[4].flags & ~1) | (A.snap ? 1 : 0);
     for (int i = 0; i < 3; i++)
         shade(&m_play.item[i].iflags, !has);
-    snprintf(m_play.item[0].text, 12, "%s", A.e && re_engine_speed(A.e) != 0 ? "Stop  Space" : "Play  Space");
+    snprintf(play_item, sizeof(play_item), "%s", A.e && re_engine_speed(A.e) != 0 ? "Stop           Space"
+                                                                                : "Play           Space");
+    for (int i = 0; i < 3; i++)
+        shade(&m_view.item[i].iflags, !has);
+    m_view.item[3].flags = (m_view.item[3].flags & ~1) | (A.attached ? 1 : 0); /* ticked */
+    shade(&m_main.item[4].iflags, !has);
     menu_is = 2;
     menu_x = x;
     menu_y = y;
@@ -848,10 +988,16 @@ static void menu_select(int *b)
         }
         break;
     case 1: /* Edit */
-        if (b[1] == 0) split();
-        else if (b[1] == 1) delete_selected(1);
-        else if (b[1] == 2) delete_selected(0);
-        else if (b[1] == 3) tl_select(-1);
+        switch (b[1]) {
+        case 0: undo(0); break;
+        case 1: undo(1); break;
+        case 2: split(); break;
+        case 3: trim(0); break;
+        case 4: trim(1); break;
+        case 5: delete_selected(1); break;
+        case 6: delete_selected(0); break;
+        case 7: tl_select(-1); break;
+        }
         break;
     case 2: /* Play */
         if (b[1] == 0) app_set_speed(A.e && re_engine_speed(A.e) != 0 ? 0 : 1);
@@ -861,11 +1007,21 @@ static void menu_select(int *b)
     case 3: /* View */
         if (b[1] >= 0 && b[1] <= 2)
             tl_zoom(b[1] == 0 ? 1 : b[1] == 1 ? 0 : -1);
+        else if (b[1] == 3) {
+            A.attached = !A.attached;
+            app_log("Timeline %s", A.attached ? "attached" : "free");
+            place_timeline();
+        } else if (b[1] == 4) {
+            snap_toggle();
+        }
+        break;
+    case 4: /* Video information */
+        info_open();
         break;
     }
     /* Adjust: the menu stays open */
     r.r[1] = (intptr_t) p;
-    if (!ro_swi(Wimp_GetPointerInfo, &r) && (p[2] & 1) && A.proj && b[0] >= 0 && !(b[0] == 0 && b[1] >= 0))
+    if (!ro_swi(Wimp_GetPointerInfo, &r) && (p[2] & 1) && A.proj && b[0] >= 0 && b[0] != 4 && !(b[0] == 0 && b[1] >= 0))
         app_menu(menu_x, menu_y);
 }
 
@@ -900,6 +1056,14 @@ int app_key(int k)
     case '+': case '=': tl_zoom(1); return 1;
     case '-': case '_': tl_zoom(0); return 1;
     case 0x1A: tl_select(-1); return 1;           /* ^Z: clear the selection */
+    case 0x188: undo(0); return 1;                /* F8 */
+    case 0x189: undo(1); return 1;                /* F9 */
+    case 0x18F: to_cut(-1); return 1;             /* Up: the cut before */
+    case 0x18E: to_cut(1); return 1;              /* Down: the cut after */
+    case 'q': case 'Q': trim(0); return 1;
+    case 'w': case 'W': trim(1); return 1;
+    case 'n': case 'N': snap_toggle(); return 1;
+    case 'Z': case '\\': tl_zoom(-1); return 1;    /* Shift-Z, \\: the whole project */
     case 0x183: {                                  /* F3: save */
         int p[5];
         _kernel_swi_regs r;
@@ -930,6 +1094,10 @@ static void redraw(int *b)
     _kernel_swi_regs r;
     if (b[0] == tl_window()) {
         tl_redraw(b);
+        return;
+    }
+    if (info_window() && b[0] == info_window()) {
+        info_redraw(b);
         return;
     }
     r.r[1] = (intptr_t) b;
@@ -981,6 +1149,10 @@ static void click(int *b)
     case I_DELETE: delete_selected(!(buttons & 1)); break; /* Adjust: leaving a gap */
     case I_ZOOMOUT: tl_zoom(0); break;
     case I_ZOOMIN: tl_zoom(1); break;
+    case I_FIT: tl_zoom(-1); break;
+    case I_UNDO: undo(0); break;
+    case I_REDO: undo(1); break;
+    case I_SNAP: snap_toggle(); break;
     case I_SAVE: save(b[0], b[1]); break;
     case I_TRACK:
     case I_FILL: {
@@ -1009,6 +1181,36 @@ static void ack(int *b)
     r.r[1] = (intptr_t) b;
     r.r[2] = to;
     ro_swi(Wimp_SendMessage, &r);
+}
+
+/* Interactive help: what's under the pointer */
+static const char *help_for(int win, int icon)
+{
+    if (win == tl_window())
+        return "This is the Timeline.|MClick the ruler or drag the playhead to move it; click a clip to select it "
+               "(Adjust: select or not).|MCtrl and the scroll wheel zoom; N turns snapping to cuts on or off.";
+    if (win == -2)
+        return "This is the Reel Edit icon.|MClick Select to open the editor; drop video files on it to add them "
+               "to the project, or an MLT project to open it.";
+    if (win == info_window())
+        return "This window shows the clip's and the project's video information.";
+    if (win != V.win)
+        return NULL;
+    switch (icon) {
+    case I_SPLIT: return "Click to split the clip at the playhead (S).";
+    case I_DELETE: return "Click to delete the selected clip, closing the gap (Delete).|MAdjust leaves the gap.";
+    case I_UNDO: return "Click to undo the last edit (F8).";
+    case I_REDO: return "Click to redo the edit undone (F9).";
+    case I_SNAP: return "Click to turn snapping on or off (N): the playhead snaps to the cuts.";
+    case I_ZOOMOUT: return "Click to zoom the Timeline out (-).";
+    case I_ZOOMIN: return "Click to zoom the Timeline in (+).";
+    case I_FIT: return "Click to show the whole project in the Timeline (Shift-Z).";
+    case I_SAVE: return "Click to save the project (F3).";
+    case I_ZLABEL: return "The buttons beside this zoom the Timeline, not the picture.";
+    default:
+        return "This is the Viewer: the frame at the playhead.|MSpace plays and stops; J K L play backwards, "
+               "stop and forwards; Left and Right move a frame; Up and Down go to the cuts.";
+    }
 }
 
 static void message(int *b, int event)
@@ -1067,6 +1269,25 @@ static void message(int *b, int event)
         int frame = tl_window() && w == tl_window() ? tl_frame_at(b[7]) : -1;
         ack(b);
         app_load(file, type, frame);
+        break;
+    }
+    case MSG_HELPREQUEST: {
+        const char *h = help_for(b[8], b[9]);
+        if (!h)
+            break;
+        int reply[64];
+        int n = (int) strlen(h) + 1;
+        if (n > 236)
+            n = 236;
+        memcpy(&reply[5], h, (size_t) n);
+        ((char *) &reply[5])[n - 1] = 0;
+        reply[0] = (20 + n + 3) & ~3;
+        reply[3] = b[2];
+        reply[4] = MSG_HELPREPLY;
+        r.r[0] = 17;
+        r.r[1] = (intptr_t) reply;
+        r.r[2] = b[1];
+        ro_swi(Wimp_SendMessage, &r);
         break;
     }
     case MSG_MODECHANGE:
@@ -1144,12 +1365,14 @@ double re_test_speed(void) { return A.e ? re_engine_speed(A.e) : 0; }
 int re_test_open(void) { return A.e != NULL; }
 re_project *re_test_project(void) { return A.proj; }
 int re_test_selected(void) { return A.sel; }
+int re_test_snap(void) { return A.snap; }
+int re_test_busy(void) { return A.e && re_engine_busy(A.e); }
 const char *re_test_title(void) { return V.title; }
 #endif
 
 int reeledit_main(int argc, char **argv)
 {
-    static const int messages[] = {MSG_DATASAVEACK, MSG_DATALOAD, MSG_PREQUIT, MSG_MODECHANGE, 0};
+    static const int messages[] = {MSG_DATASAVEACK, MSG_DATALOAD, MSG_PREQUIT, MSG_MODECHANGE, MSG_HELPREQUEST, 0};
     int block[64];
     _kernel_swi_regs r;
     (void) argc;
@@ -1175,7 +1398,7 @@ int reeledit_main(int argc, char **argv)
            playing at the next picture's time; else none at all. */
         if (A.proj && re_project_changes(A.proj) != V.changes)
             app_edited();
-        int ev, busy = A.e && re_engine_busy(A.e);
+        int ev, busy = (A.e && re_engine_busy(A.e)) || tl_scrubbing(); /* (scrubbing: the pointer followed) */
         unsigned before = ro_now_cs();
         r.r[0] = busy ? 0 : 1;
         r.r[1] = (intptr_t) block;
@@ -1191,6 +1414,8 @@ int reeledit_main(int argc, char **argv)
             V.slept_cs += ro_now_cs() - before;
         switch (ev) {
         case 0:
+            if (tl_scrubbing())
+                tl_scrub_tick();
             if (A.e)
                 tick();
             break;
@@ -1199,7 +1424,7 @@ int reeledit_main(int argc, char **argv)
             if (block[0] == V.win)
                 open_window(block);
             else if (block[0] == tl_window())
-                tl_open_request(block);
+                timeline_moved(block);
             else {
                 r.r[1] = (intptr_t) block;
                 ro_swi(Wimp_OpenWindow, &r);
@@ -1214,9 +1439,18 @@ int reeledit_main(int argc, char **argv)
             }
             break;
         case 6: click(block); break;
-        case 7: sb_drag_end(block); break;
+        case 7:
+            if (tl_scrubbing())
+                tl_drag_end(block);
+            else
+                sb_drag_end(block);
+            break;
         case 8: key(block); break;
         case 9: menu_select(block); break;
+        case 10:
+            if (block[0] == tl_window())
+                tl_scroll(block);
+            break;
         case 17:
         case 18: message(block, ev); break;
         }
