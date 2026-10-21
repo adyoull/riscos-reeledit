@@ -529,9 +529,17 @@ static void draw_rects(int *b, int more, int redraw)
             r.r[7] = 0;
             ro_swi(OS_SpriteOp, &r);
         }
-        if (redraw && ov.shown && ov.win == b[0]) { /* the overlay's part of a redraw */
+        if (redraw && ov.shown && ov.win == b[0] && c.x0 < c.x1 && c.y0 < c.y1) {
+            /* the overlay's part of a redraw: only the picture's. Given the
+               whole rectangle, VideoOverlay clears all of it, so the
+               controls under the picture (the progress bar's updates) were
+               left black where they'd just been drawn. */
+            int ob[11];
+            memcpy(ob, b, sizeof(ob));
+            ob[7] = c.x0; ob[8] = c.y0; ob[9] = c.x1; ob[10] = c.y1;
+            vdu_clip(c.x0, c.y0, c.x1 - 1, c.y1 - 1);
             r.r[0] = ov.id;
-            r.r[1] = (intptr_t) b;
+            r.r[1] = (intptr_t) ob;
             ro_swi(ov.swi[OV_REDRAW], &r);
         }
         r.r[1] = (intptr_t) b;

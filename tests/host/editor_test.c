@@ -117,7 +117,7 @@ static char datasave_leaf[64];
 static int *plot_area;
 static int ov_made, ov_destroyed, ov_shown_bank = -1, ov_displays, ov_w, ov_h;
 static uint8_t *ov_buf[3];
-static int ov_block[6];
+static int ov_block[6], ov_redraws, ov_redraws_outside;
 static int ssb_closes, ssb_playing;
 static unsigned ssb_bytes, ssb_added, ssb_played, ssb_play_cs;
 static double ssb_level;
@@ -195,6 +195,13 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
             break;
         case 1: ov_destroyed++; ov_shown_bank = -1; break;
         case 2: ov_displays++; ov_shown_bank = (int) r->r[1]; break;
+        case 8: { /* RedrawWindow: given the picture's part of the rectangle only (it clears all it's given) */
+            const int *rb = (const int *) r->r[1];
+            ov_redraws++;
+            if (rb[8] < W[0].box[1] + 2 * 64 || rb[7] < W[0].box[0] || rb[9] > W[0].box[2] || rb[10] > W[0].box[3])
+                ov_redraws_outside++;
+            break;
+        }
         case 3: {
             int bank = (int) r->r[1], pitch = (ov_w + 31) & ~31;
             uint8_t *p = ov_buf[bank];
@@ -603,6 +610,8 @@ static int script(int *b, int mask)
     case 8: /* uncovered: the overlay again */
         if (fake_cs - phase_cs >= 30) {
             CHECK(ov_shown_bank >= 0, "the overlay didn't come back");
+            CHECK(ov_redraws > 0 && ov_redraws_outside == 0,
+                  "VideoOverlay_RedrawWindow given the controls: %d of %d redraws", ov_redraws_outside, ov_redraws);
             double ahead = (ssb_bytes - ssb_mark) / (1920.0 * 4) - (pos - 1);
             CHECK(ahead > 5 && ahead < 14, "the sound is %.1f frames ahead of the picture, not about 10", ahead);
             closes_mark = ssb_closes;
