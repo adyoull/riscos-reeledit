@@ -49,6 +49,20 @@ static void sound(void *ctx, const int16_t *samples, int frames)
     sound_frames += frames;
 }
 
+/* K's sound device: playing from snd_start at snd_rate x real time, in
+   46 ms blocks as StreamManager reports it */
+static unsigned snd_start;
+static double snd_rate;
+static double fake_queued(void *ctx)
+{
+    (void) ctx;
+    double given = sound_frames / 48000.0;
+    double played = snd_rate * (int) ((fake_clock - snd_start) / 4.6) * 0.046;
+    if (played > given)
+        played = given;
+    return given - played;
+}
+
 static unsigned clock_cs(void *ctx)
 {
     (void) ctx;
@@ -242,6 +256,32 @@ int main(int argc, char **argv)
     CHECK(st.jumps - before.jumps <= 1 + nshown / 16, "I: %d seeks for %d pictures backwards", st.jumps - before.jumps,
           nshown);
     CHECK(st.reverse_fills > before.reverse_fills, "I: no runs decoded");
+
+    /* K: the sound as the clock (io.sound_queued): a sound device playing 2%
+       slow; the pictures follow what's heard, not the system clock, and
+       the sound is kept about 0.4 s ahead */
+    re_engine_close(e);
+    re_engine_io io2 = io;
+    io2.sound_queued = fake_queued;
+    e = re_engine_open(argv[1], 1.0, &io2);
+    re_engine_poll(e);
+    reset_log();
+    snd_start = fake_clock;
+    snd_rate = 0.98;
+    re_engine_play(e, 1.0);
+    run(e, 300);
+    {
+        double heard = 1 + (fake_clock - snd_start) / 100.0 * snd_rate * 25; /* (frame 1's sound first) */
+        int last = nshown ? shown[nshown - 1] : -1;
+        CHECK(fabs(last - heard) <= 2, "K: after 3 s showing frame %d, the sound heard at %.1f", last, heard);
+        CHECK(last < 74, "K: frame %d after 3 s: following the system clock, not the slow sound", last);
+        double ahead = sound_frames / 1920.0 - (last - 1);
+        CHECK(ahead > 6 && ahead < 14, "K: sound %.1f frames ahead of the picture, not about 10", ahead);
+        re_engine_get_stats(e, &st);
+        CHECK(st.clock_moves > 10, "K: the clock steered %d times", st.clock_moves);
+    }
+    snd_rate = 0;
+    re_engine_play(e, 0);
 
     /* J: four times as fast: every fourth frame, about 25 pictures a second */
     re_engine_play(e, 0);

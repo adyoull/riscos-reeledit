@@ -1,4 +1,4 @@
-Reel Edit 0.1 (test 3)
+Reel Edit 0.1 (test 4)
 ======================
 
 Reel Edit is a video editor for RISC OS that is being written, on the MLT
@@ -11,7 +11,7 @@ It needs RISC OS 5 on ARMv7 with VFP (Raspberry Pi 2, 3, 4), with
 SharedUnixLibrary and ARMEABISupport (!Run checks). H.264 is decoded on
 the Pi's VideoCore (1080p needs gpu_mem=128 in config.txt) and HEVC on the
 Pi 4's HEVC block, the ARM taking over for anything they refuse. Sound
-plays through SharedSoundBuffer.
+plays through SharedSoundBuffer, and the pictures keep time with it.
 
 Using it
 --------

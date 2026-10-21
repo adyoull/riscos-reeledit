@@ -369,10 +369,15 @@ static void show(void *ctx, const re_picture *p)
     re_display_show(p, re_engine_speed(V.e) != 0);
 }
 
-/* More sound queued than this: it has fallen behind the picture (the
-   sound of pictures left out after a stall, given after the queue had run
-   dry): thrown away, a short gap, and in step again. */
-#define SOUND_BEHIND 0.25
+/* More sound queued than this (the engine keeps 0.4 s): something has gone
+   wrong; thrown away, a short gap, and in step again. */
+#define SOUND_BEHIND 1.0
+
+static double sound_queued(void *ctx)
+{
+    (void) ctx;
+    return re_sound_queued(V.snd);
+}
 
 static void sound(void *ctx, const int16_t *samples, int frames)
 {
@@ -482,6 +487,7 @@ static void open_file(const char *path)
     io.show = show;
     io.sound = V.snd ? sound : NULL; /* (none: late pictures aren't made just for their sound) */
     io.clock_cs = clock_cs;
+    io.sound_queued = V.snd ? sound_queued : NULL; /* the sound is the clock */
     io.sound_rate = SOUND_RATE;
     io.sound_channels = 2;
     V.e = re_engine_open(name, 1.0, &io);

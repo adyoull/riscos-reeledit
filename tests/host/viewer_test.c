@@ -74,7 +74,9 @@ static int ov_block[6];
 static int ov_mapped = -1;
 /* SharedSoundBuffer/StreamManager */
 static int ssb_opens, ssb_closes, ssb_playing;
-static unsigned ssb_bytes;
+static unsigned ssb_bytes;      /* given, all streams */
+static unsigned ssb_added;      /* given to this stream */
+static unsigned ssb_played, ssb_play_cs; /* played before the last start; when it started */
 static double ssb_level;        /* the loudest sample given */
 static _kernel_oserror err = {1, "fake: not here"};
 
@@ -117,6 +119,17 @@ static void rect_block(int *b, int update)
 }
 
 static int script(int *b, int mask);
+
+/* the stream's bytes played: at 48 kHz from when it started, in whole
+   blocks of 2048 sample frames as StreamManager counts, never more than
+   given */
+static unsigned ssb_heard(void)
+{
+    unsigned p = ssb_played;
+    if (ssb_playing)
+        p += (unsigned) ((fake_cs - ssb_play_cs) * 1920) / 8192 * 8192;
+    return p < ssb_added ? p : ssb_added;
+}
 
 _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out)
 {
@@ -179,9 +192,15 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
     }
     case 0x42: r->r[0] = fake_cs; break;  /* OS_ReadMonotonicTime */
     case 0x46: case 0x65: break;          /* OS_WriteN, OS_ScreenMode */
-    case 0x55FC0: ssb_opens++; r->r[0] = 5; ssb_playing = 0; break;  /* OpenStream */
+    case 0x55FC0: ssb_opens++; r->r[0] = 5; ssb_playing = 0; ssb_added = ssb_played = 0; break; /* OpenStream */
     case 0x55FC1: ssb_closes++; ssb_playing = 0; break;
-    case 0x55FC9: ssb_playing = r->r[1] & 1; break;                 /* Pause */
+    case 0x55FC9:                                                   /* Pause: R1 bit 0 set plays */
+        if ((r->r[1] & 1) && !ssb_playing)
+            ssb_play_cs = fake_cs;
+        else if (!(r->r[1] & 1) && ssb_playing)
+            ssb_played = ssb_heard();
+        ssb_playing = r->r[1] & 1;
+        break;
     case 0x55FCE: r->r[0] = 9; break;                               /* ReturnStreamHandle */
     case 0x55FC5: case 0x57287: break;
     case 0x57282: {                                                 /* AddBlock */
@@ -190,9 +209,10 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
             if (abs(smp[i]) > ssb_level)
                 ssb_level = abs(smp[i]);
         ssb_bytes += (unsigned) r->r[2];
+        ssb_added += (unsigned) r->r[2];
         break;
     }
-    case 0x57288: r->r[0] = ssb_bytes; r->r[1] = ssb_bytes; break;  /* BufferStats: all played */
+    case 0x57288: r->r[0] = ssb_added; r->r[1] = ssb_heard(); break; /* BufferStats: added, played */
     case 0x400C0: r->r[0] = 380; r->r[1] = TASK; break;             /* Wimp_Initialise */
     case 0x400C1: win_made++; r->r[0] = WIN; break;                 /* CreateWindow */
     case 0x400C2: r->r[0] = BAR_ICON; break;                        /* CreateIcon */
@@ -393,14 +413,10 @@ static int script(int *b, int mask)
         if (fake_cs - phase_cs >= 30) {
             CHECK(ov_shown_bank >= 0, "the overlay didn't come back");
             {
-                /* the sound given keeps time with the pictures, covered or not:
-                   one frame's (1920 sample frames at 48 kHz) for each frame
-                   played since frame 1, no more (StreamManager gets whole
-                   blocks of 2048, so up to one block's less) */
-                double given = (ssb_bytes - ssb_mark) / (1920.0 * 4);
-                int played = pos - 1;
-                CHECK(given <= played + 0.01 && given > played - 1.1, "%.2f frames' sound given for %d frames played",
-                      given, played);
+                /* the sound is the clock: kept about 0.4 s (10 frames) ahead
+                   of the picture, covered or not */
+                double ahead = (ssb_bytes - ssb_mark) / (1920.0 * 4) - (pos - 1);
+                CHECK(ahead > 5 && ahead < 14, "the sound is %.1f frames ahead of the picture, not about 10", ahead);
                 (void) play_cs;
             }
             closes_mark = ssb_closes;

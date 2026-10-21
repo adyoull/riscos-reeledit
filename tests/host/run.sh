@@ -20,6 +20,8 @@ O=$H/tests
 CC=${CC:-gcc}
 mkdir -p "$O"
 bad=0
+# (never run a test program left from before: a failed build would go unseen)
+rm -f "$O"/pull_test "$O"/prefer_test "$O"/engine_test "$O"/convert_test "$O"/render_test "$O"/viewer_test
 fail() { echo "FAIL: $*"; bad=1; }
 
 # ---- the clips

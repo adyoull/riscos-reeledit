@@ -114,11 +114,11 @@ else on the desktop moves. These rules keep that time short.
 8. **Background work in slices.** Thumbnails and short waveforms are made one
    item per null event, only while stopped.
 9. **Sound is the clock** while playing, through SharedSoundBuffer, as in Reel.
-   (Not yet in 0.1: the engine follows the system clock and gives each
-   frame's sound as the frame is shown, so the sound is about two
-   StreamManager blocks, 85 ms, behind the picture, and a stall longer than
-   that leaves a gap. Next: the engine takes the sound half a second ahead
-   and the pictures follow StreamManager's count.)
+   The engine takes the sound 0.4 s ahead of the picture (a few frames'
+   a poll, without decoding their pictures), and steers the picture clock
+   to what StreamManager says has been heard: a quarter of the way each
+   time its reading moves (a block, 46 ms), the whole way when more than
+   0.1 s out (as reelcore). Pictures left out cost nothing for the sound.
 10. **Nothing copied or converted that needn't be.** MLT copies each picture
     once, into its own buffer; its image cache (two more copies) is off, so
     Reel Edit's player keeps the few pictures it has just shown, for stepping

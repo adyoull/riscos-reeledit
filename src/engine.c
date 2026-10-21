@@ -21,6 +21,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* The sound kept queued ahead of what's heard (io.sound_queued) */
+#define SOUND_AHEAD 0.4
+#define SOUND_TOPUP 3 /* frames' sound taken a poll at most */
+
 /* Going backwards: frames kept (at most this many, and this much memory) */
 #define RC_SLOTS 32
 #define RC_BYTES (48 << 20)
@@ -47,6 +51,8 @@ struct re_engine
     int shown;            /* the frame on show (-1: none yet) */
     int seek_to;          /* a frame to draw at the next poll (-1: none) */
     int last_fetched;     /* the last frame asked of MLT */
+    int audio_next;       /* the sound clock: the next frame whose sound is taken */
+    double snd_last_q;    /* io.sound_queued's last reading (-1: none yet) */
     /* going backwards (re_engine_play): frames decoded forwards and kept */
     rc_slot rc[RC_SLOTS];
     int rc_n;             /* slots used: RC_BYTES / a picture's size, 4 to RC_SLOTS */
@@ -195,6 +201,8 @@ void re_engine_play(re_engine *e, double speed)
     e->base_position = from < 0 ? 0 : from;
     e->base_clock = now_cs(e);
     e->rc_end = -1; /* (a run half decoded: not finished) */
+    e->audio_next = e->base_position + 1;
+    e->snd_last_q = -1;
 }
 
 void re_engine_seek(re_engine *e, int position)
@@ -203,9 +211,48 @@ void re_engine_seek(re_engine *e, int position)
     e->base_position = e->seek_to;
     e->base_clock = now_cs(e);
     e->rc_end = -1;
+    e->audio_next = e->seek_to + 1;
+    e->snd_last_q = -1;
+}
+
+static mlt_frame frame_at(re_engine *e, int position);
+static void take_sound(re_engine *e, mlt_frame frame, int position);
+
+/* Sound clock: tops up the sound (a few frames' a poll) to SOUND_AHEAD,
+   and steers the picture clock towards what's being heard. StreamManager
+   says what's been played a block (46 ms) at a time, so the clock is moved
+   only when the reading changes, a quarter of the way (more than 0.1 s
+   out, the whole way): pictures stay evenly spaced (as reelcore does). */
+static void sound_tick(re_engine *e, double clock_due)
+{
+    int target = (int) floor(clock_due);
+    if (e->audio_next < target) /* (the picture went on without it: a stall) */
+        e->audio_next = target + 1;
+    for (int n = 0; n < SOUND_TOPUP && e->audio_next < e->length
+                    && e->io.sound_queued(e->io.ctx) < SOUND_AHEAD; n++) {
+        mlt_frame frame = frame_at(e, e->audio_next);
+        if (frame) {
+            take_sound(e, frame, e->audio_next);
+            mlt_frame_close(frame);
+        }
+        e->audio_next++;
+    }
+    double q = e->io.sound_queued(e->io.ctx);
+    if (q > 0 && q != e->snd_last_q) {
+        double heard = e->audio_next - q * e->fps, err = heard - clock_due;
+        e->base_position += fabs(err) > 0.1 * e->fps ? err : 0.25 * err;
+        e->stats.clock_moves++;
+    }
+    e->snd_last_q = q;
 }
 
 /* The frame's sound, at normal speed only. */
+/* The sound taken ahead of the picture, the clock (io.sound_queued) */
+static int sound_clock(re_engine *e)
+{
+    return e->io.sound && e->io.sound_queued && e->speed == 1.0;
+}
+
 static void take_sound(re_engine *e, mlt_frame frame, int position)
 {
     if (!e->io.sound || e->speed != 1.0)
@@ -265,7 +312,8 @@ static void render(re_engine *e, int position)
     re_picture p;
     if (!picture_of(e, frame, position, &p))
         e->io.show(e->io.ctx, &p);
-    take_sound(e, frame, position);
+    if (!sound_clock(e))
+        take_sound(e, frame, position);
     mlt_frame_close(frame);
     e->shown = position;
     e->stats.rendered++;
@@ -403,6 +451,10 @@ int re_engine_poll(re_engine *e)
 
     double elapsed = (double) (int) (now_cs(e) - e->base_clock);
     double due = e->base_position + elapsed / 100.0 * e->fps * e->speed;
+    if (sound_clock(e)) {
+        sound_tick(e, due);
+        due = e->base_position + elapsed / 100.0 * e->fps * e->speed;
+    }
     /* (a hair over, so a frame due exactly now isn't missed by rounding;
        backwards, the frame due is the one not yet passed: rounded up) */
     int target = e->speed > 0 ? (int) floor(due + 1e-6) : (int) ceil(due - 1e-6);
@@ -441,7 +493,7 @@ int re_engine_poll(re_engine *e)
             /* over a second behind: start the clock again from here */
             e->stats.skipped += gap;
             e->stats.resyncs++;
-        } else if (e->speed == 1.0 && e->io.sound) {
+        } else if (e->speed == 1.0 && e->io.sound && !sound_clock(e)) {
             for (int p = e->shown + 1; p < target; p++)
                 skip(e, p);
         } else {

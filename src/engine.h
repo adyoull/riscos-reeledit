@@ -49,6 +49,11 @@ typedef struct
     void *ctx;
     int sound_rate;     /* samples a second (default 48000) */
     int sound_channels; /* default 2 */
+    /* Seconds of sound given and not yet heard (SharedSoundBuffer's queue).
+       Given, the sound is the clock at normal speed: it's taken about
+       0.4 s ahead of the picture, and the pictures follow what's heard.
+       NULL: each frame's sound is given as its picture is shown. */
+    double (*sound_queued)(void *ctx);
 } re_engine_io;
 
 typedef struct
@@ -60,6 +65,7 @@ typedef struct
     int fetched;        /* frames asked of MLT (pictures made, left out, and kept for going backwards) */
     int jumps;          /* ... not straight after the one before: a seek, which decodes from a keyframe */
     int reverse_fills;  /* runs of frames decoded forwards and kept, to be shown going backwards */
+    int clock_moves;    /* times the picture clock was steered to the sound heard */
 } re_engine_stats;
 
 /* Open a project or clip, at the project's own size and frame rate (a
