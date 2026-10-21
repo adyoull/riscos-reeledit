@@ -325,7 +325,9 @@ static int create_window(void)
     icon_def(&w.icon[I_UNDO], button, undo_text, "R5,3", sizeof(undo_text));
     icon_def(&w.icon[I_REDO], button, redo_text, "R5,3", sizeof(redo_text));
     icon_def(&w.icon[I_SNAP], button, V.snap_text, "R5,3", sizeof(V.snap_text));
-    icon_def(&w.icon[I_ZLABEL], IF_TEXT | IF_VCENT | IF_INDIR | 0x200 | IF_COL(7, 1),
+    /* (filled, in the bar's grey: unfilled, the Wimp anti-aliases the text
+       against the window's background, black here, and it looks ragged) */
+    icon_def(&w.icon[I_ZLABEL], IF_TEXT | IF_VCENT | IF_FILLED | IF_INDIR | 0x200 | IF_COL(7, 1),
              zlabel_text, (const char *) -1, sizeof(zlabel_text));
     icon_def(&w.icon[I_FIT], button, fit_text, "R5,3", sizeof(fit_text));
     r.r[1] = (intptr_t) &w;
