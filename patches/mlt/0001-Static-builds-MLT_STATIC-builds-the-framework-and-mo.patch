@@ -1,7 +1,7 @@
 From 11580cb9d5b328ca7420bc4c63de850edc7b0c7f Mon Sep 17 00:00:00 2001
 From: Andrew Youll <andrewyoull86@gmail.com>
 Date: Tue, 20 Oct 2026 16:31:54 +0100
-Subject: [PATCH 1/5] Static builds: MLT_STATIC builds the framework and
+Subject: [PATCH 1/6] Static builds: MLT_STATIC builds the framework and
  modules as static libraries, registered at link time
 
 Systems without dlopen (RISC OS) need every module linked into the

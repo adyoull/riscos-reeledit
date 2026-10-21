@@ -38,6 +38,7 @@ typedef struct
     int position; /* the frame's position in the project */
     int colorspace; /* 601 or 709 */
     int full_range; /* 1: 0-255, 0: video range (16-235) */
+    double dar;     /* its shape on the screen (width over height; 0: as its pixels) */
 } re_picture;
 
 typedef struct

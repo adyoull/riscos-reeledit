@@ -133,7 +133,9 @@ int main(int argc, char **argv)
     CHECK(re_engine_poll(e) == -1, "stopped, but asked to be polled again");
     CHECK(nshown == 1 && shown[0] == 0, "first poll showed %d pictures", nshown);
     CHECK(re_engine_poll(e) == -1 && nshown == 1, "stopped and drawn, but drew again");
-    CHECK(last_w == 1280 && last_h == 720, "picture %dx%d", last_w, last_h);
+    /* (the clips' own size: 320x180 in a 1280x720 profile, fitted by the
+       display, not by MLT; project_test has more of this) */
+    CHECK(last_w == 320 && last_h == 180, "picture %dx%d", last_w, last_h);
 
     /* A: playing on a fast machine: every frame, on time, with its sound */
     reset_log();
@@ -350,7 +352,8 @@ int main(int argc, char **argv)
     CHECK(e && re_engine_width(e) == 640 && re_engine_height(e) == 360, "H: preview %dx%d",
           e ? re_engine_width(e) : 0, e ? re_engine_height(e) : 0);
     re_engine_poll(e);
-    CHECK(last_w == 640 && last_h == 360, "H: picture %dx%d", last_w, last_h);
+    CHECK(last_w == 320 && last_h == 180, "H: picture %dx%d (a clip smaller than the preview: as it is)", last_w,
+          last_h);
     re_engine_close(e);
 
     printf("engine_test: %s\n", failures ? "FAILED" : "passed");

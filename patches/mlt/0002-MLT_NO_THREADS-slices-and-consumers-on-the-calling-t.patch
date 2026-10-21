@@ -1,7 +1,7 @@
 From 7beaed59c30a0574e613759a13a99574ca710b2d Mon Sep 17 00:00:00 2001
 From: Andrew Youll <andrewyoull86@gmail.com>
 Date: Tue, 20 Oct 2026 16:32:26 +0100
-Subject: [PATCH 2/5] MLT_NO_THREADS: slices and consumers on the calling
+Subject: [PATCH 2/6] MLT_NO_THREADS: slices and consumers on the calling
  thread
 
 mlt_threads_disabled() says whether MLT should do all its work on the

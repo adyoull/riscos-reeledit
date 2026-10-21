@@ -1,7 +1,7 @@
 From c353dca3564b65d4537740710321b46943ae6f52 Mon Sep 17 00:00:00 2001
 From: Andrew Youll <andrewyoull86@gmail.com>
 Date: Tue, 20 Oct 2026 16:34:57 +0100
-Subject: [PATCH 4/5] avformat producer: preferred decoders, falling back to
+Subject: [PATCH 4/6] avformat producer: preferred decoders, falling back to
  the default, and drop_before after a jump
 
 The prefer property (or MLT_AVFORMAT_PREFER, or a default chosen at build

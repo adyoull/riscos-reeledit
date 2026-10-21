@@ -1,7 +1,7 @@
 From 876f9669da488a9f9a508dfa03740fe8f49b2586 Mon Sep 17 00:00:00 2001
 From: Andrew Youll <andrewyoull86@gmail.com>
 Date: Tue, 20 Oct 2026 20:02:49 +0100
-Subject: [PATCH 5/5] yuv420p video without conversions: playing, dissolving,
+Subject: [PATCH 5/6] yuv420p video without conversions: playing, dissolving,
  exporting, colours
 
 Profiled on Linux with MLT built without the xine module (as on RISC OS),

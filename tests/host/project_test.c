@@ -16,6 +16,7 @@
 #include "engine.h"
 #include "project.h"
 #include "measure.h"
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,10 +32,15 @@ static int fails;
         }                                                                                                          \
     } while (0)
 
-static int shown_y = -1, shown_pos = -1;
+static int shown_y = -1, shown_pos = -1, shown_w, shown_h, shown_cs;
+static double shown_dar;
 static void show(void *ctx, const re_picture *p)
 {
     (void) ctx;
+    shown_w = p->width;
+    shown_h = p->height;
+    shown_cs = p->colorspace;
+    shown_dar = p->dar;
     shown_y = p->planes[0][(p->height / 2) * p->strides[0] + p->width / 2];
     shown_pos = p->position;
 }
@@ -66,8 +72,8 @@ static const char *name_of(re_project *p, int i)
 
 int main(int argc, char **argv)
 {
-    if (argc != 6) {
-        fprintf(stderr, "usage: project_test a.mp4 b.mp4 numbered.mp4 out.mlt numbered.m2v\n");
+    if (argc != 9) {
+        fprintf(stderr, "usage: project_test a.mp4 b.mp4 numbered.mp4 out.mlt numbered.m2v four3-709.mp4 big.mp4 wide-dvd.mp4\n");
         return 2;
     }
     const char *a = argv[1], *b = argv[2], *n = argv[3], *out = argv[4];
@@ -238,6 +244,34 @@ int main(int argc, char **argv)
     re_project_close(p);
     p = re_project_open(out, 1);
     CHECK(p && !strcmp(layout(p), "c75"), "the .m2v's length not kept: %s", p ? layout(p) : "(not opened)");
+    re_project_close(p);
+
+    /* ---- clips of other sizes and shapes: shown as they are, in their own
+       colours, up to 1080p (MLT's fitting converted them several times) */
+    p = re_project_new();
+    re_project_add(p, a, -1);                /* 320x180, BT.601: the profile */
+    re_project_add(p, argv[6], -1);          /* 480x360 (4:3), BT.709 */
+    re_project_add(p, argv[7], -1);          /* 2560x1440: bigger than the overlay takes */
+    re_project_add(p, argv[8], -1);          /* 720x576, anamorphic 16:9 */
+    e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    re_engine_seek(e, 10);
+    re_engine_poll(e);
+    CHECK(shown_w == 320 && shown_h == 180 && fabs(shown_dar - 16.0 / 9) < 0.01 && shown_cs == 601,
+          "the profile's own clip: %dx%d, shape %.3f, BT.%d", shown_w, shown_h, shown_dar, shown_cs);
+    re_engine_seek(e, 80);
+    re_engine_poll(e);
+    CHECK(shown_w == 480 && shown_h == 360 && fabs(shown_dar - 4.0 / 3) < 0.01,
+          "a 4:3 480x360 clip shown at %dx%d, shape %.3f (not as it is)", shown_w, shown_h, shown_dar);
+    CHECK(shown_cs == 709, "the BT.709 clip shown as BT.%d (converted)", shown_cs);
+    re_engine_seek(e, 75 + 75 + 5);
+    re_engine_poll(e);
+    CHECK(shown_w == 320 && shown_h == 180, "a 2560x1440 clip shown at %dx%d, not fitted to 320x180", shown_w,
+          shown_h);
+    re_engine_seek(e, 75 + 75 + 25 + 5);
+    re_engine_poll(e);
+    CHECK(shown_w == 720 && shown_h == 576 && fabs(shown_dar - 16.0 / 9) < 0.01,
+          "an anamorphic 720x576 16:9 clip shown at %dx%d, shape %.3f", shown_w, shown_h, shown_dar);
+    re_engine_close(e);
     re_project_close(p);
 
     printf("project_test: %s\n", fails ? "FAILED" : "passed");

@@ -351,14 +351,37 @@ static mlt_frame frame_at(re_engine *e, int position)
 
 /* The frame's picture as Reel Edit shows it: yuv420p at the preview size.
    0, or -1 when there's none. */
-static int picture_of(re_engine *e, mlt_frame frame, int position, re_picture *p)
+/* A clip's own pictures up to this size are shown as they are (the display
+   fits them, the overlay in hardware); bigger ones are scaled by MLT */
+#define NATIVE_MAX (1920L * 1088 * 11 / 10)
+
+/* The frame's picture. native: a clip's picture at its own size, when it's
+   no bigger than NATIVE_MAX (else, or not native, the profile's size, the
+   preview scale's). Either way in the clip's own colours.
+
+   MLT would fit a clip of another size or shape into the profile's: asked
+   for yuv420p, its resize filter asks for yuv422 (for the bars), the
+   producer converts, the swscale filter scales (in yuv422), the bars are
+   added, and it's converted back; a BT.709 clip in a BT.601 (SD-sized)
+   profile was converted through RGB as well. Profiled on Linux, 1080p60
+   H.264 in a 1280x544 project: those conversions took more than the
+   decoding (2.5 pictures decoded a frame); on the Pi, with the VideoCore
+   decoding, nearly all the time. The display fits pictures of any size
+   and shows either colour space, so none of that is needed to show it. */
+static int picture_of(re_engine *e, mlt_frame frame, int position, re_picture *p, int native)
 {
     mlt_image_format format = mlt_image_yuv420p;
     int w = e->width, h = e->height;
     uint8_t *image = NULL;
+    mlt_properties props = MLT_FRAME_PROPERTIES(frame);
+    mlt_properties_set_int(props, "consumer.source_colours", 1); /* (patches/mlt 0006) */
+    int mw = mlt_properties_get_int(props, "meta.media.width"), mh = mlt_properties_get_int(props, "meta.media.height");
+    if (native && mw > 0 && mh > 0 && (long) mw * mh <= NATIVE_MAX)
+        mlt_properties_set(props, "consumer.rescale", "none");
     if (mlt_frame_get_image(frame, &image, &format, &w, &h, 0) || !image || format != mlt_image_yuv420p)
         return -1;
-    mlt_properties props = MLT_FRAME_PROPERTIES(frame);
+    double sar = mlt_frame_get_aspect_ratio(frame);
+    p->dar = (sar > 0 ? sar : 1.0) * w / h;
     p->planes[0] = image;
     p->planes[1] = image + w * h;
     p->planes[2] = image + w * h + (w / 2) * (h / 2);
@@ -380,7 +403,7 @@ static void render(re_engine *e, int position)
     if (!frame)
         return;
     re_picture p;
-    if (!picture_of(e, frame, position, &p))
+    if (!picture_of(e, frame, position, &p, 1))
         e->io.show(e->io.ctx, &p);
     if (!sound_clock(e))
         take_sound(e, frame, position);
@@ -439,7 +462,7 @@ static void rc_fill_one(re_engine *e)
         re_picture p;
         if (!frame)
             return;
-        if (!picture_of(e, frame, position, &p) && p.width == e->width && p.height == e->height
+        if (!picture_of(e, frame, position, &p, 0) && p.width == e->width && p.height == e->height
             && (slot->buf || (slot->buf = malloc(bytes)))) {
             memcpy(slot->buf, p.planes[0], bytes);
             slot->pos = position;
@@ -466,6 +489,7 @@ static void rc_show(re_engine *e, rc_slot *slot)
     p.position = slot->pos;
     p.colorspace = slot->colorspace;
     p.full_range = slot->full_range;
+    p.dar = mlt_profile_dar(e->profile);
     e->io.show(e->io.ctx, &p);
     e->shown = slot->pos;
     e->stats.rendered++;

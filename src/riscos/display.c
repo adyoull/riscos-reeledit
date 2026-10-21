@@ -263,8 +263,10 @@ int re_display_check_covered(void)
 
 /* Fits the overlay in the picture area, keeping the picture's shape. 1
    placed, 0 outside its scaling limits, -1 an error. */
-static int ov_place(int pw, int ph)
+static int ov_place(int pw, int ph, double dar)
 {
+    if (dar > 0) /* (its shape on the screen, not its pixels') */
+        pw = (int) (ph * dar + 0.5);
     int bw = (D.pic.x1 - D.pic.x0) >> D.xeig, bh = (D.pic.y1 - D.pic.y0) >> D.yeig;
     int rw, rh, x, y, want[9];
     _kernel_swi_regs r;
@@ -346,7 +348,7 @@ static int ov_show(const re_picture *p)
         ov.failed = 1;
         return 0;
     }
-    if ((placed = ov_place(fw, fh)) < 0) {
+    if ((placed = ov_place(fw, fh, p->dar)) < 0) {
         ov_fail("placing it failed");
         return 0;
     }
@@ -461,8 +463,9 @@ static int sprite_make(int w, int h)
 static int sprite_convert(const re_picture *p)
 {
     int w = D.spr_w, h = D.spr_h, rw, rh, x, y;
-    double sx = (double) w / p->width, sy = (double) h / p->height, s = sx < sy ? sx : sy;
-    rw = (int) (p->width * s + 0.5);
+    double pw = p->dar > 0 ? p->height * p->dar : p->width; /* (its shape on the screen) */
+    double sx = (double) w / pw, sy = (double) h / p->height, s = sx < sy ? sx : sy;
+    rw = (int) (pw * s + 0.5);
     rh = (int) (p->height * s + 0.5);
     if (rw > w) rw = w;
     if (rh > h) rh = h;

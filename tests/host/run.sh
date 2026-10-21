@@ -36,6 +36,12 @@ mk -f lavfi -i color=c=gray:s=320x180:r=25:d=3 -f lavfi -i sine=frequency=440:sa
   "$O/numbered-snd.mp4"
 # (raw MPEG-2 video: no container, so no length; MLT takes it to be endless)
 mk -i "$O/numbered.mp4" -c:v mpeg2video -q:v 2 -f mpeg2video "$O/numbered.m2v"
+# (other sizes and shapes: 4:3 in BT.709, and bigger than the overlay takes)
+mk -f lavfi -i color=c=green:s=480x360:r=25:d=3 -c:v libx264 -bf 0 -pix_fmt yuv420p -colorspace bt709 \
+  -color_primaries bt709 -color_trc bt709 "$O/four3-709.mp4"
+mk -f lavfi -i color=c=yellow:s=2560x1440:r=25:d=1 -c:v libx264 -bf 0 -pix_fmt yuv420p "$O/big.mp4"
+# (anamorphic: 720x576 shown 16:9, as DVDs are)
+mk -f lavfi -i color=c=blue:s=720x576:r=25:d=1 -vf setsar=64/45 -c:v libx264 -bf 0 -pix_fmt yuv420p "$O/wide-dvd.mp4"
 
 # ---- the test programs, linked as Reel Edit will be: every module built in
 export PKG_CONFIG_PATH="$H/ffmpeg/lib/pkgconfig"
@@ -88,7 +94,7 @@ echo "== render_test"
 echo "== engine_test"
 "$O/engine_test" project.mlt || bad=1
 echo "== project_test"
-"$O/project_test" a.mp4 b.mp4 numbered.mp4 project_test.mlt numbered.m2v 2>&1 | grep -v "^\[" || bad=1
+"$O/project_test" a.mp4 b.mp4 numbered.mp4 project_test.mlt numbered.m2v four3-709.mp4 big.mp4 wide-dvd.mp4 2>&1 | grep -v "^\[" || bad=1
 echo "== editor_test"
 "$O/editor_test" numbered-snd.mp4 numbered.mp4 numbered.m2v 2>&1 | grep -v "^\[" || bad=1
 for m in normal refuse late off lazy max exit; do
