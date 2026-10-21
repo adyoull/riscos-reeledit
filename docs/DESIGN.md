@@ -109,11 +109,17 @@ else on the desktop moves. These rules keep that time short.
 10. **Nothing copied or converted that needn't be.** MLT copies each picture
     once, into its own buffer; its image cache (two more copies) is off, so
     Reel Edit's player keeps the few pictures it has just shown, for stepping
-    back a frame without decoding again. That one copy matters: on the Pi 4
-    (engine test 4) reading a 1080p picture out of the VideoCore's buffers
-    took 9.7 ms, against 2.3 ms from the ARM decoder's (riscos-reelhwaccel
-    is looking at why). Through MLT, a picture then costs about 2-3 ms more
-    than FFmpeg alone.
+    back a frame without decoding again. That one copy matters: reading a 1080p
+    picture out of the VideoCore's (cacheable) buffers takes 1.4 ms alone but
+    about 9-10 ms while the VideoCore is decoding the next one
+    (riscos-reelhwaccel's VCDecTest 0.3; engine test 4 found 9.7 ms, against
+    2.3 ms from the ARM decoder's pictures). Reel copies once, from the
+    VideoCore's buffer straight into the overlay; through MLT it's into MLT's
+    buffer, then the overlay (about 2 ms more, from ordinary memory). Worth
+    doing in the Viewer: when a frame is a single clip with no effects, copy
+    from the decoder's frame (kept by reference, patch 0005) straight into
+    the overlay. Otherwise MLT costs about 2-3 ms a picture more than
+    FFmpeg alone.
     **Nothing converted either.** Decoded video is yuv420p, and so is
     what the overlay and the VideoCore's encoder take: MLT is patched (0005) so
     pictures stay yuv420p from the decoder to the screen or the encoder,

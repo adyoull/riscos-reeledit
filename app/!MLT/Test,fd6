@@ -1,6 +1,6 @@
 | Test for !MLT: tries MLT on this machine, in a TaskWindow (the desktop
-| keeps running: please try using it while the test runs). Double-click
-| it. Everything it makes goes in <Wimp$ScrapDir>.MLTtest (about 30MB);
+| keeps running: please try using it while the test runs). !MLT starts
+| it (or double-click this). Everything it makes goes in <Wimp$ScrapDir>.MLTtest (about 30MB);
 | delete it afterwards. Save the TaskWindow's text (Menu > Save) and send
 | it back.
 | Most useful with one of your own 1080p videos (at least 20 seconds), so

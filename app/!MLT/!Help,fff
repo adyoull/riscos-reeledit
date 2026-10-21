@@ -17,8 +17,9 @@ Trying it
 ---------
 Most useful with one of your own 1080p videos, at least 20 seconds long:
   *Set MLTtest$Clip SDFS::Pi.$.Videos.clip/mp4
-Then double-click Test. It runs in a TaskWindow, so the desktop keeps
-working (please try using it while the test runs). It makes two 1080p
+Then double-click !MLT: it starts Test (shift-double-click opens !MLT
+instead). Test runs in a TaskWindow, so the desktop keeps working
+(please try using it while the test runs). It makes two 1080p
 clips and a busy one (random noise) with the VideoCore's encoder, times
 decoding the busy clip with FFmpeg alone and through MLT, puts a crossfade
 between the other two, times
