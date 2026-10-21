@@ -1,4 +1,4 @@
-MLT 7.42.0 for RISC OS: engine test 4
+MLT 7.42.0 for RISC OS: engine test 5
 =====================================
 
 This is the engine of Reel Edit, a video editor for RISC OS that is being
@@ -19,7 +19,9 @@ Most useful with one of your own 1080p videos, at least 20 seconds long:
   *Set MLTtest$Clip SDFS::Pi.$.Videos.clip/mp4
 Then double-click Test. It runs in a TaskWindow, so the desktop keeps
 working (please try using it while the test runs). It makes two 1080p
-clips with the VideoCore's encoder, puts a crossfade between them, times
+clips and a busy one (random noise) with the VideoCore's encoder, times
+decoding the busy clip with FFmpeg alone and through MLT, puts a crossfade
+between the other two, times
 how fast the editor's preview could make the pictures (VideoCore and ARM
 decoding), and exports the result; then the same with your clip.
 Everything goes in <Wimp$ScrapDir>.MLTtest. Save the TaskWindow's text
@@ -29,7 +31,8 @@ mltbench
 --------
   mltbench FILE [FRAMES] [SCALE]
 times how long each picture of a clip or project takes to make, exactly as
-Reel Edit's preview will ask for them; SCALE 0.5 makes them at half size.
+Reel Edit's preview will ask for them (on average, usually (the median),
+and the slowest); SCALE 0.5 makes them at half size.
   mltbench -raw FILE [FRAMES]
 decodes the file with FFmpeg alone, with the decoder MLT would choose: the
 least MLT could cost, to compare with the figure above.

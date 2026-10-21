@@ -9,7 +9,9 @@
  * picture: the least MLT could cost, to compare with MLT's figure.
  * SCALE: the preview size against the project's (default 1; 0.5 half).
  * It prints which decoder each clip got (MLT's info messages), then the
- * time a picture took on average and at worst, and the first picture
+ * time a picture took on average, the middle time (the median: what a
+ * picture usually costs, unmoved by a few slow ones such as a VideoCore
+ * decoder being handed over) and the slowest, and the first picture
  * separately (opening and the first decode).
  */
 #include <framework/mlt.h>
@@ -26,6 +28,12 @@ static double now(void)
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
     return t.tv_sec + t.tv_nsec / 1e9;
+}
+
+static int by_time(const void *a, const void *b)
+{
+    double x = *(const double *) a, y = *(const double *) b;
+    return x < y ? -1 : x > y;
 }
 
 static int raw(const char *file, int frames)
@@ -144,6 +152,7 @@ int main(int argc, char **argv)
     if (frames > mlt_producer_get_length(producer))
         frames = mlt_producer_get_length(producer);
     double start = now(), worst = 0, first = 0;
+    double *times = calloc(frames > 0 ? frames : 1, sizeof *times);
     for (int i = 0; i < frames; i++) {
         double t0 = now();
         mlt_producer_seek(producer, i);
@@ -156,6 +165,7 @@ int main(int argc, char **argv)
             printf("bench: %s, %d frames, %dx%d %s\n", argv[1], frames, w, h, mlt_image_format_name(format));
         mlt_frame_close(frame);
         double t = now() - t0;
+        times[i] = t;
         if (i == 0) {
             first = t;
             start = now();
@@ -164,8 +174,16 @@ int main(int argc, char **argv)
         }
     }
     double total = now() - start;
-    printf("bench: the first picture %.0f ms; then %.1f ms a picture (%.1f a second), the slowest %.1f ms\n",
-           first * 1000, total * 1000 / (frames > 1 ? frames - 1 : 1), (frames - 1) / total, worst * 1000);
+    double median = 0;
+    if (frames > 1) {
+        qsort(times + 1, frames - 1, sizeof *times, by_time);
+        median = times[1 + (frames - 1) / 2];
+    }
+    free(times);
+    printf("bench: the first picture %.0f ms; then %.1f ms a picture (%.1f a second), usually %.1f ms, "
+           "the slowest %.1f ms\n",
+           first * 1000, total * 1000 / (frames > 1 ? frames - 1 : 1), (frames - 1) / total, median * 1000,
+           worst * 1000);
     mlt_consumer_close(consumer);
     mlt_producer_close(producer);
     return 0;

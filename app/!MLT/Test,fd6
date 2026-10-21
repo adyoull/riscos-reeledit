@@ -10,7 +10,7 @@ Run <MLT$Dir>.!Boot
 RMEnsure SharedUnixLibrary 1.16 Error MLT needs SharedUnixLibrary 1.16 or later.
 RMEnsure ARMEABISupport 0 Error MLT needs the ARMEABISupport module.
 CDir <Wimp$ScrapDir>.MLTtest
-Echo MLT engine test 4 (melt 7.42.0, riscos-reeledit test build 4)
+Echo MLT engine test 5 (melt 7.42.0, riscos-reeledit test build 5)
 melt -version
 Echo (1080p on the VideoCore needs gpu_mem=128 or more in config.txt. MLT keeps at most one
 Echo VideoCore decoder open; restart the Pi first if an earlier test left one open.)
@@ -20,12 +20,22 @@ Echo start <Sys$Time>
 melt -profile atsc_1080p_25 colour:red out=249 -consumer avformat:/<Wimp$ScrapDir>/MLTtest/red.mp4 vcodec=h264_encvchiq vb=8M an=1
 melt -profile atsc_1080p_25 colour:blue out=249 -consumer avformat:/<Wimp$ScrapDir>/MLTtest/blue.mp4 vcodec=h264_encvchiq vb=8M an=1
 Echo end   <Sys$Time>
+Echo    and a 5 second busy clip (random noise: every picture full of detail, harder to decode than most real video)
+melt -profile atsc_1080p_25 noise: out=124 -consumer avformat:/<Wimp$ScrapDir>/MLTtest/busy.mp4 vcodec=h264_encvchiq vb=8M an=1
+Echo end   <Sys$Time>
 Echo
 Echo 2. A 2 second crossfade between them, saved as a project (MLT XML)
 melt -profile atsc_1080p_25 /<Wimp$ScrapDir>/MLTtest/red.mp4 /<Wimp$ScrapDir>/MLTtest/blue.mp4 -mix 50 -mixer luma -consumer xml:/<Wimp$ScrapDir>/MLTtest/project.mlt
 Echo
-Echo 3. One clip decoded by FFmpeg alone (no MLT), then the project's pictures made as the editor's preview makes them:
-Echo    FFmpeg alone: VideoCore, then ARM
+Echo 3. Clips decoded by FFmpeg alone (no MLT) and through MLT, then the project's pictures made as the editor's preview makes them
+Echo    the busy clip: FFmpeg alone, then MLT; VideoCore, then ARM
+mltbench -raw /<Wimp$ScrapDir>/MLTtest/busy.mp4
+mltbench /<Wimp$ScrapDir>/MLTtest/busy.mp4
+Set MLT_AVFORMAT_PREFER none
+mltbench -raw /<Wimp$ScrapDir>/MLTtest/busy.mp4
+mltbench /<Wimp$ScrapDir>/MLTtest/busy.mp4
+Unset MLT_AVFORMAT_PREFER
+Echo    the red clip, FFmpeg alone: VideoCore, then ARM
 mltbench -raw /<Wimp$ScrapDir>/MLTtest/red.mp4
 Set MLT_AVFORMAT_PREFER none
 mltbench -raw /<Wimp$ScrapDir>/MLTtest/red.mp4
