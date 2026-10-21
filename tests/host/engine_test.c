@@ -64,12 +64,15 @@ static int run(re_engine *e, int centiseconds)
     int polls = 0, idle_zero = 0;
     while ((int) (end - fake_clock) > 0 && polls < 100000) {
         int before = nshown;
+        re_engine_stats a, b;
+        re_engine_get_stats(e, &a);
         int wait = re_engine_poll(e);
+        re_engine_get_stats(e, &b);
         polls++;
         if (wait < 0)
             break;
         CHECK(wait <= 100, "asked to wait %d cs while playing", wait);
-        if (wait == 0 && nshown == before)
+        if (wait == 0 && nshown == before && b.fetched == a.fetched) /* (no picture, nothing decoded) */
             idle_zero++;
         else
             idle_zero = 0;
@@ -207,6 +210,51 @@ int main(int argc, char **argv)
     for (int i = 1; i < nshown; i++)
         CHECK(shown[i] < shown[i - 1], "G: frame %d after %d going backwards", shown[i], shown[i - 1]);
     CHECK(sound_frames == 0, "G: sound at -2");
+
+    /* I: backwards at normal speed: every frame, going down, and MLT asked
+       for runs of frames forwards (one a poll), not each frame on its own
+       (which in long-GOP video decodes from a keyframe each time) */
+    re_engine_play(e, 0);
+    re_engine_seek(e, 120);
+    re_engine_poll(e);
+    reset_log();
+    re_engine_get_stats(e, &st);
+    re_engine_stats before = st;
+    re_engine_play(e, -1.0);
+    {
+        unsigned end = fake_clock + 200;
+        int polls = 0;
+        while ((int) (end - fake_clock) > 0 && polls++ < 100000) {
+            re_engine_stats a, b;
+            re_engine_get_stats(e, &a);
+            int wait = re_engine_poll(e);
+            re_engine_get_stats(e, &b);
+            CHECK(b.fetched - a.fetched <= 1, "I: %d frames asked of MLT in one poll", b.fetched - a.fetched);
+            if (wait < 0)
+                break;
+            fake_clock += wait + 1; /* (each poll takes a moment) */
+        }
+    }
+    re_engine_get_stats(e, &st);
+    CHECK(nshown >= 25, "I: %d pictures in 2 s backwards (each poll a centisecond here)", nshown);
+    for (int i = 1; i < nshown; i++)
+        CHECK(shown[i] == shown[i - 1] - 1, "I: frame %d after %d going backwards", shown[i], shown[i - 1]);
+    CHECK(st.jumps - before.jumps <= 1 + nshown / 16, "I: %d seeks for %d pictures backwards", st.jumps - before.jumps,
+          nshown);
+    CHECK(st.reverse_fills > before.reverse_fills, "I: no runs decoded");
+
+    /* J: four times as fast: every fourth frame, about 25 pictures a second */
+    re_engine_play(e, 0);
+    re_engine_seek(e, 0);
+    re_engine_poll(e);
+    reset_log();
+    re_engine_play(e, 4.0);
+    run(e, 100);
+    CHECK(nshown >= 20 && nshown <= 27, "J: %d pictures in 1 s at 4x", nshown);
+    for (int i = 1; i < nshown; i++)
+        CHECK(shown[i] - shown[i - 1] == 4, "J: frame %d after %d at 4x", shown[i], shown[i - 1]);
+    CHECK(nshown > 0 && abs(shown[nshown - 1] - 100) <= 4, "J: after 1 s at 4x, at frame %d",
+          nshown ? shown[nshown - 1] : -1);
     re_engine_close(e);
 
     /* H: preview at half size */

@@ -94,6 +94,14 @@ else on the desktop moves. These rules keep that time short.
    doesn't copy them out.
 5. **Scrubbing renders only the newest position.** Positions asked for while a
    frame is being made replace each other; only the latest is drawn.
+   **Shuttling faster shows fewer frames, not more:** at x2 and x4 every
+   second or fourth frame, so no more pictures a second are made than at x1
+   (Viewer test 2: at x4 every frame was made and each waited for the
+   overlay's vsync, the desktop asleep 1% of the time). **Backwards**, a
+   frame on its own is decoded from its keyframe (a long-GOP AVI on the Pi:
+   one picture every 1-1.5 s, the desktop held each time), so runs of up to
+   32 frames (48 MB) before the one due are decoded forwards, one a poll,
+   kept and shown going back.
 6. **Preview at the project's size; the overlay scales it.** Rendering at a
    smaller size costs a software scale per clip, which on Linux made a half-size
    preview slower than full size (21 against 13 ms a 1080p picture). The

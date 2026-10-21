@@ -21,6 +21,17 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Going backwards: frames kept (at most this many, and this much memory) */
+#define RC_SLOTS 32
+#define RC_BYTES (48 << 20)
+
+typedef struct
+{
+    uint8_t *buf;
+    int pos;        /* -1: empty */
+    int colorspace, full_range;
+} rc_slot;
+
 struct re_engine
 {
     re_engine_io io;
@@ -35,6 +46,11 @@ struct re_engine
     unsigned base_clock;  /* ...and when */
     int shown;            /* the frame on show (-1: none yet) */
     int seek_to;          /* a frame to draw at the next poll (-1: none) */
+    int last_fetched;     /* the last frame asked of MLT */
+    /* going backwards (re_engine_play): frames decoded forwards and kept */
+    rc_slot rc[RC_SLOTS];
+    int rc_n;             /* slots used: RC_BYTES / a picture's size, 4 to RC_SLOTS */
+    int rc_next, rc_end;  /* a run being decoded: the next frame, the last (-1: none) */
     re_engine_stats stats;
 };
 
@@ -99,6 +115,15 @@ re_engine *re_engine_open(const char *file, double preview_scale, const re_engin
     e->height = even(e->profile->height * preview_scale);
     e->shown = -1;
     e->seek_to = 0;
+    e->last_fetched = -2;
+    {
+        size_t bytes = (size_t) e->width * e->height * 3 / 2;
+        int n = (int) (RC_BYTES / (bytes ? bytes : 1));
+        e->rc_n = n < 4 ? 4 : n > RC_SLOTS ? RC_SLOTS : n;
+        for (int i = 0; i < RC_SLOTS; i++)
+            e->rc[i].pos = -1;
+        e->rc_end = -1;
+    }
     return e;
 }
 
@@ -112,6 +137,8 @@ void re_engine_close(re_engine *e)
         mlt_producer_close(e->producer);
     if (e->profile)
         mlt_profile_close(e->profile);
+    for (int i = 0; i < RC_SLOTS; i++)
+        free(e->rc[i].buf);
     free(e);
 }
 
@@ -167,6 +194,7 @@ void re_engine_play(re_engine *e, double speed)
     e->speed = speed;
     e->base_position = from < 0 ? 0 : from;
     e->base_clock = now_cs(e);
+    e->rc_end = -1; /* (a run half decoded: not finished) */
 }
 
 void re_engine_seek(re_engine *e, int position)
@@ -174,6 +202,7 @@ void re_engine_seek(re_engine *e, int position)
     e->seek_to = clamp_position(e, position);
     e->base_position = e->seek_to;
     e->base_clock = now_cs(e);
+    e->rc_end = -1;
 }
 
 /* The frame's sound, at normal speed only. */
@@ -195,8 +224,36 @@ static void take_sound(re_engine *e, mlt_frame frame, int position)
 
 static mlt_frame frame_at(re_engine *e, int position)
 {
+    e->stats.fetched++;
+    if (position != e->last_fetched + 1)
+        e->stats.jumps++;
+    e->last_fetched = position;
     mlt_producer_seek(e->producer, position);
     return mlt_consumer_get_frame(e->consumer);
+}
+
+/* The frame's picture as Reel Edit shows it: yuv420p at the preview size.
+   0, or -1 when there's none. */
+static int picture_of(re_engine *e, mlt_frame frame, int position, re_picture *p)
+{
+    mlt_image_format format = mlt_image_yuv420p;
+    int w = e->width, h = e->height;
+    uint8_t *image = NULL;
+    if (mlt_frame_get_image(frame, &image, &format, &w, &h, 0) || !image || format != mlt_image_yuv420p)
+        return -1;
+    mlt_properties props = MLT_FRAME_PROPERTIES(frame);
+    p->planes[0] = image;
+    p->planes[1] = image + w * h;
+    p->planes[2] = image + w * h + (w / 2) * (h / 2);
+    p->strides[0] = w;
+    p->strides[1] = p->strides[2] = w / 2;
+    p->width = w;
+    p->height = h;
+    p->position = position;
+    int cs = mlt_properties_get_int(props, "colorspace");
+    p->colorspace = cs == 601 || (cs != 709 && h <= 576) ? 601 : 709; /* (unsaid: SD is 601) */
+    p->full_range = mlt_properties_get_int(props, "full_range");
+    return 0;
 }
 
 /* Draw a frame: its picture to show(), and its sound. */
@@ -205,26 +262,9 @@ static void render(re_engine *e, int position)
     mlt_frame frame = frame_at(e, position);
     if (!frame)
         return;
-    mlt_image_format format = mlt_image_yuv420p;
-    int w = e->width, h = e->height;
-    uint8_t *image = NULL;
-    if (!mlt_frame_get_image(frame, &image, &format, &w, &h, 0) && image
-        && format == mlt_image_yuv420p) {
-        mlt_properties props = MLT_FRAME_PROPERTIES(frame);
-        re_picture p;
-        p.planes[0] = image;
-        p.planes[1] = image + w * h;
-        p.planes[2] = image + w * h + (w / 2) * (h / 2);
-        p.strides[0] = w;
-        p.strides[1] = p.strides[2] = w / 2;
-        p.width = w;
-        p.height = h;
-        p.position = position;
-        int cs = mlt_properties_get_int(props, "colorspace");
-        p.colorspace = cs == 601 || (cs != 709 && h <= 576) ? 601 : 709; /* (unsaid: SD is 601) */
-        p.full_range = mlt_properties_get_int(props, "full_range");
+    re_picture p;
+    if (!picture_of(e, frame, position, &p))
         e->io.show(e->io.ctx, &p);
-    }
     take_sound(e, frame, position);
     mlt_frame_close(frame);
     e->shown = position;
@@ -242,10 +282,81 @@ static void skip(re_engine *e, int position)
     e->stats.skipped++;
 }
 
+/* Frames from one picture to the next: 1, or the speed when faster */
+static int step_of(re_engine *e)
+{
+    double s = fabs(e->speed);
+    return s >= 2 ? (int) s : 1;
+}
+
+/* ---- going backwards: runs of frames kept --------------------------------- */
+
+static rc_slot *rc_find(re_engine *e, int position)
+{
+    for (int i = 0; i < e->rc_n; i++)
+        if (e->rc[i].pos == position)
+            return &e->rc[i];
+    return NULL;
+}
+
+/* Decodes the next frame of the run and keeps it (in the slot of the
+   frame furthest from it). */
+static void rc_fill_one(re_engine *e)
+{
+    int position = e->rc_next++;
+    size_t bytes = (size_t) e->width * e->height * 3 / 2;
+    rc_slot *slot = rc_find(e, position);
+    if (!slot) {
+        int far = 0;
+        for (int i = 0; i < e->rc_n; i++) {
+            if (e->rc[i].pos < 0) {
+                far = i;
+                break;
+            }
+            if (abs(e->rc[i].pos - position) > abs(e->rc[far].pos - position))
+                far = i;
+        }
+        slot = &e->rc[far];
+        mlt_frame frame = frame_at(e, position);
+        re_picture p;
+        if (!frame)
+            return;
+        if (!picture_of(e, frame, position, &p) && p.width == e->width && p.height == e->height
+            && (slot->buf || (slot->buf = malloc(bytes)))) {
+            memcpy(slot->buf, p.planes[0], bytes);
+            slot->pos = position;
+            slot->colorspace = p.colorspace;
+            slot->full_range = p.full_range;
+        }
+        mlt_frame_close(frame);
+    }
+    if (e->rc_next > e->rc_end)
+        e->rc_end = -1; /* the run is done */
+}
+
+static void rc_show(re_engine *e, rc_slot *slot)
+{
+    re_picture p;
+    int w = e->width, h = e->height;
+    p.planes[0] = slot->buf;
+    p.planes[1] = slot->buf + w * h;
+    p.planes[2] = slot->buf + w * h + (w / 2) * (h / 2);
+    p.strides[0] = w;
+    p.strides[1] = p.strides[2] = w / 2;
+    p.width = w;
+    p.height = h;
+    p.position = slot->pos;
+    p.colorspace = slot->colorspace;
+    p.full_range = slot->full_range;
+    e->io.show(e->io.ctx, &p);
+    e->shown = slot->pos;
+    e->stats.rendered++;
+}
+
 /* Centiseconds until the next frame is due. */
 static int wait_for_next(re_engine *e)
 {
-    int next = e->shown + (e->speed > 0 ? 1 : -1);
+    int next = e->shown + (e->speed > 0 ? 1 : -1) * step_of(e);
     double due = (next - e->base_position) / (e->fps * e->speed) * 100.0;
     double elapsed = (double) (int) (now_cs(e) - e->base_clock);
     double wait = ceil(due - elapsed);
@@ -272,10 +383,29 @@ int re_engine_poll(re_engine *e)
     if (e->speed == 0)
         return -1;
 
+    if (e->speed < 0 && e->rc_end >= 0) {
+        /* decoding a run to go back through: a frame a poll, the clock
+           waiting; then the last of it (the one that was due) shown */
+        int last = e->rc_end;
+        rc_fill_one(e);
+        if (e->rc_end < 0) {
+            rc_slot *s = rc_find(e, last);
+            if (s)
+                rc_show(e, s);
+            else
+                render(e, last);
+            e->base_position = last;
+            e->base_clock = now_cs(e);
+            return wait_for_next(e);
+        }
+        return 0;
+    }
+
     double elapsed = (double) (int) (now_cs(e) - e->base_clock);
     double due = e->base_position + elapsed / 100.0 * e->fps * e->speed;
-    /* (a hair over, so a frame due exactly now isn't missed by rounding) */
-    int target = (int) floor(due + 1e-6);
+    /* (a hair over, so a frame due exactly now isn't missed by rounding;
+       backwards, the frame due is the one not yet passed: rounded up) */
+    int target = e->speed > 0 ? (int) floor(due + 1e-6) : (int) ceil(due - 1e-6);
     if (target >= e->length || target < 0) {
         /* the end (or the start, backwards): the last frame, then stop */
         target = clamp_position(e, target);
@@ -284,8 +414,26 @@ int re_engine_poll(re_engine *e)
         e->speed = 0;
         return -1;
     }
-    if (target == e->shown)
+    if (e->shown >= 0 && abs(target - e->shown) < step_of(e))
         return wait_for_next(e);
+    if (step_of(e) > 1) /* (shown on the speed's steps: 4, 8, 12 ... at 4x) */
+        target = e->shown + (target - e->shown) / step_of(e) * step_of(e);
+
+    if (e->speed < 0 && e->shown >= 0) {
+        rc_slot *s = rc_find(e, target);
+        if (s) {
+            int gap = e->shown - target - 1;
+            e->stats.skipped += gap > 0 ? gap : 0;
+            rc_show(e, s);
+            return wait_for_next(e);
+        }
+        /* a run up to it, decoded forwards from its start */
+        int from = target - e->rc_n + 1;
+        e->rc_next = from < 0 ? 0 : from;
+        e->rc_end = target;
+        e->stats.reverse_fills++;
+        return re_engine_poll(e);
+    }
 
     int gap = e->speed > 0 ? target - e->shown - 1 : e->shown - target - 1;
     if (e->shown >= 0 && gap > 0) {

@@ -57,6 +57,9 @@ typedef struct
     int skipped;        /* pictures left out to keep up with the clock */
     int resyncs;        /* times it fell so far behind that the clock was moved on */
     int sound_frames;   /* sample frames given to sound() */
+    int fetched;        /* frames asked of MLT (pictures made, left out, and kept for going backwards) */
+    int jumps;          /* ... not straight after the one before: a seek, which decodes from a keyframe */
+    int reverse_fills;  /* runs of frames decoded forwards and kept, to be shown going backwards */
 } re_engine_stats;
 
 /* Open a project or clip, at the project's own size and frame rate (a
@@ -71,7 +74,14 @@ int re_engine_width(re_engine *e);   /* the pictures' size (after preview_scale)
 int re_engine_height(re_engine *e);
 
 /* Play at a speed (1 normal, 2 twice as fast, -1 backwards; 0 stops). Sound
-   only at 1. */
+   only at 1. Faster than 1 (2, 4) shows every second or fourth frame, so no
+   more pictures a second are made than at 1.
+
+   Backwards: a frame on its own would be decoded from its keyframe each
+   time (in long-GOP video, up to hundreds of frames for one picture, the
+   desktop held for a second), so runs of frames before the one due are
+   decoded forwards, one a poll, kept, and shown going back; the clock waits
+   while a run is decoded. */
 void re_engine_play(re_engine *e, double speed);
 double re_engine_speed(re_engine *e);
 

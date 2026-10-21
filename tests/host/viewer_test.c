@@ -439,7 +439,7 @@ static int script(int *b, int mask)
         return key(b, 'j');
     case 12: /* backwards */
         CHECK(re_test_speed() == -1, "J: speed %g, not -1", re_test_speed());
-        if (fake_cs - phase_cs >= 20) {
+        if (fake_cs - phase_cs >= 80) { /* (a run decoded first, a frame a poll) */
             CHECK(pos < pos_mark - 2, "J: from %d to %d, not backwards", pos_mark, pos);
             next(13);
             return key(b, 'K');
