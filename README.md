@@ -7,9 +7,11 @@ Raspberry Pi's video hardware through
 [riscos-reelhwaccel](https://github.com/adyoull/riscos-reelhwaccel) and
 FFmpeg from [riscos-ffmpeg](https://github.com/adyoull/riscos-ffmpeg).
 
-**State:** the engine. MLT 7.42.0 and melt build for RISC OS and pass every
-check and Linux test below. Nothing here has run on RISC OS yet; `!MLT`
-(the engine test) is for that. The editor's windows come next: see
+**State:** the engine works on a Raspberry Pi 4 (`!MLT`, engine tests 1-5:
+1080p H.264 on the VideoCore at about 10 ms a picture through MLT, and
+exports in about real time). The desktop program, `!ReelEdit`, has its
+first window, the Viewer (0.1, tested on Linux against a fake Wimp; not
+yet run on RISC OS). The editing windows come next: see
 [docs/DESIGN.md](docs/DESIGN.md).
 
 ## What's here
@@ -19,6 +21,8 @@ check and Linux test below. Nothing here has run on RISC OS yet; `!MLT`
 | `patches/mlt/` | Five patches to MLT 7.42.0: static modules (no dlopen), no threads, the avformat module without threads, preferred (hardware) decoders with a fallback, opened only when used, and no needless picture conversions |
 | `build/` | Fetching the sources, the RISC OS build, the Linux build for the tests, the `!MLT` zip |
 | `src/engine.c` | Reel Edit's player: a project played from Wimp null events, a picture at a time |
+| `src/riscos/` | The desktop program, `!ReelEdit`: the Viewer (0.1), its overlay and sprite drawing, sound |
+| `app/!ReelEdit/` | The application's files (`build/package-reeledit.sh` makes the zip) |
 | `app/!MLT/` | The engine test application: `*melt`, `*mltbench` (`tools/bench.c`), and `Test`, which tries MLT on the machine |
 | `tests/host/` | Linux tests |
 | `docs/` | [DESIGN.md](docs/DESIGN.md): the editor; [PORTING.md](docs/PORTING.md): what was changed for RISC OS and why |
@@ -60,6 +64,13 @@ threads, the same preferred decoders) and checks:
   every frame on a fast machine, keeping to the clock on a slow one with the
   sound unbroken, catching up after a stall, seeks that replace each other,
   stopping at the end, backwards at double speed, half-size preview.
+- **viewer_test** runs `!ReelEdit` against a scripted fake Wimp: a clip
+  dropped on the icon opens the Viewer with its first frame in the window
+  and no null events while stopped; frame steps; playing at the clock
+  through the overlay with `Wimp_PollIdle` between pictures and the sound
+  (resampled to 48 kHz) given to StreamManager; a window over the picture
+  hides the overlay; stopping draws the frame in the window; shuttling
+  (J, K, L); playing to the end; closing and quitting.
 - **prefer_test** stands in for the Pi's H.264 decoder: used when it works,
   replaced by the ARM decoder when it refuses a clip at the start or part
   way, given `drop_before` after each jump, never asked for when

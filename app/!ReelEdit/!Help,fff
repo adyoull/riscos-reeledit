@@ -1,0 +1,51 @@
+Reel Edit 0.1 (test 1)
+======================
+
+Reel Edit is a video editor for RISC OS that is being written, on the MLT
+multimedia framework (the engine of Shotcut and Kdenlive), with the
+Raspberry Pi's video hardware through riscos-reelhwaccel. This test build
+has its first window only: the Viewer, which plays a video or an MLT
+project. The editing windows come next.
+
+It needs RISC OS 5 on ARMv7 with VFP (Raspberry Pi 2, 3, 4), with
+SharedUnixLibrary and ARMEABISupport (!Run checks). H.264 is decoded on
+the Pi's VideoCore (1080p needs gpu_mem=128 in config.txt) and HEVC on the
+Pi 4's HEVC block, the ARM taking over for anything they refuse. Sound
+plays through SharedSoundBuffer.
+
+Using it
+--------
+Double-click !ReelEdit: its icon goes on the icon bar. Drop a video, or an
+MLT project (.mlt, from Shotcut, Kdenlive or melt), on the icon or on the
+Viewer. Click the icon to bring the Viewer back to the front.
+
+The Viewer: the picture above the controls: to the start, a frame back,
+Play/Stop, a frame on, to the end, the position bar (click to go there)
+and the timecode (hours:minutes:seconds:frames). Adjust on the frame
+buttons moves a second.
+
+Keys (click the Viewer first):
+  Space        play / stop
+  J  K  L      play backwards, stop, play forwards; J or L again: faster (x2, x4)
+  Left Right   a frame back, forwards (Shift: a second)
+  Home  Copy   the start, the end
+  Escape       stop
+
+While playing, the picture goes through the hardware overlay (VideoOverlay)
+when it can; a menu or window over the picture, or stopping, draws it in
+the window instead, so it can be seen under them. *Set ReelEdit$NoOverlay 1
+never uses the overlay.
+
+Log
+---
+Reel Edit writes what it did to <Wimp$ScrapDir>.ReelEditLog (each time it
+starts): the file opened, the overlay, and once a second while playing the
+pictures made and left out and the time it left to other programs. Please
+send it with any report. *Set ReelEdit$Log to another file, or "off".
+
+Licence
+-------
+GPL version 2 or later. MLT is under the LGPL (2.1 or later); FFmpeg, as
+built here with the Pi's decoders, is GPL. Source: riscos-reeledit.
+
+Andrew Youll

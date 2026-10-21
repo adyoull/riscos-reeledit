@@ -4,7 +4,8 @@
    tools/make-icons.py
 
 !mlt: three tracks of a timeline (video, video, sound) with clips on them
-and the playhead across them, at 34 x 34 and 17 x 17. Drawn at 4 times
+and the playhead across them, at 34 x 34 and 17 x 17. !reeledit: a film
+reel above two tracks of clips, the same sizes. Drawn at 4 times
 the size and scaled down, so the edges are smooth.
 """
 import os
@@ -39,6 +40,32 @@ def timeline(size):
     return im.resize((size, size), Image.LANCZOS)
 
 
+def reeledit(size):
+    s = 4 * size
+    im = Image.new('RGBA', (s, s), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    u = s / 34.0
+    dark = (20, 22, 30, 255)
+    # the reel: a disc with five holes round a hub
+    cx, cy, rr = 17 * u, 12 * u, 11 * u
+    d.ellipse([cx - rr, cy - rr, cx + rr, cy + rr], fill=(70, 78, 96, 255), outline=dark, width=max(1, int(u)))
+    import math
+    for i in range(5):
+        a = math.pi / 2 + i * 2 * math.pi / 5
+        hx, hy, hr = cx + 6 * u * math.cos(a), cy - 6 * u * math.sin(a), 2.6 * u
+        d.ellipse([hx - hr, hy - hr, hx + hr, hy + hr], fill=(20, 22, 30, 255))
+    d.ellipse([cx - 1.6 * u, cy - 1.6 * u, cx + 1.6 * u, cy + 1.6 * u], fill=(200, 205, 215, 255))
+    # two tracks of clips below it
+    for top, clips in ((25, [(1, 13, (233, 120, 60)), (14, 33, (78, 160, 220))]),
+                       (30, [(4, 24, (110, 200, 140)), (25, 33, (240, 176, 64))])):
+        for a, b, c in clips:
+            d.rounded_rectangle([a * u, top * u, b * u - u * 0.8, (top + 4) * u], radius=1.2 * u,
+                                fill=c + (255,), outline=dark, width=max(1, int(u * 0.6)))
+    return im.resize((size, size), Image.LANCZOS)
+
+
 os.makedirs(OUT, exist_ok=True)
+reeledit(34).save(os.path.join(OUT, 'reeledit.png'))
+reeledit(17).save(os.path.join(OUT, 'sm-reeledit.png'))
 timeline(34).save(os.path.join(OUT, 'mlt.png'))
 timeline(17).save(os.path.join(OUT, 'sm-mlt.png'))

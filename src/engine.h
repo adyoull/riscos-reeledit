@@ -82,6 +82,10 @@ void re_engine_seek(re_engine *e, int position);
 /* The frame on show (or about to be, after a seek). */
 int re_engine_position(re_engine *e);
 
+/* 1 when a picture is waiting to be made (a seek, or playing): the caller
+   should ask for null events (Wimp_Poll without masking them) and poll. */
+int re_engine_busy(re_engine *e);
+
 /* Do some work: at most one picture. Returns the centiseconds the caller may
    wait before calling again (0: at once), or -1 when nothing will happen
    until play or seek is called. */

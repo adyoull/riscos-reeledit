@@ -220,7 +220,8 @@ static void render(re_engine *e, int position)
         p.width = w;
         p.height = h;
         p.position = position;
-        p.colorspace = mlt_properties_get_int(props, "colorspace") == 601 ? 601 : 709;
+        int cs = mlt_properties_get_int(props, "colorspace");
+        p.colorspace = cs == 601 || (cs != 709 && h <= 576) ? 601 : 709; /* (unsaid: SD is 601) */
         p.full_range = mlt_properties_get_int(props, "full_range");
         e->io.show(e->io.ctx, &p);
     }
@@ -249,6 +250,11 @@ static int wait_for_next(re_engine *e)
     double elapsed = (double) (int) (now_cs(e) - e->base_clock);
     double wait = ceil(due - elapsed);
     return wait < 0 ? 0 : (int) wait;
+}
+
+int re_engine_busy(re_engine *e)
+{
+    return e->seek_to >= 0 || e->speed != 0;
 }
 
 int re_engine_poll(re_engine *e)

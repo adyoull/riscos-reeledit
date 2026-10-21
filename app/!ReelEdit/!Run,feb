@@ -1,0 +1,14 @@
+| !Run for !ReelEdit (Reel Edit, a video editor for RISC OS, on MLT)
+Set ReelEdit$Dir <Obey$Dir>
+IconSprites <ReelEdit$Dir>.!Sprites
+| "|<" keeps <ReelEdit$Dir> unexpanded; UnixLib expands it when MLT opens a file
+Set MLT_DATA /|<ReelEdit$Dir>/share/mlt-7
+Set MLT_PROFILES_PATH /|<ReelEdit$Dir>/share/mlt-7/profiles/
+Set MLT_PRESETS_PATH /|<ReelEdit$Dir>/share/mlt-7/presets
+RMEnsure SharedUnixLibrary 1.16 IfThere System:Modules.SharedULib Then RMLoad System:Modules.SharedULib
+RMEnsure SharedUnixLibrary 1.16 Error Reel Edit needs SharedUnixLibrary 1.16 or later. Install it with PackMan.
+RMEnsure ARMEABISupport 0 IfThere System:Modules.ARMEABISupport Then RMLoad System:Modules.ARMEABISupport
+RMEnsure ARMEABISupport 0 Error Reel Edit needs the ARMEABISupport module. Install it with PackMan.
+| about 25MB of code and 8MB of zeroed data; the heap is in dynamic areas
+WimpSlot -min 40960K -max 40960K
+Run <ReelEdit$Dir>.!RunImage %*0

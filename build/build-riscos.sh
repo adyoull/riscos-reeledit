@@ -106,3 +106,16 @@ CC="$RISCOS_TOOLCHAIN/bin/arm-riscos-gnueabihf-gcc"
 "$RISCOS_TOOLCHAIN/bin/arm-riscos-gnueabihf-strip" -o "$O/bench.elf" "$O/bench"
 "$RISCOS_TOOLCHAIN/bin/elf2aif" -e "$O/bench.elf" "$O/bench,ff8" > /dev/null
 echo "built $O/bench,ff8"
+
+# ---- !ReelEdit (src/): the engine and the desktop front end
+RE_VERSION=${RE_VERSION:-0.1}
+"$RCD_DIR/checks/check-unaligned.sh" -I"$STAGE/include/mlt-7" -I"$DK/include" "$TOP"/src/engine.c "$TOP"/src/riscos/*.c
+"$CC" -O2 -Wall $CFLAGS_EXTRA -DMLT_STATIC_DEFINE -DRE_VERSION="\"$RE_VERSION\"" -I"$STAGE/include/mlt-7" -I"$DK/include" \
+  "$TOP/src/engine.c" "$TOP/src/riscos/viewer.c" "$TOP/src/riscos/display.c" "$TOP/src/riscos/sound.c" \
+  "$TOP/src/riscos/main.c" -o "$O/reeledit" \
+  -static -L"$STAGE/lib" -L"$DK/lib" -lmlt-static-modules -lmltcore -lmltavformat -lmltxml -lmlt-7 -lxml2 \
+  $FF_LIBS -lm
+"$RCD_DIR/checks/check-all.sh" "$O/reeledit" > /dev/null || { "$RCD_DIR/checks/check-all.sh" "$O/reeledit"; exit 1; }
+"$RISCOS_TOOLCHAIN/bin/arm-riscos-gnueabihf-strip" -o "$O/reeledit.elf" "$O/reeledit"
+"$RISCOS_TOOLCHAIN/bin/elf2aif" -e "$O/reeledit.elf" "$O/reeledit,ff8" > /dev/null
+echo "built $O/reeledit,ff8 ($RE_VERSION)"

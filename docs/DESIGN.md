@@ -106,6 +106,11 @@ else on the desktop moves. These rules keep that time short.
 8. **Background work in slices.** Thumbnails and short waveforms are made one
    item per null event, only while stopped.
 9. **Sound is the clock** while playing, through SharedSoundBuffer, as in Reel.
+   (Not yet in 0.1: the engine follows the system clock and gives each
+   frame's sound as the frame is shown, so the sound is about two
+   StreamManager blocks, 85 ms, behind the picture, and a stall longer than
+   that leaves a gap. Next: the engine takes the sound half a second ahead
+   and the pictures follow StreamManager's count.)
 10. **Nothing copied or converted that needn't be.** MLT copies each picture
     once, into its own buffer; its image cache (two more copies) is off, so
     Reel Edit's player keeps the few pictures it has just shown, for stepping
@@ -159,7 +164,7 @@ need the Wimp front end.
 |---|---|---|
 | MLT, patched | `patches/mlt`, built by `build/build-riscos.sh` | Engine: timeline model, decoding, mixing, effects, MLT XML, export |
 | Engine wrapper | `src/engine.c` | Plays a project from Wimp null events: pacing, skipping, seeking, sound. No RISC OS calls: the display, sound and clock are callbacks, so it's tested on Linux |
-| Display | `src/display.c` (to come) | Pictures to VideoOverlay as YV12, EGL window as the fallback (Reel's code) |
-| Sound | `src/sound.c` (to come) | SharedSoundBuffer (reelcore's code) |
-| Wimp front end | `src/wimp/` (to come) | Windows, menus, drags, saving |
+| Display | `src/riscos/display.c` | Pictures to VideoOverlay as YV12 while playing with nothing over them; otherwise a 32bpp sprite in the window, converted by swscale (Reel's code) |
+| Sound | `src/riscos/sound.c` | SharedSoundBuffer and StreamManager (reelcore's code) |
+| Wimp front end | `src/riscos/viewer.c` | The icon bar icon and the Viewer (0.1). The Timeline, Clips and Inspector windows, menus, drags and saving are to come |
 | Export | `src/export.c` (to come) | melt in a TaskWindow, presets, progress |
