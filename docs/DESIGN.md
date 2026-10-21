@@ -137,8 +137,14 @@ else on the desktop moves. These rules keep that time short.
     rule, since it knows the timeline: give the decoder to the clip that will
     play longest, and hand it over at a cut rather than after one.
 
-Targets, to be measured on a Pi 4 (the engine test, `!MLT.Test`, measures
-the first ones):
+Targets, measured on a Pi 4 (gpu_mem=128) by the engine test, `!MLT.Test`
+(test 5, 2026-10-21): a busy 1080p H.264 clip (random noise, 8 Mbit/s)
+usually takes 10.1 ms a picture through MLT on the VideoCore (FFmpeg
+alone: 12.4 ms average) and 43 ms on the ARM (FFmpeg alone 50.7 ms); the
+crossfade project 11.3 ms (VideoCore) and 10.5 ms (ARM, flat colour); an
+export of 450 frames 20 s, two of them the VideoCore decoder's 2 s start
+(riscos-reelhwaccel is looking at that). The polling and idle targets
+need the Wimp front end.
 
 | Case | Target |
 |---|---|
