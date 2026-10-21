@@ -26,6 +26,9 @@ extern "C" {
 
 typedef struct re_engine re_engine;
 
+/* Starts MLT (once; every module built in). 0, or -1. */
+int re_mlt_start(void);
+
 /* A picture to show: yuv420p, three planes. Valid only during show(). */
 typedef struct
 {
@@ -72,6 +75,15 @@ typedef struct
    clip's: the clip's). preview_scale: the pictures' size against that (1
    full size, 0.5 half). NULL on failure. */
 re_engine *re_engine_open(const char *file, double preview_scale, const re_engine_io *io);
+/* Plays a producer the caller keeps (a project's: project.h), at its
+   profile. After each edit, re_engine_refresh. */
+struct mlt_profile_s;
+struct mlt_producer_s;
+re_engine *re_engine_open_producer(struct mlt_profile_s *profile, struct mlt_producer_s *producer,
+                                   double preview_scale, const re_engine_io *io);
+/* The producer has changed (an edit): its length read again, the frames
+   kept for going backwards forgotten, and stopped, the picture made again. */
+void re_engine_refresh(re_engine *e);
 void re_engine_close(re_engine *e);
 
 int re_engine_length(re_engine *e);  /* frames */

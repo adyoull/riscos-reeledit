@@ -51,6 +51,7 @@ struct re_engine
     int shown;            /* the frame on show (-1: none yet) */
     int seek_to;          /* a frame to draw at the next poll (-1: none) */
     int last_fetched;     /* the last frame asked of MLT */
+    int borrowed;         /* the profile and producer are the caller's (a project's) */
     int audio_next;       /* the sound clock: the next frame whose sound is taken */
     double snd_last_q;    /* io.sound_queued's last reading (-1: none yet) */
     /* going backwards (re_engine_play): frames decoded forwards and kept */
@@ -73,16 +74,25 @@ static int even(double x)
     return n < 2 ? 2 : n & ~1;
 }
 
-re_engine *re_engine_open(const char *file, double preview_scale, const re_engine_io *io)
+static re_engine *setup(re_engine *e, double preview_scale);
+
+int re_mlt_start(void)
 {
     if (!mlt_started) {
 #ifdef MLT_STATIC_DEFINE
         mlt_static_modules_register();
 #endif
         if (!mlt_factory_init(NULL))
-            return NULL;
+            return -1;
         mlt_started = 1;
     }
+    return 0;
+}
+
+re_engine *re_engine_open(const char *file, double preview_scale, const re_engine_io *io)
+{
+    if (re_mlt_start() < 0)
+        return NULL;
     re_engine *e = calloc(1, sizeof(*e));
     if (!e)
         return NULL;
@@ -106,12 +116,60 @@ re_engine *re_engine_open(const char *file, double preview_scale, const re_engin
         free(e);
         return NULL;
     }
+    return setup(e, preview_scale);
+}
+
+re_engine *re_engine_open_producer(mlt_profile profile, mlt_producer producer, double preview_scale,
+                                   const re_engine_io *io)
+{
+    if (!producer)
+        return NULL;
+    re_engine *e = calloc(1, sizeof(*e));
+    if (!e)
+        return NULL;
+    e->io = *io;
+    if (e->io.sound_rate <= 0)
+        e->io.sound_rate = 48000;
+    if (e->io.sound_channels <= 0)
+        e->io.sound_channels = 2;
+    e->profile = profile;
+    e->producer = producer;
+    e->borrowed = 1;
+    return setup(e, preview_scale);
+}
+
+void re_engine_refresh(re_engine *e)
+{
+    e->length = mlt_producer_get_length(e->producer);
+    for (int i = 0; i < RC_SLOTS; i++)
+        e->rc[i].pos = -1; /* (what was kept may have changed) */
+    e->rc_end = -1;
+    int at = re_engine_position(e);
+    if (e->speed == 0)
+        re_engine_seek(e, at < 0 ? 0 : at); /* the picture again, as it is now */
+    else if (at >= e->length)
+        re_engine_seek(e, e->length - 1);
+}
+
+static re_engine *setup(re_engine *e, double preview_scale)
+{
     e->consumer = mlt_factory_consumer(e->profile, "null", NULL);
     if (!e->consumer) {
         re_engine_close(e);
         return NULL;
     }
     mlt_consumer_connect(e->consumer, MLT_PRODUCER_SERVICE(e->producer));
+    /* a gap in a track (a blank) is black, not MLT's checkerboard: the test
+       card a started consumer would make from its test_card property (this
+       one is never started) */
+    {
+        mlt_producer black = mlt_factory_producer(e->profile, NULL, "color:black");
+        if (black) {
+            mlt_properties_set(MLT_PRODUCER_PROPERTIES(black), "eof", "loop");
+            mlt_properties_set_data(MLT_CONSUMER_PROPERTIES(e->consumer), "test_card_producer", black, 0,
+                                    (mlt_destructor) mlt_producer_close, NULL);
+        }
+    }
 
     e->fps = mlt_profile_fps(e->profile);
     e->length = mlt_producer_get_length(e->producer);
@@ -139,9 +197,9 @@ void re_engine_close(re_engine *e)
         return;
     if (e->consumer)
         mlt_consumer_close(e->consumer);
-    if (e->producer)
+    if (e->producer && !e->borrowed)
         mlt_producer_close(e->producer);
-    if (e->profile)
+    if (e->profile && !e->borrowed)
         mlt_profile_close(e->profile);
     for (int i = 0; i < RC_SLOTS; i++)
         free(e->rc[i].buf);

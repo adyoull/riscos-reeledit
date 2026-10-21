@@ -21,7 +21,8 @@ yet run on RISC OS). The editing windows come next: see
 | `patches/mlt/` | Five patches to MLT 7.42.0: static modules (no dlopen), no threads, the avformat module without threads, preferred (hardware) decoders with a fallback, opened only when used, and no needless picture conversions |
 | `build/` | Fetching the sources, the RISC OS build, the Linux build for the tests, the `!MLT` zip |
 | `src/engine.c` | Reel Edit's player: a project played from Wimp null events, a picture at a time |
-| `src/riscos/` | The desktop program, `!ReelEdit`: the Viewer (0.1), its overlay and sprite drawing, sound |
+| `src/project.c` | The editing model (MLT's tractor and playlists): add, split, remove, save, open |
+| `src/riscos/` | The desktop program, `!ReelEdit`: the editor (the Viewer and the Timeline, 0.2), the save box, overlay and sprite drawing, sound |
 | `app/!ReelEdit/` | The application's files (`build/package-reeledit.sh` makes the zip) |
 | `app/!MLT/` | The engine test application: `*melt`, `*mltbench` (`tools/bench.c`), and `Test`, which tries MLT on the machine |
 | `tests/host/` | Linux tests |
@@ -64,13 +65,17 @@ threads, the same preferred decoders) and checks:
   every frame on a fast machine, keeping to the clock on a slow one with the
   sound unbroken, catching up after a stall, seeks that replace each other,
   stopping at the end, backwards at double speed, half-size preview.
-- **viewer_test** runs `!ReelEdit` against a scripted fake Wimp: a clip
-  dropped on the icon opens the Viewer with its first frame in the window
-  and no null events while stopped; frame steps; playing at the clock
-  through the overlay with `Wimp_PollIdle` between pictures and the sound
-  (resampled to 48 kHz) given to StreamManager; a window over the picture
-  hides the overlay; stopping draws the frame in the window; shuttling
-  (J, K, L); playing to the end; closing and quitting.
+- **project_test**: the editing model: the first clip's profile; adding
+  at the end or at a frame; splitting; removing (ripple, gap); saving as
+  MLT XML and opening it again; files that aren't projects refused; the
+  engine showing each edit.
+- **editor_test** runs `!ReelEdit` against a scripted fake Wimp: the icon
+  opens the editor; clips dropped on the Timeline (where dropped) and the
+  Viewer; playing through the overlay with the sound as the clock; ruler
+  clicks, S, selecting and Delete; the menu; saving by a typed name and by
+  dragging the file icon (the DataSave protocol); closing with changes
+  (Cancel, Discard); a saved project (type XML, no extension) opened
+  again; a desktop shutdown (PreQuit, Discard, the shutdown restarted).
 - **prefer_test** stands in for the Pi's H.264 decoder: used when it works,
   replaced by the ARM decoder when it refuses a clip at the start or part
   way, given `drop_before` after each jump, never asked for when

@@ -31,6 +31,7 @@
 #define Wimp_GetPointerInfo    0x400CF
 #define Wimp_ForceRedraw       0x400D1
 #define Wimp_SetCaretPosition  0x400D2
+#define Wimp_GetCaretPosition  0x400D3
 #define Wimp_CreateMenu        0x400D4
 #define Wimp_SetExtent         0x400D7
 #define Wimp_ProcessKey        0x400DC

@@ -8,7 +8,8 @@
 #   convert_test: pictures asked for in their own format and size aren't converted
 #   render_test:  a started consumer renders each frame's picture and sound
 #   engine_test:  src/engine.c, the player, polled as the Wimp polls it
-#   viewer_test:  !ReelEdit's Viewer (src/riscos) with a scripted fake Wimp
+#   project_test: the editing model (src/project.c), and the engine playing it
+#   editor_test:  !ReelEdit (src/riscos) with a scripted fake Wimp
 #   prefer_test:  the preferred decoder taken, refused, failing part way, off
 # Usage: tests/host/run.sh   (after build/build-host.sh)
 set -uo pipefail
@@ -21,7 +22,7 @@ CC=${CC:-gcc}
 mkdir -p "$O"
 bad=0
 # (never run a test program left from before: a failed build would go unseen)
-rm -f "$O"/pull_test "$O"/prefer_test "$O"/engine_test "$O"/convert_test "$O"/render_test "$O"/viewer_test
+rm -f "$O"/pull_test "$O"/prefer_test "$O"/engine_test "$O"/convert_test "$O"/render_test "$O"/editor_test "$O"/project_test
 fail() { echo "FAIL: $*"; bad=1; }
 
 # ---- the clips
@@ -47,8 +48,11 @@ $CC $CFLAGS -I"$TOP/src" "$TOP/src/engine.c" "$HERE/engine_test.c" -o "$O/engine
   -Wl,--wrap=pthread_create $MLTLIBS $FFLIBS -lpthread -lm || bad=1
 $CC $CFLAGS "$HERE/convert_test.c" -o "$O/convert_test" -Wl,--wrap=sws_scale,--wrap=mlt_frame_clone,--wrap=mlt_frame_clone_image,--wrap=avcodec_receive_frame $MLTLIBS $FFLIBS -lpthread -lm || bad=1
 $CC $CFLAGS "$HERE/render_test.c" -o "$O/render_test" $MLTLIBS $FFLIBS -lpthread -lm || bad=1
-$CC $CFLAGS -DRE_TEST -I"$HERE/fake" "$TOP/src/engine.c" "$TOP/src/riscos/viewer.c" "$TOP/src/riscos/display.c" \
-  "$TOP/src/riscos/sound.c" "$HERE/viewer_test.c" -o "$O/viewer_test" $MLTLIBS $FFLIBS -lpthread -lm || bad=1
+$CC $CFLAGS -DRE_TEST -I"$HERE/fake" -I"$TOP/src" "$TOP/src/engine.c" "$TOP/src/project.c" "$TOP/src/riscos/viewer.c" \
+  "$TOP/src/riscos/timeline.c" "$TOP/src/riscos/savebox.c" "$TOP/src/riscos/display.c" "$TOP/src/riscos/sound.c" \
+  "$HERE/editor_test.c" -o "$O/editor_test" $MLTLIBS $FFLIBS -lpthread -lm || bad=1
+$CC $CFLAGS -I"$TOP/src" "$TOP/src/engine.c" "$TOP/src/project.c" "$HERE/project_test.c" -o "$O/project_test" \
+  $MLTLIBS $FFLIBS -lpthread -lm || bad=1
 $CC -shared -fPIC "$HERE/count_threads.c" -o "$O/count_threads.so" -ldl || bad=1
 
 # ---- melt: make and save the project, then render it with no threads
@@ -81,8 +85,10 @@ echo "== render_test"
 "$O/render_test" project.mlt || bad=1
 echo "== engine_test"
 "$O/engine_test" project.mlt || bad=1
-echo "== viewer_test"
-"$O/viewer_test" numbered-snd.mp4 2>&1 | grep -v "^\[" || bad=1
+echo "== project_test"
+"$O/project_test" a.mp4 b.mp4 numbered.mp4 project_test.mlt 2>&1 | grep -v "^\[" || bad=1
+echo "== editor_test"
+"$O/editor_test" numbered-snd.mp4 numbered.mp4 2>&1 | grep -v "^\[" || bad=1
 for m in normal refuse late off lazy max exit; do
   echo "== prefer_test $m"
   "$O/prefer_test" $m numbered.mp4 2>&1 | grep -v "^\[" || bad=1

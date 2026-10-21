@@ -33,8 +33,9 @@ they disagree.
 - **Icon bar.** Select opens a new project. Dropping video files on the icon
   opens a new project with them on V1, in the order dropped. Menu: Info,
   Choices..., Quit.
-- **Windows, one set per project** (each can be closed, and reopened from
-  the project's menu):
+- **Windows, one set per project** (closing the Viewer or the Timeline
+  closes the project, asking first if it has changes; 0.2 has the Viewer,
+  with a toolbar, and the Timeline):
   - **Timeline**: tracks (V2, V1, A1, A2 to start with), a ruler, the
     playhead; a toolbar pane above it (tools, Ripple, snapping, zoom). The
     project's title bar shows its file name and a `*` when it's modified, as
@@ -174,5 +175,6 @@ need the Wimp front end.
 | Engine wrapper | `src/engine.c` | Plays a project from Wimp null events: pacing, skipping, seeking, sound. No RISC OS calls: the display, sound and clock are callbacks, so it's tested on Linux |
 | Display | `src/riscos/display.c` | Pictures to VideoOverlay as YV12 while playing with nothing over them; otherwise a 32bpp sprite in the window, converted by swscale (Reel's code) |
 | Sound | `src/riscos/sound.c` | SharedSoundBuffer and StreamManager (reelcore's code) |
-| Wimp front end | `src/riscos/viewer.c` | The icon bar icon and the Viewer (0.1). The Timeline, Clips and Inspector windows, menus, drags and saving are to come |
+| Project | `src/project.c` | The editing model: MLT's tractor with V1 a playlist (Shotcut's layout); add, split, remove (ripple or gap), save and open MLT XML. No RISC OS calls |
+| Wimp front end | `src/riscos/viewer.c`, `timeline.c`, `savebox.c` | The icon bar icon; the editor: the Viewer (picture, transport, toolbar) with the Timeline under it (ruler, playhead, V1), the menus and keys, the Save as box (0.2). Clips and Inspector windows, more tracks, dissolves, trimming and export are to come |
 | Export | `src/export.c` (to come) | melt in a TaskWindow, presets, progress |

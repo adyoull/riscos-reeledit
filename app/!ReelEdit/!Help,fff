@@ -1,11 +1,12 @@
-Reel Edit 0.1 (test 4)
+Reel Edit 0.2 (test 1)
 ======================
 
 Reel Edit is a video editor for RISC OS that is being written, on the MLT
 multimedia framework (the engine of Shotcut and Kdenlive), with the
 Raspberry Pi's video hardware through riscos-reelhwaccel. This test build
-has its first window only: the Viewer, which plays a video or an MLT
-project. The editing windows come next.
+has the Viewer and a first Timeline: one video track (V1), with cutting,
+deleting and saving. Dissolves, trimming, more tracks, titles and export
+come next.
 
 It needs RISC OS 5 on ARMv7 with VFP (Raspberry Pi 2, 3, 4), with
 SharedUnixLibrary and ARMEABISupport (!Run checks). H.264 is decoded on
@@ -13,35 +14,57 @@ the Pi's VideoCore (1080p needs gpu_mem=128 in config.txt) and HEVC on the
 Pi 4's HEVC block, the ARM taking over for anything they refuse. Sound
 plays through SharedSoundBuffer, and the pictures keep time with it.
 
-Using it
---------
-Double-click !ReelEdit: its icon goes on the icon bar. Drop a video, or an
-MLT project (.mlt, from Shotcut, Kdenlive or melt), on the icon or on the
-Viewer. Click the icon to bring the Viewer back to the front.
+The editor
+----------
+Click the icon on the icon bar: the editor opens on a new project, the
+Viewer (the picture, the transport and a toolbar) with the Timeline under
+it.
 
-The Viewer: the picture above the controls: to the start, a frame back,
-Play/Stop, a frame on, to the end, the position bar (click to go there)
-and the timecode (hours:minutes:seconds:frames). Adjust on the frame
-buttons moves a second.
+Adding clips: drag video files from a directory display to the Timeline
+(they go in where they're dropped: before the clip there, or after it if
+dropped nearer its end), or to the Viewer or the icon bar icon (at the
+end). An MLT project (from Reel Edit, Shotcut, Kdenlive or melt) dropped
+is opened.
 
-Keys (click the Viewer first):
+The Timeline: click the ruler to move the playhead (the Viewer shows that
+frame); click a clip to select it (Adjust: select or not).
+
+The toolbar: Split (at the playhead), Delete (the selected clip; the
+clips after it close up; Adjust: leave a gap), Zoom - and Zoom + (the
+Timeline), Save.
+
+The menu (Menu over the Viewer or the Timeline):
+  File  New, Save (F3), Save as...
+  Edit  Split, Delete, Leave gap, Clear selection
+  Play  Play/Stop, Start, End
+  View  Zoom in, Zoom out, Whole (the whole project in the Timeline)
+
+Keys (with the Viewer or the Timeline in front, clicked on):
   Space        play / stop
   J  K  L      play backwards, stop, play forwards; J or L again: faster (x2, x4)
   Left Right   a frame back, forwards (Shift: a second)
   Home  Copy   the start, the end
+  S            split at the playhead
+  Delete       delete the selected clip (Shift-Delete: leave a gap)
+  +  -         zoom the Timeline in, out
+  Ctrl-Z       clear the selection
+  F3           save
   Escape       stop
+
+Saving: the standard Save as box: drag the file icon to a directory
+display, or type a full name and press Return. Projects are MLT XML
+files (filetype XML, &F80), which Shotcut and Kdenlive open too. Closing
+the editor with changes not saved asks first.
 
 While playing, the picture goes through the hardware overlay (VideoOverlay)
 when it can; a menu or window over the picture, or stopping, draws it in
-the window instead, so it can be seen under them. *Set ReelEdit$NoOverlay 1
-never uses the overlay.
+the window instead. *Set ReelEdit$NoOverlay 1 never uses the overlay.
 
 Log
 ---
 Reel Edit writes what it did to <Wimp$ScrapDir>.ReelEditLog (each time it
-starts): the file opened, the overlay, and once a second while playing the
-pictures made and left out and the time it left to other programs. Please
-send it with any report. *Set ReelEdit$Log to another file, or "off".
+starts). Please send it with any report. *Set ReelEdit$Log to another
+file, or "off".
 
 Licence
 -------
