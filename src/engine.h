@@ -69,6 +69,7 @@ typedef struct
     int jumps;          /* ... not straight after the one before: a seek, which decodes from a keyframe */
     int reverse_fills;  /* runs of frames decoded forwards and kept, to be shown going backwards */
     int clock_moves;    /* times the picture clock was steered to the sound heard */
+    int slowed;         /* pictures the clock waited for (decoding slower than playing) */
 } re_engine_stats;
 
 /* Open a project or clip, at the project's own size and frame rate (a

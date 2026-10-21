@@ -27,6 +27,10 @@ static int failures = 0;
 
 static unsigned fake_clock = 1000;
 static int render_cost = 0;          /* centiseconds each picture takes to show */
+/* tenths of a centisecond each frame takes to decode: MLT decodes every
+   frame up to the one asked for, so a picture costs this for each frame
+   since the last (L) */
+static int decode_tenths = 0, decode_from = -1, decode_rem = 0, max_step = 0;
 static int shown[4096], nshown = 0;
 static int last_u = -1, last_w = 0, last_h = 0;
 static long sound_frames = 0;
@@ -40,6 +44,14 @@ static void show(void *ctx, const re_picture *p)
     last_h = p->height;
     last_u = p->planes[1][(p->height / 4) * p->strides[1] + p->width / 4];
     fake_clock += render_cost;
+    if (decode_tenths && decode_from >= 0 && p->position > decode_from) {
+        int step = p->position - decode_from, t = step * decode_tenths + decode_rem;
+        fake_clock += t / 10;
+        decode_rem = t % 10;
+        if (step > max_step)
+            max_step = step;
+    }
+    decode_from = p->position;
 }
 
 static void sound(void *ctx, const int16_t *samples, int frames)
@@ -282,6 +294,42 @@ int main(int argc, char **argv)
     }
     snd_rate = 0;
     re_engine_play(e, 0);
+
+    /* L: a clip that decodes slower than it plays (each frame 6 cs, a frame
+       lasting 4), with the sound the clock and without: not chased (each
+       picture further on, so slower, so further on...), but played slower,
+       every poll short, the clock (and the sound) waiting for the picture:
+       never a second behind (a resync, a long poll decoding through) */
+    for (int with_sound = 1; with_sound >= 0; with_sound--) {
+        re_engine_close(e);
+        e = re_engine_open(argv[1], 1.0, with_sound ? &io2 : &io);
+        re_engine_poll(e);
+        reset_log();
+        re_engine_get_stats(e, &st);
+        int slowed = st.slowed, resyncs = st.resyncs;
+        decode_from = 0;
+        decode_tenths = 60;
+        max_step = 0;
+        snd_start = fake_clock;
+        snd_rate = 1;
+        re_engine_play(e, 1.0);
+        run(e, 480);
+        int last = nshown ? shown[nshown - 1] : -1;
+        re_engine_get_stats(e, &st);
+        CHECK(max_step <= 3, "L%d: a picture %d frames on from the one before (decoded through: a long poll)",
+              with_sound, max_step);
+        CHECK(last >= 65 && last <= 90, "L%d: at frame %d after 4.8 s, not about 80", with_sound, last);
+        CHECK(nshown >= 22, "L%d: %d pictures in 4.8 s", with_sound, nshown);
+        CHECK(st.slowed > slowed, "L%d: never slowed", with_sound);
+        CHECK(st.resyncs == resyncs, "L%d: %d resyncs (the clock ran on without the picture)", with_sound,
+              st.resyncs - resyncs);
+        decode_tenths = 0;
+        decode_from = -1;
+        snd_rate = 0;
+        re_engine_play(e, 0);
+    }
+    re_engine_close(e);
+    e = re_engine_open(argv[1], 1.0, &io2);
 
     /* J: four times as fast: every fourth frame, about 25 pictures a second */
     re_engine_play(e, 0);

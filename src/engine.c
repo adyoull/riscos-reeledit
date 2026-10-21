@@ -12,6 +12,14 @@
  * still taken at normal speed, so it doesn't stutter). More than a second
  * behind (a long stall), the clock is moved on instead.
  *
+ * Left out isn't free: MLT decodes every frame up to the one asked for (a
+ * long-GOP clip can't be decoded otherwise), only the conversion is saved.
+ * So a clip that decodes more slowly than it plays (1080p60 in a 24 fps
+ * project, 2.5 decodes a frame) mustn't be chased: each picture further
+ * on costs more, the next further still. Playing, at most MAX_LEFT_OUT
+ * are left out a poll; further behind, the clock waits for the picture
+ * (it plays a little slow, the sound with gaps) and every poll stays short.
+ *
  * Part of riscos-reeledit. GPL version 2 or later.
  */
 #include "engine.h"
@@ -24,6 +32,7 @@
 /* The sound kept queued ahead of what's heard (io.sound_queued) */
 #define SOUND_AHEAD 0.4
 #define SOUND_TOPUP 3 /* frames' sound taken a poll at most */
+#define MAX_LEFT_OUT 2 /* frames left out a poll at most, playing (see above) */
 
 /* Going backwards: frames kept (at most this many, and this much memory) */
 #define RC_SLOTS 32
@@ -286,7 +295,10 @@ static void sound_tick(re_engine *e, double clock_due)
     int target = (int) floor(clock_due);
     if (e->audio_next < target) /* (the picture went on without it: a stall) */
         e->audio_next = target + 1;
-    for (int n = 0; n < SOUND_TOPUP && e->audio_next < e->length
+    /* (not further ahead of the picture than that: a picture that can't keep
+       up holds the sound back with it) */
+    int limit = e->shown >= 0 ? e->shown + (int) (SOUND_AHEAD * e->fps) + SOUND_TOPUP + 1 : e->length;
+    for (int n = 0; n < SOUND_TOPUP && e->audio_next < e->length && e->audio_next < limit
                     && e->io.sound_queued(e->io.ctx) < SOUND_AHEAD; n++) {
         mlt_frame frame = frame_at(e, e->audio_next);
         if (frame) {
@@ -545,7 +557,14 @@ int re_engine_poll(re_engine *e)
         return re_engine_poll(e);
     }
 
-    int gap = e->speed > 0 ? target - e->shown - 1 : e->shown - target - 1;
+    int gap = e->speed > 0 ? target - e->shown - 1 : e->shown - target - 1, slowed = 0;
+    if (e->shown >= 0 && gap > MAX_LEFT_OUT && gap <= e->fps && e->speed == 1.0) {
+        /* can't keep up: on a little, and the clock waits (see the top) */
+        target = e->shown + 1 + MAX_LEFT_OUT;
+        gap = MAX_LEFT_OUT;
+        slowed = 1;
+        e->stats.slowed++;
+    }
     if (e->shown >= 0 && gap > 0) {
         if (gap > e->fps) {
             /* over a second behind: start the clock again from here */
@@ -559,7 +578,7 @@ int re_engine_poll(re_engine *e)
         }
     }
     render(e, target);
-    if (gap > e->fps) {
+    if (gap > e->fps || slowed) {
         e->base_position = target;
         e->base_clock = now_cs(e);
     }

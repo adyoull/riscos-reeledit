@@ -546,6 +546,17 @@ static void timecode(char *tc, int tsize, int frames, double fps)
     snprintf(tc, tsize, "%02d:%02d:%02d:%02d", s / 3600, s / 60 % 60, s % 60, f % rate);
 }
 
+const char *re_project_decoder(re_project *p, int frame)
+{
+    mlt_playlist_clip_info info;
+    int item = re_project_item_at(p, frame);
+    if (!p->v1 || item < 0 || mlt_playlist_is_blank(p->v1, item) || mlt_playlist_get_clip_info(p->v1, &info, item)
+        || !info.producer)
+        return NULL;
+    mlt_producer clip = mlt_producer_cut_parent(info.producer);
+    return mlt_properties_get(MLT_PRODUCER_PROPERTIES(clip ? clip : info.producer), "meta.media.decoder");
+}
+
 int re_project_item_info(re_project *p, int item, char *buf, int size)
 {
     mlt_playlist_clip_info info;

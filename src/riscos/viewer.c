@@ -109,6 +109,7 @@ static struct
     unsigned last_ctl_cs, log_cs, slept_cs, log_slept;
     re_engine_stats log_st;
     int log_nulls;
+    char log_decoder[32];
     unsigned changes;     /* the project's, last seen */
     FILE *log;
     /* A clip that doesn't say how long it is, being measured (null events),
@@ -1431,10 +1432,15 @@ static void tick(void)
         re_display_stats ds;
         re_engine_get_stats(A.e, &st);
         re_display_get_stats(&ds);
-        app_log("frame %d: %d pictures, %d left out, %d resyncs in %.2f s; %d nulls, asleep %u%%; overlay %d, window "
-                "%d, overlay waited %d, skipped %d; sound queued %.2f s, %u refused",
+        const char *dec = A.proj ? re_project_decoder(A.proj, re_engine_position(A.e)) : NULL;
+        if (dec && strcmp(dec, V.log_decoder)) { /* (the clip on show, decoded by another) */
+            snprintf(V.log_decoder, sizeof(V.log_decoder), "%s", dec);
+            app_log("decoder: %s", dec);
+        }
+        app_log("frame %d: %d pictures, %d left out, %d slowed, %d resyncs in %.2f s; %d nulls, asleep %u%%; overlay "
+                "%d, window %d, overlay waited %d, skipped %d; sound queued %.2f s, %u refused",
                 re_engine_position(A.e), st.rendered - V.log_st.rendered, st.skipped - V.log_st.skipped,
-                st.resyncs - V.log_st.resyncs, (t - V.log_cs) / 100.0, V.log_nulls,
+                st.slowed - V.log_st.slowed, st.resyncs - V.log_st.resyncs, (t - V.log_cs) / 100.0, V.log_nulls,
                 (V.slept_cs - V.log_slept) * 100 / (t - V.log_cs), ds.overlay_pictures, ds.sprite_pictures,
                 ds.overlay_waited, ds.overlay_skipped, re_sound_queued(V.snd), re_sound_refused(V.snd));
         V.log_st = st;

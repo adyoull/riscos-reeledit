@@ -82,6 +82,9 @@ int re_project_redo(re_project *p);
 int re_project_can_undo(re_project *p);
 int re_project_can_redo(re_project *p);
 
+/* The decoder of the clip at a frame (NULL: none there, or not decoded yet) */
+const char *re_project_decoder(re_project *p, int frame);
+
 /* What's known of an item's file, for an information window: lines of
    "Label\tValue\n" (File, Length, Video: codec, size, frame rate, colours,
    the decoder in use; Sound: codec, rate, channels). Its length (as
