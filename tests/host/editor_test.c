@@ -106,6 +106,7 @@ static unsigned slept;
 static int polls, idle_polls, null_events, last_mask;
 static int covered, shift_key, ctrl_key;
 static char help_text[256];
+static int whole_redraws;
 static int plots, reports, questions, answer = 3, closedown, acks, menus, savebox_opens, drags;
 static int filetypes_set, dataloads_sent, plots_tl, prequit_acks, key_sent;
 static char last_text[128], filetype_path[300], all_text[16384];
@@ -332,8 +333,15 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
     case 0x400CF: memcpy((int *) r->r[1], ptr, sizeof(ptr)); break; /* GetPointerInfo */
     case 0x400D0: drags++; break;                                   /* DragBox */
     case 0x400D1:                                                   /* ForceRedraw */
-        if (r->r[1] != 0x4B534154 && win((int) r->r[0]))
+        if (r->r[1] != 0x4B534154 && win((int) r->r[0])) {
             win((int) r->r[0])->redraw = 1;
+            if (r->r[0] == VIEWER) {
+                fwin *w = &W[0];
+                if (r->r[1] <= 0 && r->r[2] <= -(w->box[3] - w->box[1]) && r->r[3] >= w->box[2] - w->box[0] &&
+                    r->r[4] >= 0)
+                    whole_redraws++;
+            }
+        }
         break;
     case 0x400D4:                                                   /* CreateMenu */
         if (r->r[1] == SAVEB) {
@@ -930,6 +938,20 @@ static int script(int *b, int mask)
             return 0;
         CHECK(!re_test_measuring() && !strcmp(layout(), "c30 c75"), "Escape while measuring: %d, %s",
               re_test_measuring(), layout());
+        whole_redraws = 0;
+        next(98);
+        b[0] = VIEWER; window_state(b);
+        b[2] += 120; /* (the bottom edge up: smaller) */
+        return 2;
+    case 98:
+        CHECK(whole_redraws == 1, "resized, the Viewer wasn't all drawn again (%d)", whole_redraws);
+        whole_redraws = 0;
+        next(99);
+        b[0] = VIEWER; window_state(b);
+        b[1] += 40; b[3] += 40; /* (moved, the same size) */
+        return 2;
+    case 99:
+        CHECK(whole_redraws == 0, "moved, the Viewer was all drawn again");
         next(24);
         b[0] = W[0].box[0] + 50; b[1] = W[0].box[3] - 50; b[2] = 2; b[3] = VIEWER; b[4] = -1;
         return 6; /* Menu */

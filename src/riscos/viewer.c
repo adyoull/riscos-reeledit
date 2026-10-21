@@ -503,8 +503,9 @@ static void timeline_moved(int *b)
 static void open_window(int *b)
 {
     _kernel_swi_regs r;
-    int vw = b[3] - b[1], vh = b[4] - b[2];
+    int vw = b[3] - b[1], vh = b[4] - b[2], resized = 0;
     if (vw != V.vis_w || vh != V.vis_h) {
+        resized = 1;
         layout(vw, vh);
         if (A.e && re_engine_speed(A.e) == 0)
             re_engine_seek(A.e, re_engine_position(A.e)); /* the picture for the new size */
@@ -518,7 +519,14 @@ static void open_window(int *b)
     if (st[3] - st[1] != V.vis_w || st[4] - st[2] != V.vis_h) {
         layout(st[3] - st[1], st[4] - st[2]);
         update_controls(1);
+        resized = 1;
     }
+    /* Resized: all of it drawn again. The Wimp keeps what was on the screen
+       where it can, but the controls moved with the bottom edge, and the
+       picture (or the overlay's see-through area) was left where they are
+       now: black. */
+    if (resized)
+        force_redraw(0, -V.vis_h, V.vis_w, 0);
     re_display_check_covered();
     place_timeline();
 }
