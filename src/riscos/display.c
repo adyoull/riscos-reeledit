@@ -105,6 +105,7 @@ static struct
     int win;
     int fw, fh, colour; /* what it was made for (or failed for) */
     int failed;
+    int was_covered;    /* (for the log: said once each time) */
     int placed[9];
 } ov;
 
@@ -315,6 +316,13 @@ static int ov_show(const re_picture *p)
     int fw = p->width & ~1, fh = p->height & ~1, c709 = p->colorspace == 709, full = p->full_range, placed, b;
     _kernel_swi_regs r;
     if (!D.window || !ov_allowed() || !ov_available() || fw < 2 || fh < 2) {
+        static int said;
+        if (!said && D.window) { /* (once: why the overlay isn't used) */
+            said = 1;
+            lg("overlay: %s: drawing in the window", !ov_allowed() ? "turned off (ReelEdit$NoOverlay or EGL$Overlay)"
+                                                     : !ov.found ? "the VideoOverlay module isn't loaded"
+                                                                 : "the picture is too small");
+        }
         re_display_hide_overlay();
         return 0;
     }
@@ -327,9 +335,13 @@ static int ov_show(const re_picture *p)
     if (ov.failed)
         return 0;
     if (covered()) {
+        if (!ov.was_covered)
+            lg("overlay: a window or menu over the picture: drawing in the window");
+        ov.was_covered = 1;
         re_display_hide_overlay();
         return 0;
     }
+    ov.was_covered = 0;
     if (!ov.id && !ov_create(fw, fh, c709, full)) {
         ov.failed = 1;
         return 0;

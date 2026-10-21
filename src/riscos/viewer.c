@@ -532,6 +532,7 @@ static void open_file(const char *path)
     set_caret();
     re_engine_seek(V.e, 0);
     V.log_cs = ro_now_cs();
+    memset(&V.log_st, 0, sizeof(V.log_st)); /* (the engine's counts start again) */
 }
 
 /* ---- events ----------------------------------------------------------------------------- */
