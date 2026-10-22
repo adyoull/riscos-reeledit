@@ -39,6 +39,7 @@ typedef struct
     int start, length;   /* in the project, frames */
     int in, out;         /* in the clip */
     int gap;             /* 1: a gap (blank), not a clip */
+    int source_length;   /* the clip's file's length (frames of the project): out is below it */
     char name[64];       /* the clip's file's leaf name */
 } re_item;
 int re_project_items(re_project *p);
@@ -73,6 +74,21 @@ int re_project_trim(re_project *p, int frame, int end);
 /* The cut (an item's start, or the end) before (dir -1) or after (dir 1) a
    frame; -1 if none. */
 int re_project_cut(re_project *p, int frame, int dir);
+
+/* An edit made of many steps (a drag): one undo for all of it. Between
+   begin and end the steps below change the project without undo points of
+   their own; end with nothing changed leaves no undo point and the project
+   as unmodified as it was. */
+void re_project_begin(re_project *p);
+void re_project_end(re_project *p);
+/* (Between begin and end.) A clip's in and out (frames of its file), what
+   follows moving up or along: ripple trimming by dragging an edge. Kept to
+   the file and to one frame at least. 1 changed, 0 not. */
+int re_project_set_in_out(re_project *p, int item, int in, int out);
+/* Moves an item so it comes before what is now item `before` (the number
+   of items: to the end); what it leaves closes up. Its new index, or -1 if
+   nothing moved. */
+int re_project_move(re_project *p, int item, int before);
 
 /* Undo and redo (up to 100 edits): the project as it was before the last
    edit, and back. 1 done, 0 nothing to do. The producer changes: an

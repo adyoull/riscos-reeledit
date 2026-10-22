@@ -105,7 +105,7 @@ static unsigned fake_cs = 1000;
 static unsigned slept;
 static int polls, idle_polls, null_events, last_mask;
 static int covered, shift_key, ctrl_key;
-static char help_text[256];
+static char help_text[256], drag_name0[64];
 static int whole_redraws;
 static int plots, reports, questions, answer = 3, closedown, acks, menus, savebox_opens, drags;
 static int filetypes_set, dataloads_sent, plots_tl, prequit_acks, key_sent;
@@ -961,6 +961,108 @@ static int script(int *b, int mask)
         return 2;
     case 99:
         CHECK(whole_redraws == 0, "moved, the Viewer was all drawn again");
+        next(100);
+        return click_tl(b, 60, 1, 0x400); /* (the playhead away from the edges to be dragged) */
+    /* ---- dragging on the Timeline: trimming an edge, moving a clip ---- */
+    case 100:
+        if (nulls)
+            return 0;
+        mark = drags;
+        next(101);
+        return click_tl(b, 104, 0, 0x40); /* a drag at the second clip's end (105): trim its end */
+    case 101:
+        CHECK(drags == mark + 1, "a drag at a clip's edge didn't start a drag");
+        ptr[0] = W[1].box[0] - W[1].scroll_x + 16 + 99 * 4; ptr[1] = W[1].box[3] - 100; /* (in two steps) */
+        next(201);
+        return script(b, mask);
+    case 201:
+        if (strcmp(layout(), "c30 c70")) {
+            if (fake_cs - phase_cs > 100)
+                fail_quit("dragging the end 5 frames back: not trimmed");
+            return 0;
+        }
+        ptr[0] = W[1].box[0] - W[1].scroll_x + 16 + 94 * 4;
+        next(102);
+        return script(b, mask);
+    case 102:
+        if (!strcmp(layout(), "c30 c65") && pos == 94 && !re_test_busy() && plots > 0) {
+            CHECK(nulls, "no null events while dragging an edge");
+            CHECK(abs(sprite_middle() - grey(64)) <= 2, "the Viewer shows %d at the dragged end, not its last frame (%d)",
+                  sprite_middle(), grey(64));
+            next(103);
+            return 7; /* the drag ends */
+        }
+        if (fake_cs - phase_cs > 100)
+            fail_quit("dragging the end 10 frames back: not trimmed (or not shown)");
+        return nulls ? 0 : (fail_quit("null events masked while dragging an edge"), 0);
+    case 103:
+        if (nulls)
+            return 0;
+        CHECK(!strcmp(layout(), "c30 c65"), "after dragging the end: %s", layout());
+        next(104);
+        return key_to(b, TL, 0x188);
+    case 104:
+        if (nulls)
+            return 0;
+        CHECK(!strcmp(layout(), "c30 c75"), "one F8 for the whole drag: %s", layout());
+        next(105);
+        return click_tl(b, 30, 0, 0x40); /* the second clip's start: trim its start */
+    case 105:
+        ptr[0] = W[1].box[0] - W[1].scroll_x + 16 + 40 * 4;
+        next(106);
+        return script(b, mask);
+    case 106:
+        if (!strcmp(layout(), "c30 c65") && pos == 30 && !re_test_busy()) {
+            CHECK(abs(sprite_middle() - grey(10)) <= 2, "the Viewer shows %d at the dragged start, not frame 10's %d",
+                  sprite_middle(), grey(10));
+            next(107);
+            return 7;
+        }
+        if (fake_cs - phase_cs > 100)
+            fail_quit("dragging the start 10 frames on: not trimmed (or not shown)");
+        return 0;
+    case 107:
+        if (nulls)
+            return 0;
+        next(108);
+        return key_to(b, TL, 0x188);
+    case 108:
+        if (nulls)
+            return 0;
+        CHECK(!strcmp(layout(), "c30 c75"), "undoing the start's trim: %s", layout());
+        {
+            re_item i0;
+            re_project_item(re_test_project(), 0, &i0);
+            snprintf(drag_name0, sizeof(drag_name0), "%s", i0.name);
+        }
+        next(109);
+        return click_tl(b, 15, 0, 0x40); /* the first clip's middle: move it */
+    case 109:
+        ptr[0] = W[1].box[0] - W[1].scroll_x + 16 + 101 * 4; /* (nearest the end, 105) */
+        next(110);
+        return script(b, mask);
+    case 110:
+        if (fake_cs - phase_cs < 10)
+            return 0;
+        next(111);
+        return 7; /* dropped */
+    case 111:
+        if (nulls)
+            return 0;
+        {
+            re_item i1;
+            re_project_item(re_test_project(), 1, &i1);
+            CHECK(!strcmp(layout(), "c75 c30") && !strcmp(i1.name, drag_name0) && re_test_selected() == 1,
+                  "the first clip dragged to the end: %s, the second %s (sel %d)", layout(), i1.name,
+                  re_test_selected());
+            CHECK(pos == 75, "after the move, at %d, not its new start (75)", pos);
+        }
+        next(112);
+        return key_to(b, TL, 0x188);
+    case 112:
+        if (nulls)
+            return 0;
+        CHECK(!strcmp(layout(), "c30 c75"), "undoing the move: %s", layout());
         next(24);
         b[0] = W[0].box[0] + 50; b[1] = W[0].box[3] - 50; b[2] = 2; b[3] = VIEWER; b[4] = -1;
         return 6; /* Menu */
@@ -1061,10 +1163,11 @@ static int script(int *b, int mask)
         CHECK(savebox_opens == 2 && W[3].open && !strcmp(re_test_savebox_name(), typed_path),
               "File > Save as: the box (%d) with \"%s\"", savebox_opens, re_test_savebox_name());
         next(36);
+        mark = drags;
         b[0] = 0; b[1] = 0; b[2] = 0x40; b[3] = SAVEB; b[4] = 0; /* a drag of the file icon */
         return 6;
     case 36:
-        CHECK(drags == 2, "no drag started");
+        CHECK(drags == mark + 1, "no drag started");
         ptr[0] = 500; ptr[1] = 500; ptr[2] = 0; ptr[3] = FILER; ptr[4] = 0;
         next(37);
         return 7; /* the drag ends over a directory display */

@@ -246,6 +246,50 @@ int main(int argc, char **argv)
     CHECK(p && !strcmp(layout(p), "c75"), "the .m2v's length not kept: %s", p ? layout(p) : "(not opened)");
     re_project_close(p);
 
+    /* ---- drags: trimming an edge in many steps (one undo for all), and
+       moving a clip */
+    p = re_project_new();
+    re_project_add(p, a, -1);
+    re_project_add(p, b, -1);
+    CHECK(re_project_save(p, out) == 0 && !re_project_modified(p), "drags: not saved");
+    re_project_begin(p);
+    CHECK(re_project_set_in_out(p, 1, 10, 74) == 1 && !strcmp(layout(p), "c75 c65"), "drags: in 10: %s",
+          layout(p));
+    CHECK(re_project_set_in_out(p, 1, 20, 74) == 1 && !strcmp(layout(p), "c75 c55"), "drags: in 20: %s",
+          layout(p));
+    re_project_end(p);
+    CHECK(re_project_modified(p), "drags: trimmed, but not modified");
+    CHECK(re_project_undo(p) && !strcmp(layout(p), "c75 c75"), "drags: one undo for the drag: %s", layout(p));
+    CHECK(!re_project_modified(p), "drags: undone to the saved state, but modified");
+    CHECK(re_project_redo(p) && !strcmp(layout(p), "c75 c55"), "drags: redo: %s", layout(p));
+    /* back where it was before the end: no undo point, not modified */
+    re_project_undo(p);
+    int could_undo = re_project_can_undo(p);
+    re_project_begin(p);
+    re_project_set_in_out(p, 1, 30, 74);
+    re_project_set_in_out(p, 1, 0, 74);
+    re_project_end(p);
+    CHECK(re_project_can_undo(p) == could_undo && !re_project_modified(p),
+          "drags: a drag back to where it began left an undo point (%d) or modified (%d)", re_project_can_undo(p),
+          re_project_modified(p));
+    /* kept to the file, and at least a frame */
+    CHECK(re_project_set_in_out(p, 0, 0, 500) == 0 && !strcmp(layout(p), "c75 c75"), "drags: past the file's end: %s",
+          layout(p));
+    CHECK(re_project_set_in_out(p, 0, 40, 30) == 1 && !strcmp(layout(p), "c1 c75"), "drags: in past out: %s",
+          layout(p));
+    re_project_undo(p);
+    /* moving: a's clip after b's; and back */
+    char n0[64], n1[64];
+    snprintf(n0, sizeof(n0), "%s", name_of(p, 0));
+    snprintf(n1, sizeof(n1), "%s", name_of(p, 1));
+    CHECK(re_project_move(p, 0, 1) == -1 && re_project_move(p, 0, 0) == -1, "drags: a move to where it is");
+    CHECK(re_project_move(p, 0, 2) == 1 && !strcmp(name_of(p, 0), n1) && !strcmp(name_of(p, 1), n0),
+          "drags: moved to the end: %s, %s", name_of(p, 0), name_of(p, 1));
+    CHECK(re_project_move(p, 1, 0) == 0 && !strcmp(name_of(p, 0), n0), "drags: moved to the start: %s",
+          name_of(p, 0));
+    CHECK(re_project_undo(p) && !strcmp(name_of(p, 0), n1), "drags: undoing a move: %s", name_of(p, 0));
+    re_project_close(p);
+
     /* ---- clips of other sizes and shapes: shown as they are, in their own
        colours, up to 1080p (MLT's fitting converted them several times) */
     p = re_project_new();

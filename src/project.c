@@ -31,6 +31,10 @@ struct re_project
         unsigned state;
     } *undo, *redo;
     int n_undo, n_redo;
+    /* an edit of many steps (re_project_begin): its undo point's state, and
+       the state before it */
+    int in_edit;
+    unsigned edit_state;
 };
 
 #define UNDO_MAX 100
@@ -383,6 +387,7 @@ int re_project_item(re_project *p, int i, re_item *item)
     item->in = info.frame_in;
     item->out = info.frame_out;
     item->gap = mlt_playlist_is_blank(p->v1, i);
+    item->source_length = info.length;
     if (!item->gap && info.resource) {
         const char *leaf = info.resource;
         for (const char *c = info.resource; *c; c++)
@@ -509,6 +514,71 @@ int re_project_trim(re_project *p, int frame, int end)
     }
     changed(p);
     return 1;
+}
+
+void re_project_begin(re_project *p)
+{
+    if (p->in_edit)
+        return;
+    checkpoint(p);
+    p->in_edit = 1;
+    p->edit_state = p->state;
+}
+
+void re_project_end(re_project *p)
+{
+    if (!p->in_edit)
+        return;
+    p->in_edit = 0;
+    /* (unchanged in the end: no undo point; as modified as before) */
+    const char *before = p->n_undo > 0 ? p->undo[p->n_undo - 1].xml : NULL;
+    char *now = snapshot(p);
+    if (before && now && !strcmp(before, now)) {
+        no_edit(p);
+        p->state = p->edit_state;
+    }
+    free(now);
+}
+
+int re_project_set_in_out(re_project *p, int item, int in, int out)
+{
+    re_item it;
+    if (re_project_item(p, item, &it) || it.gap)
+        return 0;
+    if (in < 0)
+        in = 0;
+    if (it.source_length > 0 && out > it.source_length - 1)
+        out = it.source_length - 1;
+    if (out < in)
+        out = in;
+    if (in == it.in && out == it.out)
+        return 0;
+    if (!p->in_edit)
+        checkpoint(p);
+    if (mlt_playlist_resize_clip(p->v1, item, in, out)) {
+        if (!p->in_edit)
+            no_edit(p);
+        return 0;
+    }
+    changed(p);
+    return 1;
+}
+
+int re_project_move(re_project *p, int item, int before)
+{
+    int n = re_project_items(p);
+    if (item < 0 || item >= n || before < 0 || before > n || before == item || before == item + 1)
+        return -1;
+    int dest = before > item ? before - 1 : before; /* (its index once it's out of its place) */
+    if (!p->in_edit)
+        checkpoint(p);
+    if (mlt_playlist_move(p->v1, item, dest)) {
+        if (!p->in_edit)
+            no_edit(p);
+        return -1;
+    }
+    changed(p);
+    return dest;
 }
 
 int re_project_cut(re_project *p, int frame, int dir)

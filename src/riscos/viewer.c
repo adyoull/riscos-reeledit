@@ -1294,7 +1294,8 @@ static const char *help_for(int win, int icon)
 {
     if (win == tl_window())
         return "This is the Timeline.|MClick the ruler or drag the playhead to move it; click a clip to select it "
-               "(Adjust: select or not).|MCtrl and the scroll wheel zoom; N turns snapping to cuts on or off.";
+               "(Adjust: select or not).|MDrag a clip's edge to trim it, its middle to move it.|M"
+               "Ctrl and the scroll wheel zoom; N turns snapping to cuts on or off.";
     if (win == -2)
         return "This is the Reel Edit icon.|MClick Select to open the editor; drop video files on it to add them "
                "to the project, or an MLT project to open it.";

@@ -2,7 +2,10 @@
  * track V1's clips and gaps, scrolled sideways by the window's own scroll
  * bar. Select on the ruler moves the playhead; on a clip selects it
  * (Adjust: toggles); files dropped on it go in at the frame they're
- * dropped on. Drawn with ColourTrans and OS_Plot, the names with the
+ * dropped on. Dragged: the ruler or the playhead scrubs; a clip's edge
+ * trims it (ripple: what follows moves along; the Viewer shows the frame
+ * at the edge); a clip's middle moves it (a line shows where it'll go, at
+ * the cut nearest the pointer). Drawn with ColourTrans and OS_Plot, the names with the
  * desktop font (Wimp_TextOp).
  *
  * Part of riscos-reeledit. GPL version 2 or later.
@@ -23,6 +26,9 @@
 #define MIN_W   640
 #define LABEL_W 200  /* the playhead's timecode, beside it on the ruler */
 #define SNAP    12   /* OS units: the playhead snaps to a cut this near */
+#define EDGE    16   /* OS units: a drag this near a clip's edge trims it (a third of a narrow clip) */
+
+enum { DRAG_NONE, DRAG_SCRUB, DRAG_IN, DRAG_OUT, DRAG_MOVE };
 
 static struct
 {
@@ -32,8 +38,11 @@ static struct
     int playhead;     /* the frame it's drawn at */
     int extent_w;
     char title[32];
-    int scrubbing;    /* the playhead being dragged along the ruler */
-} T = {0, 4.0, 0, 0, 0, 0, 0, "Timeline", 0};
+    int drag;         /* DRAG_: what a drag going on does */
+    /* the item dragged: as it was when the drag began */
+    int d_item, d_in, d_out, d_start, d_f0;
+    int d_before, d_line; /* moving: where it would go (before item d_before), the line's frame (-1: none) */
+} T = {0, 4.0, 0, 0, 0, 0, 0, "Timeline", DRAG_NONE, 0, 0, 0, 0, 0, -1, -1};
 
 static int x_of(int frame)
 {
@@ -373,6 +382,14 @@ static void draw(int *b)
             }
         }
     }
+    /* moving a clip: where it would go */
+    if (T.drag == DRAG_MOVE && T.d_line >= 0) {
+        int lx = ox + x_of(T.d_line);
+        colour(0xFFFFFF00);
+        rect(lx - 3, track_y0 - 8, lx + 3, track_y1 + 8);
+        colour(0x2080F000);
+        rect(lx - 1, track_y0 - 8, lx + 1, track_y1 + 8);
+    }
     /* the playhead: a line, a handle on the ruler, and its timecode beside it */
     colour(0x0000E000);
     int px = ox + x_of(T.playhead);
@@ -396,6 +413,108 @@ void tl_redraw(int *b)
         draw(b);
         r.r[1] = (intptr_t) b;
         more = ro_swi(Wimp_GetRectangle, &r) ? 0 : (int) r.r[0];
+    }
+}
+
+/* ---- dragging on the track ------------------------------------------------------ */
+
+static void redraw_frames(int f0, int f1) /* (the track between two frames, a little either side) */
+{
+    _kernel_swi_regs r;
+    int x0 = x_of(f0 < f1 ? f0 : f1) - 8, x1 = x_of(f0 < f1 ? f1 : f0) + 8;
+    r.r[0] = T.win; r.r[1] = x0; r.r[2] = -(RULER_H + TRACK_H + 16); r.r[3] = x1; r.r[4] = -RULER_H;
+    ro_swi(Wimp_ForceRedraw, &r);
+}
+
+/* A drag begun on a clip: its edges trim it, its middle moves it */
+static void drag_start(int f, int wx, int *b, int *st)
+{
+    int i = re_project_item_at(A.proj, f);
+    re_item it;
+    if (i < 0 || re_project_item(A.proj, i, &it) || it.gap)
+        return;
+    int x0 = x_of(it.start), x1 = x_of(it.start + it.length), edge = (x1 - x0) / 3;
+    if (edge > EDGE)
+        edge = EDGE;
+    int mode = wx - x0 < edge ? DRAG_IN : x1 - wx <= edge ? DRAG_OUT : DRAG_MOVE;
+    app_set_speed(0);
+    T.d_item = i;
+    T.d_in = it.in;
+    T.d_out = it.out;
+    T.d_start = it.start;
+    T.d_f0 = f;
+    T.d_before = -1;
+    T.d_line = -1;
+    tl_select(i);
+    /* the pointer kept to the window's visible part */
+    int d[10];
+    _kernel_swi_regs r;
+    d[0] = T.win;
+    d[1] = 7; /* a point, nothing drawn */
+    d[2] = d[4] = b[0];
+    d[3] = d[5] = b[1];
+    d[6] = st[1]; d[7] = st[2]; d[8] = st[3] - 1; d[9] = st[4] - 1;
+    r.r[1] = (intptr_t) d;
+    if (ro_swi(Wimp_DragBox, &r))
+        return;
+    T.drag = mode;
+    if (mode != DRAG_MOVE) {
+        re_project_begin(A.proj); /* (one undo for the whole drag) */
+        app_seek(mode == DRAG_IN ? it.start : it.start + it.length - 1);
+    }
+}
+
+/* Where a moved clip would go: the cut (an item's start, or the end)
+   nearest the frame */
+static void move_target(int f, int *before, int *at)
+{
+    int n = re_project_items(A.proj), best = 0, bd = -1;
+    for (int k = 0; k <= n; k++) {
+        re_item it;
+        int c = k < n ? (re_project_item(A.proj, k, &it), it.start) : re_project_length(A.proj);
+        int d = c > f ? c - f : f - c;
+        if (bd < 0 || d < bd) {
+            bd = d;
+            best = k;
+            *at = c;
+        }
+    }
+    *before = best;
+}
+
+static void drag_tick(int f)
+{
+    /* (trimming isn't snapped: the cuts after the clip move with it, and the
+       playhead shows the edge) */
+    int delta = f - T.d_f0;
+    re_item it;
+    switch (T.drag) {
+    case DRAG_IN:
+        if (re_project_set_in_out(A.proj, T.d_item, T.d_in + delta, T.d_out))
+            app_edited();
+        app_seek(T.d_start); /* (the clip's first frame now) */
+        break;
+    case DRAG_OUT:
+        if (re_project_set_in_out(A.proj, T.d_item, T.d_in, T.d_out + delta))
+            app_edited();
+        if (!re_project_item(A.proj, T.d_item, &it))
+            app_seek(it.start + it.length - 1); /* (its last frame now) */
+        break;
+    case DRAG_MOVE: {
+        int before, at;
+        move_target(f, &before, &at);
+        if (before == T.d_item || before == T.d_item + 1)
+            at = -1; /* (where it is: nowhere to show) */
+        if (at != T.d_line) {
+            if (T.d_line >= 0)
+                redraw_frames(T.d_line, T.d_line);
+            T.d_line = at;
+            T.d_before = before;
+            if (at >= 0)
+                redraw_frames(at, at);
+        }
+        break;
+    }
     }
 }
 
@@ -441,12 +560,14 @@ void tl_click(int *b)
             d[6] = st[1]; d[7] = st[4] - RULER_H + 4; d[8] = st[3] - 1; d[9] = st[4] - 4;
             r.r[1] = (intptr_t) d;
             if (!ro_swi(Wimp_DragBox, &r))
-                T.scrubbing = 1;
+                T.drag = DRAG_SCRUB;
         }
         return;
     }
-    if (drag) /* (dragging clips: to come) */
+    if (drag) {
+        drag_start(f, wx, b, st);
         return;
+    }
     int i = re_project_item_at(A.proj, f);
     re_item it;
     if (i >= 0 && !re_project_item(A.proj, i, &it) && it.gap)
@@ -520,7 +641,7 @@ static int snapped(int f)
 
 int tl_scrubbing(void)
 {
-    return T.scrubbing;
+    return T.drag != DRAG_NONE;
 }
 
 void tl_scrub_tick(void)
@@ -534,7 +655,12 @@ void tl_scrub_tick(void)
     r.r[1] = (intptr_t) st;
     if (ro_swi(Wimp_GetWindowState, &r))
         return;
-    int f = snapped(frame_of(p[0] - (st[1] - st[5])));
+    int raw = frame_of(p[0] - (st[1] - st[5]));
+    if (T.drag != DRAG_SCRUB) {
+        drag_tick(raw);
+        return;
+    }
+    int f = snapped(raw);
     if (f != app_position())
         app_seek(f); /* (seeks before the next picture replace each other: the newest is drawn) */
 }
@@ -542,8 +668,25 @@ void tl_scrub_tick(void)
 void tl_drag_end(int *b)
 {
     (void) b;
-    if (!T.scrubbing)
+    if (T.drag == DRAG_NONE)
         return;
     tl_scrub_tick();
-    T.scrubbing = 0;
+    int mode = T.drag;
+    T.drag = DRAG_NONE;
+    if (mode == DRAG_IN || mode == DRAG_OUT) {
+        re_project_end(A.proj);
+        app_edited();
+    } else if (mode == DRAG_MOVE) {
+        if (T.d_line >= 0)
+            redraw_frames(T.d_line, T.d_line);
+        T.d_line = -1;
+        int j = T.d_before >= 0 ? re_project_move(A.proj, T.d_item, T.d_before) : -1;
+        if (j >= 0) {
+            re_item it;
+            A.sel = j;
+            app_edited();
+            if (!re_project_item(A.proj, j, &it))
+                app_seek(it.start);
+        }
+    }
 }

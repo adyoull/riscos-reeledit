@@ -131,7 +131,7 @@ the save box, Menu for menus), the Style Guide wins.
 **Order of work** (each a test build): undo/redo, Up/Down, Q/W, playhead
 grab, selection outline, snapping, interactive help, wheel zoom (0.2, done
 in 0.2 test 2); trimming by dragging edges with the Viewer showing the edge
-frame, moving clips by dragging, dissolves by overlap (0.3); thumbnails and waveforms, the
+frame, moving clips by dragging (0.3 test 1), dissolves by overlap, fades, I/O marks (0.3); thumbnails and waveforms, the
 Clips window, autosave (0.4); then audio tracks, V2 and overlays, titles,
 export.
 
