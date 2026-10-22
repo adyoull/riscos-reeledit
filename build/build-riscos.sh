@@ -21,10 +21,11 @@ unpack_devkit() {   # file, directory
     mv "$O/src/$2.tmp" "$O/src/$2"
   fi
 }
-unpack_devkit "riscos-ffmpeg-devkit-$FFMPEG_DEVKIT_VERSION.tgz" ffmpeg-devkit
-unpack_devkit "riscos-mesa-devkit-$MESA_DEVKIT_VERSION.tgz" mesa-devkit
+# (by version: a new devkit in .riscos-deps is unpacked, not the old one used)
+unpack_devkit "riscos-ffmpeg-devkit-$FFMPEG_DEVKIT_VERSION.tgz" "ffmpeg-devkit-$FFMPEG_DEVKIT_VERSION"
+unpack_devkit "riscos-mesa-devkit-$MESA_DEVKIT_VERSION.tgz" "mesa-devkit-$MESA_DEVKIT_VERSION"
 rm -rf "$DK" && mkdir -p "$DK/lib/pkgconfig" "$DK/include"
-for d in mesa-devkit ffmpeg-devkit; do
+for d in "mesa-devkit-$MESA_DEVKIT_VERSION" "ffmpeg-devkit-$FFMPEG_DEVKIT_VERSION"; do
   for f in "$O/src/$d"/include/*; do ln -sfn "$f" "$DK/include/"; done
   for f in "$O/src/$d"/lib/*.a; do ln -sfn "$f" "$DK/lib/"; done
   for f in "$O/src/$d"/lib/pkgconfig/*.pc; do ln -sfn "$f" "$DK/lib/pkgconfig/"; done
@@ -75,7 +76,7 @@ FF_LIBS="$(PKG_CONFIG_LIBDIR=$DK/lib/pkgconfig PKG_CONFIG_PATH= pkg-config --sta
   libavfilter libavformat libavcodec libswresample libswscale libavutil) -lz"
 cmake -S "$M" -B "$M/build" "${CMAKE_RISCOS[@]}" -DCMAKE_C_FLAGS="$CFLAGS_EXTRA -include $TOP/build/riscos-compat.h" \
   -DCMAKE_C_STANDARD_LIBRARIES="$FF_LIBS" -DCMAKE_CXX_STANDARD_LIBRARIES="$FF_LIBS" \
-  -DMLT_STATIC=ON -DMLT_NO_THREADS=ON -DMLT_AVFORMAT_PREFER_DEFAULT="h264=h264_vchiq,hevc=hevc_hwdec" -DMLT_AVFORMAT_PREFER_MAX_DEFAULT="h264_vchiq=1,hevc_hwdec=1" -DMLT_AVFORMAT_CACHE_DEFAULT=0 -DMLT_AVFORMAT_CONCEAL_BY_REFERENCE=ON \
+  -DMLT_STATIC=ON -DMLT_NO_THREADS=ON -DMLT_AVFORMAT_PREFER_DEFAULT="h264=h264_vchiq,hevc=hevc_hwdec" -DMLT_AVFORMAT_PREFER_MAX_DEFAULT="h264_vchiq=3,hevc_hwdec=1" -DMLT_AVFORMAT_CACHE_DEFAULT=0 -DMLT_AVFORMAT_CONCEAL_BY_REFERENCE=ON \
   -DMOD_AVFORMAT=ON -DUSE_AVDEVICE=OFF -DMOD_XML=ON "${MODS_OFF[@]}" -DBUILD_TESTING=OFF -DBUILD_DOCS=OFF \
   -DSWIG_PYTHON=OFF -DSWIG_RUBY=OFF -DSWIG_LUA=OFF -DSWIG_PERL=OFF -DSWIG_PHP=OFF -DSWIG_TCL=OFF \
   -DSWIG_CSHARP=OFF -DSWIG_JAVA=OFF -DSWIG_NODEJS=OFF > "$O/mlt-configure.log" 2>&1 || { tail -30 "$O/mlt-configure.log"; exit 1; }
