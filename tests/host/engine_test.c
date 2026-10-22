@@ -281,9 +281,10 @@ int main(int argc, char **argv)
     CHECK(nshown >= 25, "I: %d pictures in 2 s backwards (each poll a centisecond here)", nshown);
     for (int i = 1; i < nshown; i++)
         CHECK(shown[i] == shown[i - 1] - 1, "I: frame %d after %d going backwards", shown[i], shown[i - 1]);
-    CHECK(st.jumps - before.jumps <= 1 + nshown / 16, "I: %d seeks for %d pictures backwards", st.jumps - before.jumps,
+    CHECK(st.jumps - before.jumps <= 2 + nshown / 14 /* (runs of 14: 48 MB of 1080p-sized slots) */, "I: %d seeks for %d pictures backwards", st.jumps - before.jumps,
           nshown);
     CHECK(st.reverse_fills > before.reverse_fills, "I: no runs decoded");
+    CHECK(last_w == 320 && last_h == 180, "I: backwards, pictures %dx%d, not the clips' own 320x180", last_w, last_h);
 
     /* K: the sound as the clock (io.sound_queued): a sound device playing 2%
        slow; the pictures follow what's heard, not the system clock, and
@@ -378,11 +379,12 @@ int main(int argc, char **argv)
     av_log(NULL, AV_LOG_WARNING, "No format change\n");
     av_log(NULL, AV_LOG_WARNING, "No format change\n");
     av_log(NULL, AV_LOG_WARNING, "No format change\n");
-    av_log(NULL, AV_LOG_VERBOSE, "chatter\n");
+    av_log(NULL, AV_LOG_VERBOSE, "The format change came 1 cs\n");
+    av_log(NULL, AV_LOG_DEBUG, "chatter\n");
     mlt_log(NULL, MLT_LOG_INFO, "decoder %s handed over\n", "h264_vchiq");
     mlt_log(NULL, MLT_LOG_DEBUG, "seeking\n");
-    CHECK(collected == 4 && strstr(lines, "The format change came 3 cs after the first access unit|")
-              && strstr(lines, "|No format change|(the line before, 2 more times)|mlt: decoder h264_vchiq handed over|")
+    CHECK(collected == 5 && strstr(lines, "The format change came 3 cs after the first access unit|")
+              && strstr(lines, "|No format change|(the line before, 2 more times)|The format change came 1 cs|mlt: decoder h264_vchiq handed over|")
               && !strstr(lines, "chatter") && !strstr(lines, "seeking"),
           "M: %d lines: %s", collected, lines);
 

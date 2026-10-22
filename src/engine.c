@@ -41,11 +41,18 @@
 #define RC_SLOTS 32
 #define RC_BYTES (48 << 20)
 
+/* A clip's own pictures up to this size are shown as they are (the display
+   fits them, the overlay in hardware); bigger ones are scaled by MLT */
+#define NATIVE_MAX (1920L * 1088 * 11 / 10)
+
+
 typedef struct
 {
     uint8_t *buf;
+    size_t size;    /* buf's */
     int pos;        /* -1: empty */
-    int colorspace, full_range;
+    int width, height, colorspace, full_range;
+    double dar;
 } rc_slot;
 
 struct re_engine
@@ -149,7 +156,7 @@ static void msg_text(const char *s)
 static void msg_from_mlt(void *service, int level, const char *fmt, va_list ap)
 {
     (void) service;
-    if (level > MLT_LOG_INFO || !msg_line)
+    if (level > MLT_LOG_INFO || !msg_line) /* (MLT's verbose is chatty: its level is for FFmpeg's sake) */
         return;
     char t[512];
     int n = snprintf(t, sizeof(t), "mlt: ");
@@ -159,7 +166,7 @@ static void msg_from_mlt(void *service, int level, const char *fmt, va_list ap)
 
 static void msg_from_ffmpeg(void *avcl, int level, const char *fmt, va_list ap)
 {
-    if (level > AV_LOG_INFO || !msg_line)
+    if (level > AV_LOG_VERBOSE || !msg_line) /* (the VideoCore's decoder says what it does at verbose) */
         return;
     char t[512];
     int prefix = 1;
@@ -170,9 +177,9 @@ static void msg_from_ffmpeg(void *avcl, int level, const char *fmt, va_list ap)
 void re_engine_messages(void (*line)(const char *line))
 {
     msg_line = line;
-    mlt_log_set_level(MLT_LOG_INFO); /* (MLT's avformat module sets FFmpeg's level from it when it starts) */
+    mlt_log_set_level(MLT_LOG_VERBOSE); /* (MLT's avformat module sets FFmpeg's level from it when it starts) */
     mlt_log_set_callback(msg_from_mlt);
-    av_log_set_level(AV_LOG_INFO);
+    av_log_set_level(AV_LOG_VERBOSE);
     av_log_set_callback(msg_from_ffmpeg);
 }
 
@@ -268,7 +275,9 @@ static re_engine *setup(re_engine *e, double preview_scale)
     e->seek_to = 0;
     e->last_fetched = -2;
     {
-        size_t bytes = (size_t) e->width * e->height * 3 / 2;
+        /* (pictures are kept at their own size, up to NATIVE_MAX's) */
+        long px = (long) e->width * e->height;
+        size_t bytes = (size_t) (px > NATIVE_MAX ? px : NATIVE_MAX) * 3 / 2;
         int n = (int) (RC_BYTES / (bytes ? bytes : 1));
         e->rc_n = n < 4 ? 4 : n > RC_SLOTS ? RC_SLOTS : n;
         for (int i = 0; i < RC_SLOTS; i++)
@@ -429,9 +438,6 @@ static mlt_frame frame_at(re_engine *e, int position)
 
 /* The frame's picture as Reel Edit shows it: yuv420p at the preview size.
    0, or -1 when there's none. */
-/* A clip's own pictures up to this size are shown as they are (the display
-   fits them, the overlay in hardware); bigger ones are scaled by MLT */
-#define NATIVE_MAX (1920L * 1088 * 11 / 10)
 
 /* The frame's picture. native: a clip's picture at its own size, when it's
    no bigger than NATIVE_MAX (else, or not native, the profile's size, the
@@ -523,7 +529,6 @@ static rc_slot *rc_find(re_engine *e, int position)
 static void rc_fill_one(re_engine *e)
 {
     int position = e->rc_next++;
-    size_t bytes = (size_t) e->width * e->height * 3 / 2;
     rc_slot *slot = rc_find(e, position);
     if (!slot) {
         int far = 0;
@@ -540,12 +545,29 @@ static void rc_fill_one(re_engine *e)
         re_picture p;
         if (!frame)
             return;
-        if (!picture_of(e, frame, position, &p, 0) && p.width == e->width && p.height == e->height
-            && (slot->buf || (slot->buf = malloc(bytes)))) {
-            memcpy(slot->buf, p.planes[0], bytes);
-            slot->pos = position;
-            slot->colorspace = p.colorspace;
-            slot->full_range = p.full_range;
+        if (!picture_of(e, frame, position, &p, 1)) {
+            /* (at its own size, as when going forwards: not fitted by MLT,
+               which took longer than the decoding; the planes kept packed) */
+            size_t y = (size_t) p.width * p.height, c = (size_t) (p.width / 2) * (p.height / 2);
+            if (slot->size < y + 2 * c) {
+                free(slot->buf);
+                slot->buf = malloc(y + 2 * c);
+                slot->size = slot->buf ? y + 2 * c : 0;
+            }
+            if (slot->buf) {
+                for (int r = 0; r < p.height; r++)
+                    memcpy(slot->buf + (size_t) r * p.width, p.planes[0] + (size_t) r * p.strides[0], p.width);
+                for (int pl = 1; pl < 3; pl++)
+                    for (int r = 0; r < p.height / 2; r++)
+                        memcpy(slot->buf + y + (pl - 1) * c + (size_t) r * (p.width / 2),
+                               p.planes[pl] + (size_t) r * p.strides[pl], p.width / 2);
+                slot->pos = position;
+                slot->width = p.width;
+                slot->height = p.height;
+                slot->dar = p.dar;
+                slot->colorspace = p.colorspace;
+                slot->full_range = p.full_range;
+            }
         }
         mlt_frame_close(frame);
     }
@@ -556,7 +578,7 @@ static void rc_fill_one(re_engine *e)
 static void rc_show(re_engine *e, rc_slot *slot)
 {
     re_picture p;
-    int w = e->width, h = e->height;
+    int w = slot->width, h = slot->height;
     p.planes[0] = slot->buf;
     p.planes[1] = slot->buf + w * h;
     p.planes[2] = slot->buf + w * h + (w / 2) * (h / 2);
@@ -567,7 +589,7 @@ static void rc_show(re_engine *e, rc_slot *slot)
     p.position = slot->pos;
     p.colorspace = slot->colorspace;
     p.full_range = slot->full_range;
-    p.dar = mlt_profile_dar(e->profile);
+    p.dar = slot->dar;
     e->io.show(e->io.ctx, &p);
     e->shown = slot->pos;
     e->stats.rendered++;
