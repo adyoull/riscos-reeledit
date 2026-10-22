@@ -962,17 +962,22 @@ static int script(int *b, int mask)
     case 99:
         CHECK(whole_redraws == 0, "moved, the Viewer was all drawn again");
         next(100);
-        return click_tl(b, 60, 1, 0x400); /* (the playhead away from the edges to be dragged) */
+        return click_tl(b, 104, 1, 0x400); /* (the playhead at the end: its line is at the edge to be dragged) */
     /* ---- dragging on the Timeline: trimming an edge, moving a clip ---- */
     case 100:
         if (nulls)
             return 0;
         mark = drags;
+        CHECK(pos == 104, "the playhead not at the end (%d)", pos);
         next(101);
-        return click_tl(b, 104, 0, 0x40); /* a drag at the second clip's end (105): trim its end */
+        /* a drag just past the second clip's end (105), where the playhead's
+           line is too: trims the end, not the playhead */
+        b[0] = W[1].box[0] - W[1].scroll_x + 16 + 105 * 4 + 6; b[1] = W[1].box[3] - 48 - 8 - 48; b[2] = 0x40;
+        b[3] = TL; b[4] = -1;
+        return 6;
     case 101:
         CHECK(drags == mark + 1, "a drag at a clip's edge didn't start a drag");
-        ptr[0] = W[1].box[0] - W[1].scroll_x + 16 + 99 * 4; ptr[1] = W[1].box[3] - 100; /* (in two steps) */
+        ptr[0] = W[1].box[0] - W[1].scroll_x + 16 + 105 * 4 + 6 - 5 * 4; ptr[1] = W[1].box[3] - 100; /* (5 back; in two steps) */
         next(201);
         return script(b, mask);
     case 201:
@@ -981,7 +986,7 @@ static int script(int *b, int mask)
                 fail_quit("dragging the end 5 frames back: not trimmed");
             return 0;
         }
-        ptr[0] = W[1].box[0] - W[1].scroll_x + 16 + 94 * 4;
+        ptr[0] = W[1].box[0] - W[1].scroll_x + 16 + 105 * 4 + 6 - 10 * 4;
         next(102);
         return script(b, mask);
     case 102:

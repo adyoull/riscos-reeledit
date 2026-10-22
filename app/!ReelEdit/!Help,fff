@@ -1,4 +1,4 @@
-Reel Edit 0.3 (test 1)
+Reel Edit 0.3 (test 2)
 ======================
 
 Reel Edit is a video editor for RISC OS that is being written, on the MLT
@@ -34,8 +34,9 @@ Escape stops it. An .m2v file holds only the pictures: its sound, if it
 has any, is in a file of its own (.mp2, .ac3, .wav), which will go on an
 audio track when Reel Edit has them.
 
-Dragging on the Timeline: drag a clip's end (near its right edge) to
-trim it, or its start (near its left edge): the clips after it move along,
+Dragging on the Timeline: drag a clip's end (near its right edge, or
+just past the last clip's end) to trim it, or its start (near its left
+edge; a selected clip shows handles there): the clips after it move along,
 and the Viewer shows the frame at the edge as you drag. Drag the middle of
 a clip to move it: a line shows where it will go (the nearest cut), and it
 goes there when you let go. Each drag is one step for Undo (F8).

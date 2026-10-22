@@ -26,7 +26,7 @@
 #define MIN_W   640
 #define LABEL_W 200  /* the playhead's timecode, beside it on the ruler */
 #define SNAP    12   /* OS units: the playhead snaps to a cut this near */
-#define EDGE    16   /* OS units: a drag this near a clip's edge trims it (a third of a narrow clip) */
+#define EDGE    24   /* OS units: a drag this near a clip's edge trims it (a third of a narrow clip) */
 
 enum { DRAG_NONE, DRAG_SCRUB, DRAG_IN, DRAG_OUT, DRAG_MOVE };
 
@@ -368,6 +368,11 @@ static void draw(int *b)
             int inset = i == A.sel ? 6 : 2;
             colour(fill);
             rect(x0 + inset, track_y0 + inset, x1 - inset, track_y1 - inset);
+            if (i == A.sel && x1 - x0 > 4 * inset) { /* its ends' handles: drag to trim */
+                colour(0x2080F000);
+                rect(x0, track_y0 + 20, x0 + inset + 4, track_y1 - 20);
+                rect(x1 - inset - 4, track_y0 + 20, x1, track_y1 - 20);
+            }
             /* the name, clipped to the clip */
             int c0 = x0 + 2 > cx0 ? x0 + 2 : cx0, c1 = x1 - 2 < cx1 ? x1 - 2 : cx1;
             int r0 = track_y0 > cy0 ? track_y0 : cy0, r1 = track_y1 < cy1 ? track_y1 : cy1;
@@ -426,17 +431,40 @@ static void redraw_frames(int f0, int f1) /* (the track between two frames, a li
     ro_swi(Wimp_ForceRedraw, &r);
 }
 
-/* A drag begun on a clip: its edges trim it, its middle moves it */
-static void drag_start(int f, int wx, int *b, int *st)
+/* What a drag at a work area x would do: the clip, and trim its start
+   (DRAG_IN), its end (DRAG_OUT), or move it (DRAG_MOVE); DRAG_NONE for
+   none. The item is the one under the pointer (at a cut: the one after
+   it); just past the end, the last one's end. */
+static int drag_mode_at(int wx, int *item)
 {
-    int i = re_project_item_at(A.proj, f);
+    int len = re_project_length(A.proj);
+    int fi = (int) ((wx - LEFT) / T.scale); /* (the frame the pointer is over, not the nearest edge) */
+    int i;
+    if (fi >= len) {
+        if (len <= 0 || wx - x_of(len) > EDGE)
+            return DRAG_NONE;
+        i = re_project_items(A.proj) - 1;
+    } else {
+        i = re_project_item_at(A.proj, fi < 0 ? 0 : fi);
+    }
     re_item it;
     if (i < 0 || re_project_item(A.proj, i, &it) || it.gap)
-        return;
+        return DRAG_NONE;
+    *item = i;
     int x0 = x_of(it.start), x1 = x_of(it.start + it.length), edge = (x1 - x0) / 3;
     if (edge > EDGE)
         edge = EDGE;
-    int mode = wx - x0 < edge ? DRAG_IN : x1 - wx <= edge ? DRAG_OUT : DRAG_MOVE;
+    return wx - x0 < edge ? DRAG_IN : x1 - wx <= edge ? DRAG_OUT : DRAG_MOVE;
+}
+
+/* A drag begun on a clip: its edges trim it, its middle moves it */
+static void drag_start(int f, int wx, int *b, int *st)
+{
+    (void) f;
+    int i = -1, mode = drag_mode_at(wx, &i);
+    re_item it;
+    if (mode == DRAG_NONE || re_project_item(A.proj, i, &it))
+        return;
     app_set_speed(0);
     T.d_item = i;
     T.d_in = it.in;
@@ -544,7 +572,13 @@ void tl_click(int *b)
         return;
     int f = frame_of(wx);
     int drag = buttons & (0x40 | 0x10);
-    int on_playhead = wx > x_of(T.playhead) - 12 && wx < x_of(T.playhead) + 12;
+    int on_playhead = wx > x_of(T.playhead) - 12 && wx < x_of(T.playhead) + 12, item;
+    /* (on the track a clip's edge wins: the playhead is often at a cut) */
+    if (wy <= -RULER_H && on_playhead && drag) {
+        int m = drag_mode_at(wx, &item);
+        if (m == DRAG_IN || m == DRAG_OUT)
+            on_playhead = 0;
+    }
     if (wy > -RULER_H || (drag && on_playhead)) {
         /* the ruler, or the playhead line grabbed: the playhead there;
            dragged, it follows the pointer */
