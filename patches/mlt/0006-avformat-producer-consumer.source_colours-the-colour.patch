@@ -1,4 +1,4 @@
-From d9c8a6b59b568c8285fe1018f5a81efce3238e40 Mon Sep 17 00:00:00 2001
+From 0c2bee7d5cb924fb04dbfd50fb25ab720c8c092e Mon Sep 17 00:00:00 2001
 From: Andrew Youll <andrewyoull86@gmail.com>
 Date: Wed, 21 Oct 2026 21:08:36 +0100
 Subject: [PATCH 6/6] avformat producer: consumer.source_colours, the colours
@@ -13,10 +13,10 @@ to BT.601 through RGB, costing more than decoding it.
  1 file changed, 9 insertions(+)
 
 diff --git a/src/modules/avformat/producer_avformat.c b/src/modules/avformat/producer_avformat.c
-index b7a0cfe..95de9d1 100644
+index 44186bd..2df5228 100644
 --- a/src/modules/avformat/producer_avformat.c
 +++ b/src/modules/avformat/producer_avformat.c
-@@ -2871,6 +2871,15 @@ static int producer_get_image(mlt_frame frame,
+@@ -2882,6 +2882,15 @@ static int producer_get_image(mlt_frame frame,
      int dst_full_range = (*format == mlt_image_none) ? self->full_range
                                                       : mlt_image_full_range(dst_color_range);
  

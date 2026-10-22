@@ -97,7 +97,7 @@ echo "== project_test"
 "$O/project_test" a.mp4 b.mp4 numbered.mp4 project_test.mlt numbered.m2v four3-709.mp4 big.mp4 wide-dvd.mp4 2>&1 | grep -v "^\[" || bad=1
 echo "== editor_test"
 "$O/editor_test" numbered-snd.mp4 numbered.mp4 numbered.m2v 2>&1 | grep -v "^\[" || bad=1
-for m in normal refuse late off lazy max exit; do
+for m in normal refuse late off lazy max max3 exit; do
   echo "== prefer_test $m"
   "$O/prefer_test" $m numbered.mp4 2>&1 | grep -v "^\[" || bad=1
 done

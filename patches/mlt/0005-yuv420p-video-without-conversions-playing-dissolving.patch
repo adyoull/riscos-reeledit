@@ -1,4 +1,4 @@
-From 876f9669da488a9f9a508dfa03740fe8f49b2586 Mon Sep 17 00:00:00 2001
+From 94301f3d1a7cb27051f50a7bcfc8105d7be3d155 Mon Sep 17 00:00:00 2001
 From: Andrew Youll <andrewyoull86@gmail.com>
 Date: Tue, 20 Oct 2026 20:02:49 +0100
 Subject: [PATCH 5/6] yuv420p video without conversions: playing, dissolving,
@@ -47,7 +47,7 @@ exporting 100 frames of a colour at 1080p from 6.1 to 1.0 s.
  6 files changed, 169 insertions(+), 16 deletions(-)
 
 diff --git a/src/modules/avformat/CMakeLists.txt b/src/modules/avformat/CMakeLists.txt
-index cbea7bc..c2f035a 100644
+index 23e3741..252b073 100644
 --- a/src/modules/avformat/CMakeLists.txt
 +++ b/src/modules/avformat/CMakeLists.txt
 @@ -34,6 +34,14 @@ set(MLT_AVFORMAT_PREFER_DEFAULT "" CACHE STRING "Decoders the avformat producer
@@ -62,9 +62,9 @@ index cbea7bc..c2f035a 100644
 +if(MLT_AVFORMAT_CONCEAL_BY_REFERENCE)
 +  target_compile_definitions(mltavformat PRIVATE MLT_AVFORMAT_CONCEAL_BY_REFERENCE)
 +endif()
- set(MLT_AVFORMAT_PREFER_MAX_DEFAULT "" CACHE STRING "How many preferred decoders may be open at once, in all producers (empty or 0: no limit); the MLT_AVFORMAT_PREFER_MAX environment variable overrides it")
+ set(MLT_AVFORMAT_PREFER_MAX_DEFAULT "" CACHE STRING "How many of each preferred decoder may be open at once, in all producers: a number, or decoder=number,... (for example h264_vchiq=3,hevc_hwdec=1; empty or 0: no limit); the MLT_AVFORMAT_PREFER_MAX environment variable overrides it")
  if(MLT_AVFORMAT_PREFER_MAX_DEFAULT)
-   target_compile_definitions(mltavformat PRIVATE MLT_AVFORMAT_PREFER_MAX_DEFAULT=${MLT_AVFORMAT_PREFER_MAX_DEFAULT})
+   target_compile_definitions(mltavformat PRIVATE MLT_AVFORMAT_PREFER_MAX_DEFAULT="${MLT_AVFORMAT_PREFER_MAX_DEFAULT}")
 diff --git a/src/modules/avformat/consumer_avformat.c b/src/modules/avformat/consumer_avformat.c
 index 8272f4d..42e5f87 100644
 --- a/src/modules/avformat/consumer_avformat.c
@@ -149,10 +149,10 @@ index 3f6690d..e9c57ab 100644
      // Check that we want progressive and we aren't already progressive
      if (deinterlace && *format == mlt_image_yuv422 && *image != NULL
 diff --git a/src/modules/avformat/producer_avformat.c b/src/modules/avformat/producer_avformat.c
-index d3cfbff..b7a0cfe 100644
+index f3ec905..44186bd 100644
 --- a/src/modules/avformat/producer_avformat.c
 +++ b/src/modules/avformat/producer_avformat.c
-@@ -137,6 +137,7 @@ struct producer_avformat_s
+@@ -148,6 +148,7 @@ struct producer_avformat_s
      char prefer_name[64];        // its name, from the prefer list
      AVRational video_time_base;
      mlt_frame last_good_frame; // for video error concealment
@@ -160,7 +160,7 @@ index d3cfbff..b7a0cfe 100644
      int last_good_position;    // for video error concealment
      AVFilterGraph *vfilter_graph;
      AVFilterContext *vfilter_in;
-@@ -2357,14 +2358,29 @@ static mlt_colorspace convert_image_yuvp(producer_avformat self,
+@@ -2368,14 +2369,29 @@ static mlt_colorspace convert_image_yuvp(producer_avformat self,
          src_pix_fmt = intermediate_pix_fmt;
      }
  
@@ -194,7 +194,7 @@ index d3cfbff..b7a0cfe 100644
  
      // For YUVJ formats, the range is encoded in the format
      int effective_src_range = (src_pix_fmt == AV_PIX_FMT_YUVJ420P
-@@ -2797,6 +2813,13 @@ static void init_cache(mlt_properties properties, mlt_cache *cache)
+@@ -2808,6 +2824,13 @@ static void init_cache(mlt_properties properties, mlt_cache *cache)
      // if cache size supplied by environment variable
      int cache_supplied = getenv("MLT_AVFORMAT_CACHE") != NULL;
      int cache_size = cache_supplied ? atoi(getenv("MLT_AVFORMAT_CACHE")) : 0;
@@ -208,7 +208,7 @@ index d3cfbff..b7a0cfe 100644
  
      // cache size supplied via property
      if (mlt_properties_get(properties, "cache")) {
-@@ -3366,9 +3389,38 @@ static int producer_get_image(mlt_frame frame,
+@@ -3377,9 +3400,38 @@ static int producer_get_image(mlt_frame frame,
          // Clone frame for error concealment.
          if (self->current_position >= self->last_good_position) {
              self->last_good_position = self->current_position;
@@ -247,7 +247,7 @@ index d3cfbff..b7a0cfe 100644
          }
      } else if (self->last_good_frame) {
          // Use last known good frame if there was a decoding failure.
-@@ -5049,6 +5101,7 @@ static void producer_avformat_close(producer_avformat self)
+@@ -5081,6 +5133,7 @@ static void producer_avformat_close(producer_avformat self)
      mlt_cache_close(self->audio_cache);
      if (self->last_good_frame)
          mlt_frame_close(self->last_good_frame);

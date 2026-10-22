@@ -1,4 +1,4 @@
-From c353dca3564b65d4537740710321b46943ae6f52 Mon Sep 17 00:00:00 2001
+From 27c4f2d7d6a87a517cd78528a92083edd896008a Mon Sep 17 00:00:00 2001
 From: Andrew Youll <andrewyoull86@gmail.com>
 Date: Tue, 20 Oct 2026 16:34:57 +0100
 Subject: [PATCH 4/6] avformat producer: preferred decoders, falling back to
@@ -37,12 +37,12 @@ Places are given back when a decoder is closed or falls back, and any
 still open at exit are closed (on RISC OS nothing else would close them).
 ---
  src/modules/avformat/CMakeLists.txt        |   9 +
- src/modules/avformat/producer_avformat.c   | 389 ++++++++++++++++++++-
+ src/modules/avformat/producer_avformat.c   | 421 ++++++++++++++++++++-
  src/modules/avformat/producer_avformat.yml |  16 +
- 3 files changed, 411 insertions(+), 3 deletions(-)
+ 3 files changed, 443 insertions(+), 3 deletions(-)
 
 diff --git a/src/modules/avformat/CMakeLists.txt b/src/modules/avformat/CMakeLists.txt
-index 8b1bf6c..cbea7bc 100644
+index 8b1bf6c..23e3741 100644
 --- a/src/modules/avformat/CMakeLists.txt
 +++ b/src/modules/avformat/CMakeLists.txt
 @@ -29,6 +29,15 @@ add_custom_target(Other_avformat_Files SOURCES
@@ -54,18 +54,36 @@ index 8b1bf6c..cbea7bc 100644
 +if(MLT_AVFORMAT_PREFER_DEFAULT)
 +  target_compile_definitions(mltavformat PRIVATE MLT_AVFORMAT_PREFER_DEFAULT="${MLT_AVFORMAT_PREFER_DEFAULT}")
 +endif()
-+set(MLT_AVFORMAT_PREFER_MAX_DEFAULT "" CACHE STRING "How many preferred decoders may be open at once, in all producers (empty or 0: no limit); the MLT_AVFORMAT_PREFER_MAX environment variable overrides it")
++set(MLT_AVFORMAT_PREFER_MAX_DEFAULT "" CACHE STRING "How many of each preferred decoder may be open at once, in all producers: a number, or decoder=number,... (for example h264_vchiq=3,hevc_hwdec=1; empty or 0: no limit); the MLT_AVFORMAT_PREFER_MAX environment variable overrides it")
 +if(MLT_AVFORMAT_PREFER_MAX_DEFAULT)
-+  target_compile_definitions(mltavformat PRIVATE MLT_AVFORMAT_PREFER_MAX_DEFAULT=${MLT_AVFORMAT_PREFER_MAX_DEFAULT})
++  target_compile_definitions(mltavformat PRIVATE MLT_AVFORMAT_PREFER_MAX_DEFAULT="${MLT_AVFORMAT_PREFER_MAX_DEFAULT}")
 +endif()
  target_compile_options(mltavformat PRIVATE ${MLT_COMPILE_OPTIONS})
  
  target_include_directories(mltavformat SYSTEM PRIVATE ${FFMPEG_INCLUDE_DIRS})
 diff --git a/src/modules/avformat/producer_avformat.c b/src/modules/avformat/producer_avformat.c
-index 62aaaeb..d3cfbff 100644
+index 62aaaeb..f3ec905 100644
 --- a/src/modules/avformat/producer_avformat.c
 +++ b/src/modules/avformat/producer_avformat.c
-@@ -129,6 +129,12 @@ struct producer_avformat_s
+@@ -69,6 +69,17 @@
+ #define POSITION_INITIAL (-2)
+ #define POSITION_INVALID (-1)
+ 
++/* (decode_again: after a decoder is changed, the next picture is decoded
++   from a seek; a clip that hasn't shown a picture yet stays "initial", so
++   that seek first finds the stream's first pts: else the first packet read
++   after the seek (a keyframe part way in) was taken for the start, and
++   every picture was a GOP late) */
++#define decode_again(self) \
++    do { \
++        if ((self)->last_position != POSITION_INITIAL) \
++            (self)->last_position = POSITION_INVALID; \
++    } while (0)
++
+ #define MAX_AUDIO_STREAMS (32)
+ #define MAX_AUDIO_FRAME_SIZE (192000) // 1 second of 48khz 32bit audio
+ #define IMAGE_ALIGN (1)
+@@ -129,6 +140,12 @@ struct producer_avformat_s
      int packets_thread_stop; // non-zero when packets_thread is to stop
      int is_thread_init;
      int packets_inline; // no packets_thread: packets are read as they're needed (mlt_threads_disabled)
@@ -78,7 +96,7 @@ index 62aaaeb..d3cfbff 100644
      AVRational video_time_base;
      mlt_frame last_good_frame; // for video error concealment
      int last_good_position;    // for video error concealment
-@@ -166,6 +172,16 @@ static void producer_set_up_video(producer_avformat self, mlt_frame frame);
+@@ -166,6 +183,16 @@ static void producer_set_up_video(producer_avformat self, mlt_frame frame);
  static void producer_set_up_audio(producer_avformat self, mlt_frame frame);
  static void apply_properties(void *obj, mlt_properties properties, int flags);
  static int video_codec_init(producer_avformat self, int index, mlt_properties properties);
@@ -95,7 +113,7 @@ index 62aaaeb..d3cfbff 100644
  static void get_audio_streams_info(producer_avformat self);
  static mlt_audio_format pick_audio_format(int sample_fmt);
  static int pick_av_pixel_format(int *pix_fmt, int full_range);
-@@ -1707,7 +1723,7 @@ static void prepare_reopen(producer_avformat self)
+@@ -1707,7 +1734,7 @@ static void prepare_reopen(producer_avformat self)
          self->decode_buffer[i] = NULL;
          avcodec_free_context(&self->audio_codec[i]);
      }
@@ -104,7 +122,7 @@ index 62aaaeb..d3cfbff 100644
      av_frame_unref(self->video_frame);
      av_buffer_unref(&self->hwaccel.device_ctx);
      self->hwaccel.device_ctx = NULL;
-@@ -1927,6 +1943,19 @@ static int seek_video(producer_avformat self,
+@@ -1927,6 +1954,19 @@ static int seek_video(producer_avformat self,
              self->last_position = POSITION_INVALID;
              av_frame_unref(self->video_frame);
          }
@@ -124,7 +142,7 @@ index 62aaaeb..d3cfbff 100644
      }
      pthread_mutex_unlock(&self->packets_mutex);
      return paused;
-@@ -2899,6 +2928,42 @@ static int producer_get_image(mlt_frame frame,
+@@ -2899,6 +2939,42 @@ static int producer_get_image(mlt_frame frame,
  
      double delay = mlt_properties_get_double(properties, "video_delay");
  
@@ -159,7 +177,7 @@ index 62aaaeb..d3cfbff 100644
 +            if (!opened || !self->video_codec)
 +                goto exit_get_image;
 +            // decode from a seek, as for a new clip
-+            self->last_position = POSITION_INVALID;
++            decode_again(self);
 +            av_frame_unref(self->video_frame);
 +        }
 +    }
@@ -167,7 +185,7 @@ index 62aaaeb..d3cfbff 100644
      // Seek if necessary
      double speed = mlt_producer_get_speed(producer);
      int preseek = must_decode && self->video_codec->has_b_frames && speed >= 0.0 && speed <= 1.0;
-@@ -3056,6 +3121,12 @@ static int producer_get_image(mlt_frame frame,
+@@ -3056,6 +3132,12 @@ static int producer_get_image(mlt_frame frame,
                                    "decoded video packet with size %d => %d\n",
                                    self->pkt.size,
                                    self->video_send_result);
@@ -180,7 +198,7 @@ index 62aaaeb..d3cfbff 100644
                      // Note: decode may fail at the beginning of MPEGfile (B-frames referencing before first I-frame), so allow a few errors.
                      if (!ignore_send_packet_result(self->video_send_result)) {
                          mlt_log_warning(MLT_PRODUCER_SERVICE(producer),
-@@ -3063,6 +3134,12 @@ static int producer_get_image(mlt_frame frame,
+@@ -3063,6 +3145,12 @@ static int producer_get_image(mlt_frame frame,
                                          self->video_send_result);
                      } else {
                          int error = avcodec_receive_frame(self->video_codec, self->video_frame);
@@ -193,7 +211,7 @@ index 62aaaeb..d3cfbff 100644
                          if (error < 0) {
                              if (error != AVERROR(EAGAIN) && ++decode_errors > 10) {
                                  mlt_log_warning(MLT_PRODUCER_SERVICE(producer),
-@@ -3356,6 +3433,276 @@ static void apply_properties(void *obj, mlt_properties properties, int flags)
+@@ -3356,6 +3444,297 @@ static void apply_properties(void *obj, mlt_properties properties, int flags)
  /** Initialize the video codec context.
   */
  
@@ -230,14 +248,35 @@ index 62aaaeb..d3cfbff 100644
 +   Raspberry Pi 4 with gpu_mem=128, a second h264_vchiq decoder opens but
 +   never gives a picture, and four or more can stop the VideoCore answering:
 +   there it is 1. */
-+static int prefer_max(void)
++/* How many of a preferred decoder may be open at once (0: no limit), from
++   MLT_AVFORMAT_PREFER_MAX or the build's MLT_AVFORMAT_PREFER_MAX_DEFAULT:
++   a number for every decoder, or decoder=number pairs, comma separated
++   ("h264_vchiq=3,hevc_hwdec=1"), a bare number among them for the rest.
++   (The Pi's HEVC block takes one stream; with direct output, riscos-
++   reelhwaccel devkit 0.2.18, the VideoCore decodes three 1080p H.264
++   streams at once in gpu_mem=128, where before one filled it.) */
++static int prefer_max(const char *name)
 +{
 +    const char *e = getenv("MLT_AVFORMAT_PREFER_MAX");
 +#ifdef MLT_AVFORMAT_PREFER_MAX_DEFAULT
 +    if (!e)
-+        return MLT_AVFORMAT_PREFER_MAX_DEFAULT;
++        e = MLT_AVFORMAT_PREFER_MAX_DEFAULT;
 +#endif
-+    return e ? atoi(e) : 0;
++    int rest = 0;
++    size_t len = name ? strlen(name) : 0;
++    while (e && *e) {
++        const char *item = e, *end = strchr(e, ','), *eq = strchr(e, '=');
++        if (!end)
++            end = item + strlen(item);
++        if (eq && eq < end) {
++            if (name && (size_t) (eq - item) == len && !strncmp(item, name, len))
++                return atoi(eq + 1);
++        } else {
++            rest = atoi(item);
++        }
++        e = *end ? end + 1 : end;
++    }
++    return rest;
 +}
 +
 +/* How many pictures (of any producer) a holder must have gone without
@@ -290,7 +329,7 @@ index 62aaaeb..d3cfbff 100644
 +
 +static int prefer_claim(producer_avformat self, const char *name)
 +{
-+    int max = prefer_max(), idle = prefer_idle(), n = 0, victim = -1, free_slot = -1;
++    int max = prefer_max(name), idle = prefer_idle(), n = 0, victim = -1, free_slot = -1;
 +    pthread_mutex_lock(&prefer_lock);
 +    if (!prefer_exit_registered) {
 +        prefer_exit_registered = 1;
@@ -335,7 +374,7 @@ index 62aaaeb..d3cfbff 100644
 +        avcodec_free_context(&evicted->video_codec);
 +        pthread_mutex_unlock(&evicted->open_mutex);
 +        evicted->prefer_pending = 1;
-+        evicted->last_position = POSITION_INVALID;
++        decode_again(evicted);
 +        pthread_mutex_unlock(&evicted->video_mutex);
 +    }
 +    prefer_holders[free_slot].self = self;
@@ -463,14 +502,14 @@ index 62aaaeb..d3cfbff 100644
 +    self->prefer_pending = 0;
 +    if (!video_codec_init(self, self->video_index, properties))
 +        return 0;
-+    self->last_position = POSITION_INVALID;
++    decode_again(self);
 +    return 1;
 +}
 +
  static int video_codec_init(producer_avformat self, int index, mlt_properties properties)
  {
      // Initialise the codec if necessary
-@@ -3378,6 +3725,24 @@ static int video_codec_init(producer_avformat self, int index, mlt_properties pr
+@@ -3378,6 +3757,24 @@ static int video_codec_init(producer_avformat self, int index, mlt_properties pr
              if (!(codec = avcodec_find_decoder_by_name("libvpx")))
                  codec = avcodec_find_decoder(codec_params->codec_id);
          }
@@ -495,7 +534,7 @@ index 62aaaeb..d3cfbff 100644
  
          // Setup the codec context
          AVCodecContext *codec_context = avcodec_alloc_context3(codec);
-@@ -3476,6 +3841,19 @@ static int video_codec_init(producer_avformat self, int index, mlt_properties pr
+@@ -3476,6 +3873,19 @@ static int video_codec_init(producer_avformat self, int index, mlt_properties pr
              }
              // Now store the codec with its destructor
              self->video_codec = codec_context;
@@ -515,7 +554,7 @@ index 62aaaeb..d3cfbff 100644
          } else {
              // Remember that we can't use this later
              self->video_index = -1;
-@@ -3483,6 +3861,11 @@ static int video_codec_init(producer_avformat self, int index, mlt_properties pr
+@@ -3483,6 +3893,11 @@ static int video_codec_init(producer_avformat self, int index, mlt_properties pr
              return 0;
          }
          pthread_mutex_unlock(&self->open_mutex);
@@ -527,7 +566,7 @@ index 62aaaeb..d3cfbff 100644
  
          // Process properties as AVOptions
          apply_properties(codec_context,
-@@ -3641,7 +4024,7 @@ static void producer_set_up_video(producer_avformat self, mlt_frame frame)
+@@ -3641,7 +4056,7 @@ static void producer_set_up_video(producer_avformat self, mlt_frame frame)
          self->video_index = index;
          mlt_properties_set_int(properties, "_probe_complete", 0);
          pthread_mutex_lock(&self->open_mutex);
@@ -536,7 +575,7 @@ index 62aaaeb..d3cfbff 100644
          set_up_discard(self, self->audio_index, index);
          pthread_mutex_unlock(&self->open_mutex);
      }
-@@ -4634,7 +5017,7 @@ static void producer_avformat_close(producer_avformat self)
+@@ -4634,7 +5049,7 @@ static void producer_avformat_close(producer_avformat self)
          av_free(self->decode_buffer[i]);
          avcodec_free_context(&self->audio_codec[i]);
      }

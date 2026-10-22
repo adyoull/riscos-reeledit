@@ -42,7 +42,7 @@ export PKG_CONFIG_PATH="$O/ffmpeg/lib/pkgconfig"
 FF_LIBS="$(pkg-config --static --libs libavfilter libavformat libavcodec libswresample libswscale libavutil)"
 cmake -S "$M" -B "$M/build" -DCMAKE_C_COMPILER="$CC" -DCMAKE_BUILD_TYPE=RelWithDebInfo \
   -DCMAKE_INSTALL_PREFIX="$O/stage" -DCMAKE_C_STANDARD_LIBRARIES="$FF_LIBS" -DCMAKE_CXX_STANDARD_LIBRARIES="$FF_LIBS" \
-  -DMLT_STATIC=ON -DMLT_NO_THREADS=ON -DMLT_AVFORMAT_PREFER_DEFAULT="h264=h264_vchiq,hevc=hevc_hwdec" -DMLT_AVFORMAT_PREFER_MAX_DEFAULT=1 -DMLT_AVFORMAT_CACHE_DEFAULT=0 -DMLT_AVFORMAT_CONCEAL_BY_REFERENCE=ON \
+  -DMLT_STATIC=ON -DMLT_NO_THREADS=ON -DMLT_AVFORMAT_PREFER_DEFAULT="h264=h264_vchiq,hevc=hevc_hwdec" -DMLT_AVFORMAT_PREFER_MAX_DEFAULT="h264_vchiq=1,hevc_hwdec=1" -DMLT_AVFORMAT_CACHE_DEFAULT=0 -DMLT_AVFORMAT_CONCEAL_BY_REFERENCE=ON \
   -DMOD_AVFORMAT=ON -DUSE_AVDEVICE=OFF -DMOD_XML=ON "${MODS_OFF[@]}" -DBUILD_TESTING=OFF \
   -DBUILD_DOCS=OFF -DCLANG_FORMAT=OFF > "$O/mlt-configure.log" 2>&1 || { tail -30 "$O/mlt-configure.log"; exit 1; }
 # (never test or package a build left from before)

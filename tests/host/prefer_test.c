@@ -25,6 +25,13 @@
  *           second takes it over, the first's closed before the second's
  *           opens; the first gets it back when it's used again; closing a
  *           clip frees its place; every picture right throughout
+ *   max3    three at once (MLT_AVFORMAT_PREFER_MAX="hevc_hwdec=1,h264_vchiq=3":
+ *           devkit 0.2.18's direct output, where the VideoCore decodes three
+ *           1080p streams at once): clips in turn each keep their own; a
+ *           fourth uses the default decoder until one of the three is
+ *           idle, then takes its place (that one closed first). And a
+ *           clip's first picture part way in, its preferred decoder opened
+ *           for it, is the right one (it was a GOP late)
  *   exit    a program that exits without closing its clips still closes the
  *           hardware decoder (on RISC OS nothing else would, and it would
  *           keep its VideoCore memory until a restart)
@@ -167,8 +174,55 @@ int main(int argc, char **argv)
         CHECK(preferred_now == 1, "exit: %d open before exiting", preferred_now);
         exit(mltt_failures != 0); /* without closing anything */
     }
+    if (!strcmp(mode, "max3")) {
+        setenv("MLT_AVFORMAT_PREFER_MAX", "hevc_hwdec=1,h264_vchiq=3", 1);
+        mltt a, b, c, d;
+        if (!mltt_open(&a, "hdv_720_25p", "avformat", argv[2]) || !mltt_open(&b, "hdv_720_25p", "avformat", argv[2])
+            || !mltt_open(&c, "hdv_720_25p", "avformat", argv[2]) || !mltt_open(&d, "hdv_720_25p", "avformat", argv[2]))
+            return 1;
+        int yuv[3] = {0}, f;
+#define FRAME(t, n, what) CHECK(abs(mltt_centre(&t, n, yuv) - (16 + 2 * (n))) <= 1, "max3: %s frame %d has luma %d", what, n, yuv[0])
+        /* 0: a clip's first picture part way in (past a keyframe), its
+           preferred decoder opened for it: the right picture, not one a
+           GOP on (the stream's first pts lost with the decoder changed) */
+        FRAME(d, 40, "D's first");
+        FRAME(d, 41, "D");
+        /* 1: three more in turn: two get places beside D; the third takes
+           idle D's (D's closed first) */
+        for (f = 0; f < 10; f++) {
+            FRAME(a, f, "A");
+            FRAME(b, 15 + f, "B");
+            FRAME(c, 30 + f, "C");
+        }
+        CHECK(opened_preferred == 4 && preferred_most == 3 && preferred_now == 3,
+              "max3: three in turn beside D: opened %d times, %d at once at most, %d now", opened_preferred,
+              preferred_most, preferred_now);
+        /* 2: D again with the three in use: the default decoder */
+        for (f = 0; f < 3; f++) {
+            FRAME(a, 10 + f, "A");
+            FRAME(b, 25 + f, "B");
+            FRAME(c, 40 + f, "C");
+            FRAME(d, 45 + f, "D (beside three)");
+        }
+        CHECK(opened_preferred == 4 && preferred_now == 3, "max3: D opened one beside three (%d opened, %d now)",
+              opened_preferred, preferred_now);
+        /* 3: the three idle, D goes on: D takes a place back */
+        for (f = 48; f < 70; f++)
+            FRAME(d, f, "D (alone)");
+        CHECK(opened_preferred == 5 && preferred_now == 3 && preferred_most == 3,
+              "max3: D's handover: opened %d times, %d now, %d at most", opened_preferred, preferred_now,
+              preferred_most);
+        mltt_close(&a);
+        mltt_close(&b);
+        mltt_close(&c);
+        mltt_close(&d);
+        CHECK(preferred_now == 0, "max3: %d still open after closing everything", preferred_now);
+#undef FRAME
+        printf("prefer_test %s: %s\n", mode, mltt_failures ? "FAILED" : "passed");
+        return mltt_failures != 0;
+    }
     if (!strcmp(mode, "max")) {
-        setenv("MLT_AVFORMAT_PREFER_MAX", "1", 1);
+        setenv("MLT_AVFORMAT_PREFER_MAX", "hevc_hwdec=3,1", 1); /* (a bare number: every decoder not named) */
         mltt a, b;
         if (!mltt_open(&a, "hdv_720_25p", "avformat", argv[2]) || !mltt_open(&b, "hdv_720_25p", "avformat", argv[2]))
             return 1;
