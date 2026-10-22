@@ -38,7 +38,7 @@
 #define MAX_LEFT_OUT 2 /* frames left out a poll at most, playing (see above) */
 
 /* Going backwards: frames kept (at most this many, and this much memory) */
-#define RC_SLOTS 32
+#define RC_SLOTS 64
 #define RC_BYTES (48 << 20)
 
 /* A clip's own pictures up to this size are shown as they are (the display
@@ -75,7 +75,9 @@ struct re_engine
     double snd_last_q;    /* io.sound_queued's last reading (-1: none yet) */
     /* going backwards (re_engine_play): frames decoded forwards and kept */
     rc_slot rc[RC_SLOTS];
-    int rc_n;             /* slots used: RC_BYTES / a picture's size, 4 to RC_SLOTS */
+    int rc_run;           /* a run's length: RC_BYTES of pictures the size of the last, 4 to RC_SLOTS */
+    size_t rc_bytes;      /* the slots' buffers, all told (kept to about RC_BYTES) */
+    size_t pic_bytes;     /* the last picture's */
     int rc_next, rc_end;  /* a run being decoded: the next frame, the last (-1: none) */
     re_engine_stats stats;
 };
@@ -275,11 +277,7 @@ static re_engine *setup(re_engine *e, double preview_scale)
     e->seek_to = 0;
     e->last_fetched = -2;
     {
-        /* (pictures are kept at their own size, up to NATIVE_MAX's) */
-        long px = (long) e->width * e->height;
-        size_t bytes = (size_t) (px > NATIVE_MAX ? px : NATIVE_MAX) * 3 / 2;
-        int n = (int) (RC_BYTES / (bytes ? bytes : 1));
-        e->rc_n = n < 4 ? 4 : n > RC_SLOTS ? RC_SLOTS : n;
+        e->pic_bytes = (size_t) e->width * e->height * 3 / 2;
         for (int i = 0; i < RC_SLOTS; i++)
             e->rc[i].pos = -1;
         e->rc_end = -1;
@@ -466,6 +464,7 @@ static int picture_of(re_engine *e, mlt_frame frame, int position, re_picture *p
         return -1;
     double sar = mlt_frame_get_aspect_ratio(frame);
     p->dar = (sar > 0 ? sar : 1.0) * w / h;
+    e->pic_bytes = (size_t) w * h * 3 / 2;
     p->planes[0] = image;
     p->planes[1] = image + w * h;
     p->planes[2] = image + w * h + (w / 2) * (h / 2);
@@ -518,7 +517,7 @@ static int step_of(re_engine *e)
 
 static rc_slot *rc_find(re_engine *e, int position)
 {
-    for (int i = 0; i < e->rc_n; i++)
+    for (int i = 0; i < RC_SLOTS; i++)
         if (e->rc[i].pos == position)
             return &e->rc[i];
     return NULL;
@@ -531,16 +530,21 @@ static void rc_fill_one(re_engine *e)
     int position = e->rc_next++;
     rc_slot *slot = rc_find(e, position);
     if (!slot) {
-        int far = 0;
-        for (int i = 0; i < e->rc_n; i++) {
+        /* an empty slot (one with a buffer big enough, or a new one while
+           they're under RC_BYTES all told), else the furthest frame's */
+        int empty = -1, far = -1;
+        for (int i = 0; i < RC_SLOTS; i++) {
             if (e->rc[i].pos < 0) {
+                if (empty < 0
+                    && (e->rc[i].size >= e->pic_bytes || e->rc_bytes - e->rc[i].size + e->pic_bytes <= RC_BYTES))
+                    empty = i;
+            } else if (far < 0 || abs(e->rc[i].pos - position) > abs(e->rc[far].pos - position)) {
                 far = i;
-                break;
             }
-            if (abs(e->rc[i].pos - position) > abs(e->rc[far].pos - position))
-                far = i;
         }
-        slot = &e->rc[far];
+        if (empty < 0 && far < 0)
+            empty = 0;
+        slot = &e->rc[empty >= 0 ? empty : far];
         mlt_frame frame = frame_at(e, position);
         re_picture p;
         if (!frame)
@@ -550,9 +554,11 @@ static void rc_fill_one(re_engine *e)
                which took longer than the decoding; the planes kept packed) */
             size_t y = (size_t) p.width * p.height, c = (size_t) (p.width / 2) * (p.height / 2);
             if (slot->size < y + 2 * c) {
+                e->rc_bytes -= slot->size;
                 free(slot->buf);
                 slot->buf = malloc(y + 2 * c);
                 slot->size = slot->buf ? y + 2 * c : 0;
+                e->rc_bytes += slot->size;
             }
             if (slot->buf) {
                 for (int r = 0; r < p.height; r++)
@@ -673,8 +679,12 @@ int re_engine_poll(re_engine *e)
             rc_show(e, s);
             return wait_for_next(e);
         }
-        /* a run up to it, decoded forwards from its start */
-        int from = target - e->rc_n + 1;
+        /* a run up to it, decoded forwards from its start: as long as
+           RC_BYTES of pictures this size allow (a long-GOP clip decodes
+           from a keyframe before each run: the longer, the fewer) */
+        size_t n = RC_BYTES / (e->pic_bytes ? e->pic_bytes : 1);
+        e->rc_run = n < 4 ? 4 : n > RC_SLOTS ? RC_SLOTS : (int) n;
+        int from = target - e->rc_run + 1;
         e->rc_next = from < 0 ? 0 : from;
         e->rc_end = target;
         e->stats.reverse_fills++;

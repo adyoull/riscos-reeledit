@@ -281,7 +281,7 @@ int main(int argc, char **argv)
     CHECK(nshown >= 25, "I: %d pictures in 2 s backwards (each poll a centisecond here)", nshown);
     for (int i = 1; i < nshown; i++)
         CHECK(shown[i] == shown[i - 1] - 1, "I: frame %d after %d going backwards", shown[i], shown[i - 1]);
-    CHECK(st.jumps - before.jumps <= 2 + nshown / 14 /* (runs of 14: 48 MB of 1080p-sized slots) */, "I: %d seeks for %d pictures backwards", st.jumps - before.jumps,
+    CHECK(st.jumps - before.jumps <= 2 /* (runs as long as 48 MB of these small pictures allow: 64) */, "I: %d seeks for %d pictures backwards", st.jumps - before.jumps,
           nshown);
     CHECK(st.reverse_fills > before.reverse_fills, "I: no runs decoded");
     CHECK(last_w == 320 && last_h == 180, "I: backwards, pictures %dx%d, not the clips' own 320x180", last_w, last_h);
