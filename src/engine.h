@@ -28,6 +28,10 @@ typedef struct re_engine re_engine;
 
 /* Starts MLT (once; every module built in). 0, or -1. */
 int re_mlt_start(void);
+/* MLT's and FFmpeg's messages (information and worse) as lines to this,
+   instead of stderr: the hardware decoders say there when they wait or
+   give up. */
+void re_engine_messages(void (*line)(const char *line));
 
 /* A picture to show: yuv420p, three planes. Valid only during show(). */
 typedef struct

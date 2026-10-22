@@ -25,7 +25,10 @@
 #include "engine.h"
 
 #include <framework/mlt.h>
+#include <libavutil/log.h>
 #include <math.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -96,6 +99,81 @@ int re_mlt_start(void)
         mlt_started = 1;
     }
     return 0;
+}
+
+/* ---- MLT's and FFmpeg's messages, into the caller's log ------------------
+
+   Otherwise they go to stderr, which on RISC OS no one sees: the
+   VideoCore's decoder (riscos-reelhwaccel's vcdec, through h264_vchiq)
+   says there when it waits or falls back, and MLT's patch when a decoder
+   is handed over. Information and worse; a line repeated straight after
+   itself is counted, not written again. */
+static void (*msg_line)(const char *line);
+static char msg_buf[600], msg_last[600];
+static int msg_len, msg_repeats;
+
+static void msg_flush_repeats(void)
+{
+    if (msg_repeats > 0) {
+        char t[64];
+        snprintf(t, sizeof(t), "(the line before, %d more time%s)", msg_repeats, msg_repeats == 1 ? "" : "s");
+        msg_line(t);
+        msg_repeats = 0;
+    }
+}
+
+/* Text, maybe part of a line: whole lines go to the log */
+static void msg_text(const char *s)
+{
+    for (; *s; s++) {
+        if (*s != '\n' && msg_len < (int) sizeof(msg_buf) - 1) {
+            msg_buf[msg_len++] = *s;
+            continue;
+        }
+        if (*s != '\n')
+            continue; /* (too long: the rest of it left out) */
+        msg_buf[msg_len] = 0;
+        msg_len = 0;
+        if (!msg_buf[0])
+            continue;
+        if (!strcmp(msg_buf, msg_last)) {
+            msg_repeats++;
+            continue;
+        }
+        msg_flush_repeats();
+        snprintf(msg_last, sizeof(msg_last), "%s", msg_buf);
+        msg_line(msg_buf);
+    }
+}
+
+static void msg_from_mlt(void *service, int level, const char *fmt, va_list ap)
+{
+    (void) service;
+    if (level > MLT_LOG_INFO || !msg_line)
+        return;
+    char t[512];
+    int n = snprintf(t, sizeof(t), "mlt: ");
+    vsnprintf(t + n, sizeof(t) - n, fmt, ap);
+    msg_text(t);
+}
+
+static void msg_from_ffmpeg(void *avcl, int level, const char *fmt, va_list ap)
+{
+    if (level > AV_LOG_INFO || !msg_line)
+        return;
+    char t[512];
+    int prefix = 1;
+    av_log_format_line2(avcl, level, fmt, ap, t, sizeof(t), &prefix);
+    msg_text(t);
+}
+
+void re_engine_messages(void (*line)(const char *line))
+{
+    msg_line = line;
+    mlt_log_set_level(MLT_LOG_INFO); /* (MLT's avformat module sets FFmpeg's level from it when it starts) */
+    mlt_log_set_callback(msg_from_mlt);
+    av_log_set_level(AV_LOG_INFO);
+    av_log_set_callback(msg_from_ffmpeg);
 }
 
 re_engine *re_engine_open(const char *file, double preview_scale, const re_engine_io *io)

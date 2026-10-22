@@ -9,6 +9,9 @@
  * it was given (Wimp_PollIdle), plus however long showing a picture took.
  */
 #include "engine.h"
+#include <framework/mlt.h>
+#include <libavutil/log.h>
+#include <string.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -106,6 +109,17 @@ static int run(re_engine *e, int centiseconds)
         fake_clock += wait;
     }
     return polls;
+}
+
+static int collected;
+static char lines[2048];
+static void collect(const char *line)
+{
+    collected++;
+    if (strlen(lines) + strlen(line) + 2 < sizeof(lines)) {
+        strcat(lines, line);
+        strcat(lines, "|");
+    }
 }
 
 static void reset_log(void)
@@ -355,6 +369,22 @@ int main(int argc, char **argv)
     CHECK(last_w == 320 && last_h == 180, "H: picture %dx%d (a clip smaller than the preview: as it is)", last_w,
           last_h);
     re_engine_close(e);
+
+    /* M: FFmpeg's and MLT's messages into the log, as whole lines, repeats
+       counted, below information left out */
+    re_engine_messages(collect);
+    av_log(NULL, AV_LOG_INFO, "The format change came %d cs ", 3);
+    av_log(NULL, AV_LOG_INFO, "after the first access unit\n");
+    av_log(NULL, AV_LOG_WARNING, "No format change\n");
+    av_log(NULL, AV_LOG_WARNING, "No format change\n");
+    av_log(NULL, AV_LOG_WARNING, "No format change\n");
+    av_log(NULL, AV_LOG_VERBOSE, "chatter\n");
+    mlt_log(NULL, MLT_LOG_INFO, "decoder %s handed over\n", "h264_vchiq");
+    mlt_log(NULL, MLT_LOG_DEBUG, "seeking\n");
+    CHECK(collected == 4 && strstr(lines, "The format change came 3 cs after the first access unit|")
+              && strstr(lines, "|No format change|(the line before, 2 more times)|mlt: decoder h264_vchiq handed over|")
+              && !strstr(lines, "chatter") && !strstr(lines, "seeking"),
+          "M: %d lines: %s", collected, lines);
 
     printf("engine_test: %s\n", failures ? "FAILED" : "passed");
     return failures != 0;

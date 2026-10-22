@@ -1494,6 +1494,8 @@ int reeledit_main(int argc, char **argv)
     snprintf(V.play_text, sizeof(V.play_text), "Play");
     log_open();
     re_display_set_log(lg_line);
+    if (V.log)
+        re_engine_messages(lg_line);
     r.r[0] = 380;
     r.r[1] = 0x4B534154; /* "TASK" */
     r.r[2] = (intptr_t) APP;
