@@ -12,6 +12,7 @@
 #   editor_test:  !ReelEdit (src/riscos) with a scripted fake Wimp
 #   prefer_test:  the preferred decoder taken, refused, failing part way, off
 # Usage: tests/host/run.sh   (after build/build-host.sh)
+#        SCREENS=dir tests/host/run.sh: editor_test's screenshots too (PNGs; screens.py)
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 TOP=$(cd "$HERE/../.." && pwd)
@@ -96,7 +97,14 @@ echo "== engine_test"
 echo "== project_test"
 "$O/project_test" a.mp4 b.mp4 numbered.mp4 project_test.mlt numbered.m2v four3-709.mp4 big.mp4 wide-dvd.mp4 2>&1 | grep -v "^\[" || bad=1
 echo "== editor_test"
-"$O/editor_test" numbered-snd.mp4 numbered.mp4 numbered.m2v 2>&1 | grep -v "^\[" || bad=1
+env -u SCREENS "$O/editor_test" numbered-snd.mp4 numbered.mp4 numbered.m2v 2>&1 | grep -v "^\[" || bad=1
+# (screenshots, when asked for: SCREENS=dir tests/host/run.sh; PNGs of the editor at points in the script)
+if [ -n "${SCREENS:-}" ]; then
+  mkdir -p "$SCREENS" && rm -f "$SCREENS"/*.txt "$SCREENS"/*.raw "$SCREENS"/*.yuv "$SCREENS"/*.png
+  SCREENS=$(cd "$SCREENS" && pwd) "$O/editor_test" numbered-snd.mp4 numbered.mp4 numbered.m2v 2>&1 | grep "screenshots\|FAIL"
+  python3 "$HERE/screens.py" "$SCREENS" > /dev/null || fail "screens.py couldn't draw the screenshots"
+  rm -f "$SCREENS"/*.txt "$SCREENS"/*.raw "$SCREENS"/*.yuv
+fi
 for m in normal refuse late off lazy max max3 exit; do
   echo "== prefer_test $m"
   "$O/prefer_test" $m numbered.mp4 2>&1 | grep -v "^\[" || bad=1

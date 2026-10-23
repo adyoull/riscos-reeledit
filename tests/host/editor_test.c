@@ -45,6 +45,7 @@
 #include <unistd.h>
 
 #include "project.h"
+#include "fake/screens.h"
 
 int reeledit_main(int argc, char **argv);
 int re_test_position(void);
@@ -195,6 +196,8 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
             break;
         case 1: ov_destroyed++; ov_shown_bank = -1; break;
         case 2: ov_displays++; ov_shown_bank = (int) r->r[1]; break;
+        case 5: S.ov_w = (int) r->r[1]; S.ov_h = (int) r->r[2]; break;         /* SetScale */
+        case 7: S.ov_x = (int) r->r[1]; S.ov_y = (int) r->r[2]; break;         /* SetPosition */
         case 8: { /* RedrawWindow: given the picture's part of the rectangle only (it clears all it's given) */
             const int *rb = (const int *) r->r[1];
             ov_redraws++;
@@ -229,7 +232,12 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
             snprintf(filetype_path, sizeof(filetype_path), "%s", (const char *) r->r[1]);
         }
         break;
-    case 0x2E: plots++; plot_area = (int *) r->r[1]; break;
+    case 0x2E:
+        plots++;
+        plot_area = (int *) r->r[1];
+        if ((r->r[0] & 0xFF) == 52)
+            scr_sprite((const int *) r->r[2], (int) r->r[3], (int) r->r[4]);
+        break;
     case 0x35: {
         static const int v[13] = {0, 0, 0, 0, 1, 1, 0, 0, 0, 5, 0, 1919, 1079};
         r->r[2] = r->r[1] < 13 ? v[r->r[1]] : 0;
@@ -249,9 +257,11 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
         return &err;
     }
     case 0x42: r->r[0] = fake_cs; break;
-    case 0x45: plots_tl++; break;                 /* OS_Plot */
-    case 0x46: case 0x65: break;
+    case 0x45: plots_tl++; scr_plot((int) r->r[0], (int) r->r[1], (int) r->r[2]); break; /* OS_Plot */
+    case 0x46: scr_vdu((const unsigned char *) r->r[0], (int) r->r[1]); break;        /* OS_WriteN */
+    case 0x65: break;
     case 0x40743:                                  /* ColourTrans_SetGCOL */
+        scr_colour((unsigned) r->r[0]);
         if ((unsigned) r->r[0] == 0x2080F000u)
             colours_seen |= 1;
         break;
@@ -280,6 +290,7 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
     case 0x400C1:                                                   /* CreateWindow */
         if (windows_made >= 4)
             fail_quit("more than four windows made");
+        scr_create_window(windows_made, (const void *) r->r[1]);
         r->r[0] = VIEWER + 0x100 * windows_made++;
         break;
     case 0x400C2: r->r[0] = BAR_ICON; break;
@@ -317,6 +328,8 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
                 return NULL;
             }
         ev = script(b, last_mask);
+        if (ev == 9 || ev == 6)
+            S.menu = NULL;
         if (ev == 0) {
             if (last_mask & 1)
                 fail_quit("the script wanted a null event, but they're masked out");
@@ -333,9 +346,14 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
         r->r[0] = ev;
         break;
     }
-    case 0x400C8: rect_block((int *) r->r[1], 0); r->r[0] = 1; break; /* RedrawWindow */
-    case 0x400C9: rect_block((int *) r->r[1], 1); r->r[0] = 1; break; /* UpdateWindow */
-    case 0x400CA: r->r[0] = 0; break;
+    case 0x400C8: case 0x400C9: { /* RedrawWindow, UpdateWindow */
+        int *b = (int *) r->r[1];
+        rect_block(b, no == 0x400C9);
+        scr_begin((b[0] - VIEWER) / 0x100, no == 0x400C8, b[7], b[8], b[9], b[10]);
+        r->r[0] = 1;
+        break;
+    }
+    case 0x400CA: r->r[0] = 0; S.cur = -1; break;
     case 0x400CB: window_state((int *) r->r[1]); break;
     case 0x400CF: memcpy((int *) r->r[1], ptr, sizeof(ptr)); break; /* GetPointerInfo */
     case 0x400D0: drags++; break;                                   /* DragBox */
@@ -354,10 +372,15 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
         if (r->r[1] == SAVEB) {
             savebox_opens++;
             W[3].open = 1;
+            W[3].box[0] = (int) r->r[2]; W[3].box[3] = (int) r->r[3]; /* (its top left) */
+            W[3].box[2] = W[3].box[0] + S.w[3].vw; W[3].box[1] = W[3].box[3] - S.w[3].vh;
+            S.menu = NULL;
         } else if (r->r[1] == -1) {
             W[3].open = 0;
+            S.menu = NULL;
         } else {
             menus++;
+            scr_menu_open((const void *) r->r[1], (int) r->r[2], (int) r->r[3]);
         }
         break;
     case 0x400D7: {                                                 /* SetExtent */
@@ -367,8 +390,19 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
             w->extent_w = b[2] - b[0];
         break;
     }
-    case 0x400CD: case 0x400D2: case 0x400DC: case 0x400FC: break;
+    case 0x400FC: /* ResizeIcon */
+        if (win((int) r->r[0]))
+            scr_resize_icon(((int) r->r[0] - VIEWER) / 0x100, (int) r->r[1], (int) r->r[2], (int) r->r[3],
+                            (int) r->r[4], (int) r->r[5]);
+        break;
+    case 0x400CD: /* SetIconState */
+        if (win(((int *) r->r[1])[0]))
+            scr_set_icon_state((((int *) r->r[1])[0] - VIEWER) / 0x100, ((int *) r->r[1])[1], ((int *) r->r[1])[2],
+                               ((int *) r->r[1])[3]);
+        break;
+    case 0x400D2: case 0x400DC: break;
     case 0x400F9:                                                   /* Wimp_TextOp: 2 plots */
+        scr_textop((int) r->r[0], r->r[1], r->r[2], (int) r->r[4], (int) r->r[5]);
         if ((r->r[0] & 0xFF) == 2) {
             snprintf(last_text, sizeof(last_text), "%s", (const char *) r->r[1]);
             if (strlen(all_text) + strlen(last_text) + 2 < sizeof(all_text)) {
@@ -443,6 +477,21 @@ static int overlay_middle(void)
         return -1;
     int pitch = (ov_w + 31) & ~31;
     return ov_buf[ov_shown_bank][(size_t) (ov_h / 2) * pitch + ov_w / 2];
+}
+
+/* A screenshot (SCREENS=dir): the desktop as the editor has drawn it */
+static int shot_box(int i, int b[5])
+{
+    if (!W[i].open)
+        return 0;
+    b[0] = W[i].box[0]; b[1] = W[i].box[1]; b[2] = W[i].box[2]; b[3] = W[i].box[3]; b[4] = W[i].scroll_x;
+    return 1;
+}
+static void shot(const char *name)
+{
+    static const int order[4] = {0, 1, 2, 3};
+    int pitch = (ov_w + 31) & ~31;
+    snap(name, order, 4, shot_box, ov_shown_bank >= 0 ? ov_buf[ov_shown_bank] : NULL, ov_w, ov_h, pitch);
 }
 
 static int grey(int frame)
@@ -525,6 +574,7 @@ static int script(int *b, int mask)
         b[0] = 100; b[1] = 20; b[2] = 4; b[3] = -2; b[4] = BAR_ICON;
         return 6;
     case 2:
+        shot("01-empty");
         CHECK(W[0].open && W[1].open, "the editor's windows aren't open (%d, %d)", W[0].open, W[1].open);
         CHECK(re_test_project() && re_project_items(re_test_project()) == 0, "not an empty project");
         CHECK(!re_test_open(), "an engine with nothing to play");
@@ -570,6 +620,7 @@ static int script(int *b, int mask)
               all_text);
         CHECK(strstr(all_text, "0:00:00") != NULL, "no timecode beside the playhead (\"%s\")", all_text);
         plots_mark = plots;
+        shot("02-first-clip");
         next(5);
         return key(b, 0x18D);
     case 5:
@@ -594,6 +645,7 @@ static int script(int *b, int mask)
             CHECK(slept > 50, "asleep only %u cs of 100 while playing", slept);
             CHECK(ssb_bytes > (unsigned) ssb_mark && ssb_playing, "no sound given, or not playing");
             CHECK(ssb_level > 1000, "the sound given is silent (loudest %g)", ssb_level);
+            shot("03-playing");
             covered = 1;
             plots_mark = plots;
             next(7);
@@ -750,6 +802,7 @@ static int script(int *b, int mask)
     case 22:
         CHECK(re_test_selected() == 1, "a click on the second piece selected %d", re_test_selected());
         CHECK(colours_seen & 1, "the selected clip isn't drawn orange"); /* (the redraw came first) */
+        shot("04-split-and-selected");
         shift_key = 0;
         next(23);
         return key_to(b, TL, 0x7F); /* Delete */
@@ -994,6 +1047,7 @@ static int script(int *b, int mask)
             CHECK(nulls, "no null events while dragging an edge");
             CHECK(abs(sprite_middle() - grey(64)) <= 2, "the Viewer shows %d at the dragged end, not its last frame (%d)",
                   sprite_middle(), grey(64));
+            shot("05-trimming-an-end");
             next(103);
             return 7; /* the drag ends */
         }
@@ -1049,6 +1103,7 @@ static int script(int *b, int mask)
     case 110:
         if (fake_cs - phase_cs < 10)
             return 0;
+        shot("06-moving-a-clip");
         next(111);
         return 7; /* dropped */
     case 111:
@@ -1081,6 +1136,7 @@ static int script(int *b, int mask)
         return 10;
     case 24:
         CHECK(menus >= 1, "Menu didn't open the menu");
+        shot("07-menu");
         next(25);
         b[0] = 3; b[1] = 0; b[2] = -1; /* View > Zoom in */
         return 9;
@@ -1097,6 +1153,7 @@ static int script(int *b, int mask)
         CHECK(strstr(all_text, "H.264") && strstr(all_text, "Decoded by") && strstr(all_text, "320x180") &&
                   strstr(all_text, "AAC"),
               "Video information: \"%.300s\"", all_text);
+        shot("08-video-information");
         next(67);
         b[0] = 3; b[1] = 3; b[2] = -1; /* View > Attach the Timeline: off */
         return 9;
@@ -1108,11 +1165,13 @@ static int script(int *b, int mask)
         return 2;
     case 68:
         CHECK(W[0].box[0] == mark, "detached, the Viewer still moved with the Timeline");
+        shot("09-detached-zoomed");
         next(26);
         return key(b, 0x183); /* F3 */
     /* ---- saving ---- */
     case 26:
         CHECK(savebox_opens == 1 && W[3].open, "F3 didn't open the save box");
+        shot("10-save-box");
         snprintf(re_test_savebox_name(), 256, "%.255s", typed_path);
         next(27);
         return key_to(b, SAVEB, 13);
@@ -1295,6 +1354,7 @@ int main(int argc, char **argv)
     remove(typed_path);
     remove(dragged_path);
     setenv("ReelEdit$Log", "editor_test.log", 1);
+    scr_init();
     int r = reeledit_main(0, NULL);
     CHECK(r == 0, "reeledit_main returned %d", r);
     CHECK(phase == 46, "the script stopped at phase %d", phase);
@@ -1304,6 +1364,8 @@ int main(int argc, char **argv)
     CHECK(closedown == 1, "Wimp_CloseDown not called");
     printf("editor_test: %d polls, %d null events, %d Wimp_PollIdle, %u cs asleep; overlay %d pictures; "
            "%u bytes of sound\n", polls, null_events, idle_polls, slept, ov_displays, ssb_bytes);
+    if (S.on)
+        printf("editor_test: %d screenshots in %s\n", S.shots, S.dir);
     printf("editor_test: %s\n", fails ? "FAILED" : "passed");
     return fails != 0;
 }
