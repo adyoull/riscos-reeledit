@@ -41,10 +41,12 @@ and the Viewer shows the frame at the edge as you drag. Drag the middle of
 a clip to move it: a line shows where it will go (the nearest cut), and it
 goes there when you let go. Each drag is one step for Undo (F8).
 
-The Timeline: click the ruler to move the playhead (the Viewer shows that
-frame), or drag along it, or drag the playhead itself, to scrub; its
-timecode is shown beside it. Click a clip to select it (Adjust: select or
-not); click an empty part to clear the selection. With snapping on (N, or
+The Timeline: the playhead moves only from the ruler (the strip with the
+times along the top). Click the ruler to move the playhead there (the
+Viewer shows that frame), or drag along it to scrub; its timecode is shown
+beside it. Clicks and drags on the track never move the playhead: click a
+clip to select it (Adjust: select or not), click an empty part to clear
+the selection. With snapping on (N, or
 the Snap button), the playhead snaps to the cuts near it. The scroll
 wheel scrolls the Timeline; Ctrl and the wheel zoom it, about the
 pointer. The Timeline is attached under the Viewer: move or resize either

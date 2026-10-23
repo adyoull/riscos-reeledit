@@ -1,8 +1,9 @@
 /* timeline.c - the Timeline window (app.h): a ruler with the playhead, and
  * track V1's clips and gaps, scrolled sideways by the window's own scroll
- * bar. Select on the ruler moves the playhead; on a clip selects it
- * (Adjust: toggles); files dropped on it go in at the frame they're
- * dropped on. Dragged: the ruler or the playhead scrubs; a clip's edge
+ * bar. The ruler is the only place the playhead moves from: a click puts
+ * it there, a drag scrubs. On the track, a click on a clip selects it
+ * (Adjust: toggles), on empty space clears the selection; files dropped on
+ * it go in at the frame they're dropped on. Dragged on the track: a clip's edge
  * trims it (ripple: what follows moves along; the Viewer shows the frame
  * at the edge); a clip's middle moves it (a line shows where it'll go, at
  * the cut nearest the pointer). Drawn with ColourTrans and OS_Plot, the names with the
@@ -463,8 +464,10 @@ static void drag_start(int f, int wx, int *b, int *st)
     (void) f;
     int i = -1, mode = drag_mode_at(wx, &i);
     re_item it;
-    if (mode == DRAG_NONE || re_project_item(A.proj, i, &it))
+    if (mode == DRAG_NONE || re_project_item(A.proj, i, &it)) {
+        app_log("timeline: a drag at x %d, on no clip", wx);
         return;
+    }
     app_set_speed(0);
     T.d_item = i;
     T.d_in = it.in;
@@ -486,6 +489,8 @@ static void drag_start(int f, int wx, int *b, int *st)
     if (ro_swi(Wimp_DragBox, &r))
         return;
     T.drag = mode;
+    app_log("timeline: %s clip %d (frames %d-%d), from x %d", mode == DRAG_IN ? "trimming the start of"
+            : mode == DRAG_OUT ? "trimming the end of" : "moving", i, it.start, it.start + it.length - 1, wx);
     if (mode != DRAG_MOVE) {
         re_project_begin(A.proj); /* (one undo for the whole drag) */
         app_seek(mode == DRAG_IN ? it.start : it.start + it.length - 1);
@@ -572,19 +577,14 @@ void tl_click(int *b)
         return;
     int f = frame_of(wx);
     int drag = buttons & (0x40 | 0x10);
-    int on_playhead = wx > x_of(T.playhead) - 12 && wx < x_of(T.playhead) + 12, item;
-    /* (on the track a clip's edge wins: the playhead is often at a cut) */
-    if (wy <= -RULER_H && on_playhead && drag) {
-        int m = drag_mode_at(wx, &item);
-        if (m == DRAG_IN || m == DRAG_OUT)
-            on_playhead = 0;
-    }
-    if (wy > -RULER_H || (drag && on_playhead)) {
-        /* the ruler, or the playhead line grabbed: the playhead there;
-           dragged, it follows the pointer */
-        if (!(drag && on_playhead))
+    if (wy > -RULER_H) {
+        /* the ruler: the only place the playhead is moved from. A click puts
+           it there; a drag (on it or anywhere on the ruler) scrubs. (The
+           Pi: on the track, the playhead's line took clicks and drags meant
+           for a clip's edges.) */
+        if (!drag)
             app_seek(snapped(f));
-        if (drag) {
+        else {
             /* the pointer kept to the ruler's visible part while dragging */
             int d[10];
             d[0] = T.win;
@@ -598,6 +598,7 @@ void tl_click(int *b)
         }
         return;
     }
+    /* the track: clips are selected, trimmed and moved; the playhead stays */
     if (drag) {
         drag_start(f, wx, b, st);
         return;
@@ -606,10 +607,9 @@ void tl_click(int *b)
     re_item it;
     if (i >= 0 && !re_project_item(A.proj, i, &it) && it.gap)
         i = -1;
-    if (i < 0) { /* empty track space: the playhead there, nothing selected */
+    if (i < 0) { /* empty track space: nothing selected */
         if (!adjust)
             tl_select(-1);
-        app_seek(snapped(f));
         return;
     }
     if (adjust)

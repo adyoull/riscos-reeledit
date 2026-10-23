@@ -801,6 +801,7 @@ static int script(int *b, int mask)
         return click_tl(b, 40, 0, 0x400); /* the second piece */
     case 22:
         CHECK(re_test_selected() == 1, "a click on the second piece selected %d", re_test_selected());
+        CHECK(pos == 30, "a click on a clip moved the playhead (to %d)", pos);
         CHECK(colours_seen & 1, "the selected clip isn't drawn orange"); /* (the redraw came first) */
         shot("04-split-and-selected");
         shift_key = 0;
@@ -1123,6 +1124,34 @@ static int script(int *b, int mask)
         if (nulls)
             return 0;
         CHECK(!strcmp(layout(), "c30 c75"), "undoing the move: %s", layout());
+        next(113);
+        return click_tl(b, 50, 1, 0x400);
+    /* ---- the playhead moves only from the ruler: on the track, its line is passed over ---- */
+    case 113:
+        if (nulls)
+            return 0;
+        CHECK(pos == 50, "the ruler at 50: %d", pos);
+        next(114);
+        return click_tl(b, 150, 0, 0x400); /* empty track, past the end */
+    case 114:
+        if (nulls && fake_cs - phase_cs < 20)
+            return 0;
+        CHECK(pos == 50 && re_test_selected() == -1, "a click on empty track: at %d (not 50), selected %d", pos,
+              re_test_selected());
+        mark = drags;
+        ptr[0] = W[1].box[0] - W[1].scroll_x + 16 + 50 * 4; ptr[1] = W[1].box[3] - 100;
+        next(115);
+        return click_tl(b, 50, 0, 0x40); /* a drag on the track, on the playhead's line: the clip */
+    case 115:
+        CHECK(drags == mark + 1 && re_test_selected() == 1, "a drag on a clip at the playhead: drags %d, selected %d",
+              drags - mark, re_test_selected());
+        next(116);
+        return 7; /* dropped where it was */
+    case 116:
+        if (nulls && fake_cs - phase_cs < 20)
+            return 0;
+        CHECK(pos == 50 && !strcmp(layout(), "c30 c75"), "after a drag on a clip at the playhead: at %d, %s", pos,
+              layout());
         next(24);
         b[0] = W[0].box[0] + 50; b[1] = W[0].box[3] - 50; b[2] = 2; b[3] = VIEWER; b[4] = -1;
         return 6; /* Menu */
