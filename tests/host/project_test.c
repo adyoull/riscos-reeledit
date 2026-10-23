@@ -50,7 +50,7 @@ static unsigned clk(void *ctx)
     return 0;
 }
 
-/* items as "c75 g10 c40": clips (c) and gaps (g) with their lengths */
+/* items as "c75 g10 m5 c40": clips (c), gaps (g) and dissolves (m) with their lengths */
 static const char *layout(re_project *p)
 {
     static char s[256];
@@ -58,7 +58,8 @@ static const char *layout(re_project *p)
     for (int i = 0; i < re_project_items(p); i++) {
         re_item it;
         re_project_item(p, i, &it);
-        snprintf(s + strlen(s), sizeof(s) - strlen(s), "%s%c%d", i ? " " : "", it.gap ? 'g' : 'c', it.length);
+        snprintf(s + strlen(s), sizeof(s) - strlen(s), "%s%c%d", i ? " " : "", it.gap ? 'g' : it.mix ? 'm' : 'c',
+                 it.length);
     }
     return s;
 }
@@ -68,6 +69,113 @@ static const char *name_of(re_project *p, int i)
     static re_item it;
     re_project_item(p, i, &it);
     return it.name;
+}
+
+static int luma_at(re_engine *e, int frame)
+{
+    re_engine_seek(e, frame);
+    re_engine_poll(e);
+    return shown_pos == frame ? shown_y : -1;
+}
+
+/* ---- dissolves: made from the clips' spare frames or by overlapping them;
+   lengthened, shortened, removed; kept through undo, saving, opening; the
+   engine plays them (the picture between the two clips'), also between
+   clips of different sizes */
+static void dissolves(const char *a, const char *b, const char *four3, const char *out)
+{
+    re_engine_io io = {show, NULL, clk, NULL, 48000, 2, NULL};
+    re_project *p = re_project_new();
+    re_project_add(p, a, -1);
+    re_project_add(p, b, -1);
+    re_engine *e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    int red = luma_at(e, 10), blue = luma_at(e, 100);
+
+    /* no frames beyond the cut: overlapped, the project 25 shorter */
+    CHECK(re_project_dissolve(p, 0, 25, 0) == 1 && !strcmp(layout(p), "c50 m25 c50") && re_project_length(p) == 125,
+          "dissolves: overlapped: %s, %d", layout(p), re_project_length(p));
+    re_item it;
+    re_project_item(p, 1, &it);
+    CHECK(it.mix && it.in == 0 && it.out == 24 && !strcmp(it.name, "Dissolve"), "dissolves: the item: %d %d-%d %s",
+          it.mix, it.in, it.out, it.name);
+    re_engine_refresh(e);
+    int mid = luma_at(e, 62), first = luma_at(e, 50), last = luma_at(e, 74);
+    CHECK(abs(first - red) <= 6 && abs(last - blue) <= 6 && mid > blue + 10 && mid < red - 10,
+          "dissolves: played: luma %d, %d, %d (red %d, blue %d)", first, mid, last, red, blue);
+    CHECK(re_project_dissolve_max(p, 1) == 25 + 49, "dissolves: the longest %d, not 74", re_project_dissolve_max(p, 1));
+    CHECK(re_project_dissolve_length(p, 1, 35) == 1 && !strcmp(layout(p), "c40 m35 c40"), "dissolves: longer: %s",
+          layout(p));
+    CHECK(re_project_dissolve_length(p, 1, 500) == 1 && !strcmp(layout(p), "c1 m74 c1"), "dissolves: kept to the clips: %s",
+          layout(p));
+    CHECK(re_project_dissolve_length(p, 1, 10) == 1 && !strcmp(layout(p), "c65 m10 c65"), "dissolves: shorter: %s",
+          layout(p));
+    re_engine_refresh(e);
+    mid = luma_at(e, 70);
+    CHECK(mid > blue + 10 && mid < red - 10, "dissolves: played after resizing: luma %d", mid);
+
+    /* what's refused: splitting it, trimming or moving into it */
+    CHECK(re_project_split(p, 70) == 0, "dissolves: split inside one");
+    CHECK(re_project_trim(p, 30, 1) == 0 && re_project_trim(p, 100, 0) == 0, "dissolves: Q or W into one: %s", layout(p));
+    CHECK(re_project_move(p, 0, 3) == -1 && re_project_move(p, 1, 0) == -1, "dissolves: moved");
+    CHECK(re_project_set_in_out(p, 0, 0, 70) == 0 && !strcmp(layout(p), "c65 m10 c65"),
+          "dissolves: an end in one trimmed: %s", layout(p));
+
+    /* undo and redo: XML again, the links made again (resizing works) */
+    CHECK(re_project_undo(p) && !strcmp(layout(p), "c1 m74 c1"), "dissolves: undo: %s", layout(p));
+    CHECK(re_project_redo(p) && !strcmp(layout(p), "c65 m10 c65"), "dissolves: redo: %s", layout(p));
+    CHECK(re_project_dissolve_length(p, 1, 20) == 1 && !strcmp(layout(p), "c55 m20 c55"),
+          "dissolves: resized after redo: %s", layout(p));
+
+    /* saved and opened again: still a dissolve, that resizes, and is removed */
+    CHECK(re_project_save(p, out) == 0, "dissolves: not saved");
+    re_engine_close(e);
+    re_project_close(p);
+    p = re_project_open(out, 1);
+    CHECK(p && !strcmp(layout(p), "c55 m20 c55"), "dissolves: opened: %s", p ? layout(p) : "-");
+    if (!p)
+        return;
+    CHECK(re_project_dissolve_length(p, 1, 30) == 1 && !strcmp(layout(p), "c45 m30 c45"),
+          "dissolves: opened, resized: %s", layout(p));
+    e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    mid = luma_at(e, 60);
+    CHECK(mid > blue + 10 && mid < red - 10, "dissolves: opened, played: luma %d", mid);
+    CHECK(re_project_remove(p, 1, 1) == 1 && !strcmp(layout(p), "c75 c75"), "dissolves: removed: %s", layout(p));
+
+    /* from spare frames: the length kept (the first clip's after its out; then the second's before its in) */
+    CHECK(re_project_set_in_out(p, 0, 0, 49) == 1 && !strcmp(layout(p), "c50 c75"), "dissolves: a trimmed: %s",
+          layout(p));
+    CHECK(re_project_dissolve(p, 0, 10, 0) == 1 && !strcmp(layout(p), "c50 m10 c65"),
+          "dissolves: a's spare frames: %s", layout(p));
+    re_engine_refresh(e);
+    int at_cut = luma_at(e, 50);
+    CHECK(abs(at_cut - red) <= 6, "dissolves: a's spare frames: the dissolve starts red (%d)", at_cut);
+    CHECK(re_project_remove(p, 1, 1) == 1 && !strcmp(layout(p), "c50 c75"), "dissolves: removed again: %s", layout(p));
+    CHECK(re_project_set_in_out(p, 0, 0, 74) == 1 && re_project_set_in_out(p, 1, 20, 74) == 1
+              && !strcmp(layout(p), "c75 c55"),
+          "dissolves: b trimmed: %s", layout(p));
+    CHECK(re_project_dissolve(p, 0, 10, 0) == 1 && !strcmp(layout(p), "c65 m10 c55"),
+          "dissolves: b's spare frames: %s", layout(p));
+    /* a clip removed takes its dissolve: the other clip as it was */
+    CHECK(re_project_remove(p, 0, 1) == 1 && !strcmp(layout(p), "c55"), "dissolves: the clip before removed: %s",
+          layout(p));
+    re_project_item(p, 0, &it);
+    CHECK(it.in == 20, "dissolves: the clip left starts at %d, not 20", it.in);
+    re_engine_close(e);
+    re_project_close(p);
+
+    /* clips of different sizes: played at the project's size */
+    p = re_project_new();
+    re_project_add(p, a, -1);
+    re_project_add(p, four3, -1);
+    CHECK(re_project_dissolve(p, 0, 20, 1) == 1, "dissolves: different sizes: %s", layout(p));
+    e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    mid = luma_at(e, 65);
+    CHECK(mid > 0 && shown_w == 320 && shown_h == 180, "dissolves: different sizes: %dx%d, luma %d", shown_w, shown_h,
+          mid);
+    mid = luma_at(e, 90);
+    CHECK(shown_w == 480 && shown_h == 360, "dissolves: after it, the 4:3 clip as it is: %dx%d", shown_w, shown_h);
+    re_engine_close(e);
+    re_project_close(p);
 }
 
 int main(int argc, char **argv)
@@ -317,6 +425,8 @@ int main(int argc, char **argv)
           "an anamorphic 720x576 16:9 clip shown at %dx%d, shape %.3f", shown_w, shown_h, shown_dar);
     re_engine_close(e);
     re_project_close(p);
+
+    dissolves(a, b, argv[6], out);
 
     printf("project_test: %s\n", fails ? "FAILED" : "passed");
     return fails != 0;

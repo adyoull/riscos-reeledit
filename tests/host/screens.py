@@ -4,7 +4,7 @@ made into PNGs: tests/host/screens.py dir
 
 editor_test writes, for each screenshot, a display list (name.txt): the
 windows open (their boxes, titles and icons), what !ReelEdit drew in each
-(OS_Plot rectangles, Wimp_TextOp text, the picture sprite, the graphics
+(OS_Plot rectangles and triangles, Wimp_TextOp text, the picture sprite, the graphics
 clip), the overlay's picture and an open menu. This draws them as a RISC
 OS 5 desktop would, roughly: the Wimp's own parts (title bars, scroll bars,
 icon borders, the desktop font) are a likeness, not the real thing; what
@@ -90,6 +90,15 @@ class Screen:
         self.rect(x0, y0, x0 + 3, y1, hi, clip)
         self.rect(x0, y0, x1, y0 + 3, lo, clip)
         self.rect(x1 - 3, y0, x1, y1, lo, clip)
+
+    def triangle(self, pts, fill, clip):
+        """filled, its corners in OS units, clipped"""
+        l, t, r, b = clip.box()
+        layer = Image.new('L', self.im.size, 0)
+        ImageDraw.Draw(layer).polygon([px(x, y) for x, y in pts], fill=255)
+        mask = Image.new('L', self.im.size, 0)
+        mask.paste(layer.crop((l, t, r, b)), (l, t))
+        self.im.paste(fill, (0, 0, self.im.width, self.im.height), mask)
 
     def text(self, s, x, y, fg, clip, right=False, font=FONT, bg=None):
         """baseline at x, y (OS units)"""
@@ -206,6 +215,8 @@ def draw_window(sc, w, icons, ops):
             gclip = Clip(*op[1:5]).inter(clip)
         elif k == 'R':
             sc.rect(op[1], op[2], op[3], op[4], colour(op[5]), gclip)
+        elif k == 'P':
+            sc.triangle([(op[1], op[2]), (op[3], op[4]), (op[5], op[6])], colour(op[7]), gclip)
         elif k == 'T':
             sc.text(text_of(op[6]), op[1], op[2], colour(op[3]), gclip, right=op[5])
         elif k == 'S':
@@ -276,6 +287,9 @@ def render(path):
         elif k == 'R':
             p = rest.split(b' ')
             cur['ops'].append(('R', int(p[0]), int(p[1]), int(p[2]), int(p[3]), p[4].decode()))
+        elif k == 'P':
+            p = rest.split(b' ')
+            cur['ops'].append(('P',) + tuple(int(v) for v in p[:6]) + (p[6].decode(),))
         elif k == 'T':
             p = rest.split(b' ', 5)
             cur['ops'].append(('T', int(p[0]), int(p[1]), p[2].decode(), p[3].decode(), int(p[4]),

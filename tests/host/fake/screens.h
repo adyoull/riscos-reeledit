@@ -46,8 +46,8 @@ typedef struct
 
 typedef struct
 {
-    char type;         /* R rect, T text, S sprite, C clip */
-    int x0, y0, x1, y1;
+    char type;         /* R rect, P triangle, T text, S sprite, C clip */
+    int x0, y0, x1, y1, x2, y2;
     unsigned colour, bg;
     int right;
     char *text;        /* T: the text; S: the sprite's pixels (x1 = width, y1 = rows) */
@@ -71,7 +71,7 @@ static struct
     } w[SCR_WINS];
     int cur;              /* the window being drawn (-1: none) */
     unsigned colour;
-    int px, py;           /* OS_Plot's last point */
+    int px, py, qx, qy;   /* OS_Plot's last point, and the one before */
     unsigned tfg, tbg;
     const scr_menu *menu;
     int menu_x, menu_y;
@@ -157,6 +157,11 @@ static void scr_cover(int i, int x0, int y0, int x1, int y1)
             int len = 16 * (int) strlen(p->text);
             b0 = p->right ? p->x0 - len : p->x0; b2 = p->right ? p->x0 : p->x0 + len;
             b1 = p->y0 - 8; b3 = p->y0 + 28;
+        } else if (p->type == 'P') {
+            b0 = p->x0 < p->x1 ? p->x0 : p->x1; b0 = b0 < p->x2 ? b0 : p->x2;
+            b2 = p->x0 > p->x1 ? p->x0 : p->x1; b2 = b2 > p->x2 ? b2 : p->x2;
+            b1 = p->y0 < p->y1 ? p->y0 : p->y1; b1 = b1 < p->y2 ? b1 : p->y2;
+            b3 = p->y0 > p->y1 ? p->y0 : p->y1; b3 = b3 > p->y2 ? b3 : p->y2;
         } else if (p->type == 'S') {
             b2 = p->x0 + 2 * p->x1; b3 = p->y0 + 2 * p->y1;
         }
@@ -185,7 +190,7 @@ static void scr_begin(int i, int full, int x0, int y0, int x1, int y1)
         scr_clear(i);
     else
         scr_cover(i, x0, y0, x1, y1);
-    scr_add((scr_op){'C', x0, y0, x1 - 1, y1 - 1, 0, 0, 0, NULL});
+    scr_add((scr_op){'C', x0, y0, x1 - 1, y1 - 1, 0, 0, 0, 0, 0, NULL});
 }
 
 static void scr_colour(unsigned bbggrr00) { S.colour = bbggrr00; }
@@ -194,8 +199,12 @@ static void scr_plot(int code, int x, int y)
 {
     if ((code & ~7) == 96) { /* a rectangle fill (96-103), from the last point */
         scr_add((scr_op){'R', S.px < x ? S.px : x, S.py < y ? S.py : y, S.px < x ? x : S.px, S.py < y ? y : S.py,
-                         S.colour, 0, 0, NULL});
+                         0, 0, S.colour, 0, 0, NULL});
+    } else if ((code & ~7) == 80) { /* a triangle fill (80-87): the last two points and this */
+        scr_add((scr_op){'P', S.qx, S.qy, S.px, S.py, x, y, S.colour, 0, 0, NULL});
     }
+    S.qx = S.px;
+    S.qy = S.py;
     S.px = x;
     S.py = y;
 }
@@ -204,7 +213,7 @@ static void scr_vdu(const unsigned char *b, int n)
 {
     if (n == 9 && b[0] == 24) /* the graphics window */
         scr_add((scr_op){'C', (short) (b[1] | b[2] << 8), (short) (b[3] | b[4] << 8), (short) (b[5] | b[6] << 8),
-                         (short) (b[7] | b[8] << 8), 0, 0, 0, NULL});
+                         (short) (b[7] | b[8] << 8), 0, 0, 0, 0, 0, NULL});
 }
 
 static void scr_textop(int reason, intptr_t r1, intptr_t r2, int x, int y)
@@ -213,7 +222,7 @@ static void scr_textop(int reason, intptr_t r1, intptr_t r2, int x, int y)
         S.tfg = (unsigned) r1;
         S.tbg = (unsigned) r2;
     } else if ((reason & 0xFF) == 2) {
-        scr_add((scr_op){'T', x, y, 0, 0, S.tfg, S.tbg, (reason >> 31) & 1, strdup((const char *) r1)});
+        scr_add((scr_op){'T', x, y, 0, 0, 0, 0, S.tfg, S.tbg, (reason >> 31) & 1, strdup((const char *) r1)});
     }
 }
 
@@ -228,7 +237,7 @@ static void scr_sprite(const int *spr, int x, int y)
     if (!px)
         return;
     memcpy(px, (const char *) spr + spr[8], n);
-    scr_add((scr_op){'S', x, y, w, rows, 0, 0, 0, px});
+    scr_add((scr_op){'S', x, y, w, rows, 0, 0, 0, 0, 0, px});
 }
 
 static void scr_menu_open(const void *menu, int x, int y)
@@ -274,6 +283,9 @@ static void snap(const char *name, const int order[], int n, int (*box)(int i, i
             switch (p->type) {
             case 'C': fprintf(f, "C %d %d %d %d\n", p->x0, p->y0, p->x1, p->y1); break;
             case 'R': fprintf(f, "R %d %d %d %d 0x%08X\n", p->x0, p->y0, p->x1, p->y1, p->colour); break;
+            case 'P':
+                fprintf(f, "P %d %d %d %d %d %d 0x%08X\n", p->x0, p->y0, p->x1, p->y1, p->x2, p->y2, p->colour);
+                break;
             case 'T': fprintf(f, "T %d %d 0x%08X 0x%08X %d %s\n", p->x0, p->y0, p->colour, p->bg, p->right, p->text); break;
             case 'S': {
                 char sp[512];

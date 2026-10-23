@@ -41,6 +41,17 @@ and the Viewer shows the frame at the edge as you drag. Drag the middle of
 a clip to move it: a line shows where it will go (the nearest cut), and it
 goes there when you let go. Each drag is one step for Undo (F8).
 
+Dissolves (one shot fading into the next): at each cut between two clips
+there's a small white mark at the top of the track. Drag from it, left or
+right: the clips overlap by as far as you drag, and the overlap becomes a
+dissolve (shown as a band with a diagonal), the project that much
+shorter; the Viewer shows its middle as you drag. Or press D (Edit >
+Dissolve at the cut): a dissolve a second long at the cut nearest the
+playhead, made from the clips' frames beyond the cut if they have any
+(trimmed clips do), so nothing moves. Click a dissolve to select it, drag
+its ends to make it longer or shorter, Delete takes it out (the clips as
+they were). The sound crossfades too.
+
 The Timeline: the playhead moves only from the ruler (the strip with the
 times along the top). Click the ruler to move the playhead there (the
 Viewer shows that frame), or drag along it to scrub; its timecode is shown
@@ -60,7 +71,7 @@ Save. Interactive help (!Help) says what each does.
 
 The menu (Menu over the Viewer or the Timeline):
   File  New, Save (F3), Save as...
-  Edit  Undo, Redo, Split, Trim the start, Trim the end, Delete,
+  Edit  Undo, Redo, Split, Trim the start, Trim the end, Dissolve, Delete,
         Leave gap, Clear selection
   Play  Play/Stop, Start, End
   View  Zoom the Timeline in, out, the whole project; Attach the
@@ -78,7 +89,8 @@ Keys (with the Viewer or the Timeline in front, clicked on):
   S            split at the playhead
   Q  W         trim the clip at the playhead: its start to it, its end to
                it (the clips after close up)
-  Delete       delete the selected clip (Shift-Delete: leave a gap)
+  D            a dissolve at the cut nearest the playhead
+  Delete       delete the selected clip or dissolve (Shift-Delete: leave a gap)
   F8  F9       undo, redo (100 steps)
   N            snapping on / off
   +  -         zoom the Timeline in, out

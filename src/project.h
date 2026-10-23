@@ -39,6 +39,7 @@ typedef struct
     int start, length;   /* in the project, frames */
     int in, out;         /* in the clip */
     int gap;             /* 1: a gap (blank), not a clip */
+    int mix;             /* 1: a dissolve, the clips either side mixed (its in and out: 0, length - 1) */
     int source_length;   /* the clip's file's length (frames of the project): out is below it */
     char name[64];       /* the clip's file's leaf name */
 } re_item;
@@ -64,7 +65,8 @@ int re_project_frames(re_project *p, double seconds);
    1 split, 0 not. */
 int re_project_split(re_project *p, int frame);
 /* Removes an item. ripple: what follows moves up (else a gap is left).
-   A gap removed is always closed up. 1 done, 0 not. */
+   A gap removed is always closed up. A dissolve removed: the clips as they
+   were before it; a clip removed takes its dissolves with it. 1 done, 0 not. */
 int re_project_remove(re_project *p, int item, int ripple);
 
 /* Ripple trims (Premiere's Q and W): the clip at a frame trimmed so it
@@ -87,8 +89,28 @@ void re_project_end(re_project *p);
 int re_project_set_in_out(re_project *p, int item, int in, int out);
 /* Moves an item so it comes before what is now item `before` (the number
    of items: to the end); what it leaves closes up. Its new index, or -1 if
-   nothing moved. */
+   nothing moved (a dissolve, a clip in one, or into one, isn't moved). */
 int re_project_move(re_project *p, int item, int before);
+
+/* Dissolves: an item of their own between two clips, the end of the one
+   mixed into the start of the other over its length (MLT's playlist mix: a
+   tractor with luma and mix transitions, marked as Shotcut marks its own).
+   overlap 0: from the clips' frames beyond the cut if they have them (the
+   first's after its out: the dissolve starts at the cut; or the second's
+   before its in: it ends at the cut), the project's length kept; else, or
+   overlap 1, the clips overlapped (the last frames of the first, the first
+   of the second), the project that much shorter. item: the clip before the
+   cut. The dissolve's index, or -1. */
+int re_project_dissolve(re_project *p, int item, int length, int overlap);
+/* A dissolve made longer or shorter (the clips overlapped more or less;
+   kept to what they have, each left a frame at least). 1 changed, 0 not.
+   Between begin and end, as a drag makes it, too. */
+int re_project_dissolve_length(re_project *p, int mix, int length);
+/* The longest a dissolve can be */
+int re_project_dissolve_max(re_project *p, int mix);
+/* The cut between two clips (no dissolve there yet) nearest a frame: the
+   clip before it, or -1 if there's none */
+int re_project_dissolve_cut(re_project *p, int frame);
 
 /* Undo and redo (up to 100 edits): the project as it was before the last
    edit, and back. 1 done, 0 nothing to do. The producer changes: an

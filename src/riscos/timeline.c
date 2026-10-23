@@ -1,19 +1,28 @@
 /* timeline.c - the Timeline window (app.h): a ruler with the playhead, and
- * track V1's clips and gaps, scrolled sideways by the window's own scroll
- * bar. The ruler is the only place the playhead moves from: a click puts
- * it there, a drag scrubs. On the track, a click on a clip selects it
+ * track V1's clips, gaps and dissolves, scrolled sideways by the window's
+ * own scroll bar.
+ *
+ * The ruler is the only place the playhead moves from: a click puts it
+ * there, a drag scrubs. On the track, a click selects a clip or a dissolve
  * (Adjust: toggles), on empty space clears the selection; files dropped on
- * it go in at the frame they're dropped on. Dragged on the track: a clip's edge
- * trims it (ripple: what follows moves along; the Viewer shows the frame
- * at the edge); a clip's middle moves it (a line shows where it'll go, at
- * the cut nearest the pointer). Drawn with ColourTrans and OS_Plot, the names with the
- * desktop font (Wimp_TextOp).
+ * it go in at the frame they're dropped on. Dragged on the track (see
+ * drag_mode_at):
+ *   - a clip's edge trims it (ripple: what follows moves along; the Viewer
+ *     shows the frame at the edge);
+ *   - a clip's middle moves it (a line shows where it'll go, at the cut
+ *     nearest the pointer);
+ *   - the white mark at the top of a cut makes a dissolve there, as long as
+ *     the drag;
+ *   - a dissolve's ends make it longer or shorter.
+ * Each drag is one undo. Drawn with ColourTrans and OS_Plot, the names with
+ * the desktop font (Wimp_TextOp).
  *
  * Part of riscos-reeledit. GPL version 2 or later.
  */
 #include "app.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define ColourTrans_SetGCOL 0x40743
@@ -28,8 +37,14 @@
 #define LABEL_W 200  /* the playhead's timecode, beside it on the ruler */
 #define SNAP    12   /* OS units: the playhead snaps to a cut this near */
 #define EDGE    24   /* OS units: a drag this near a clip's edge trims it (a third of a narrow clip) */
+#define CORNER  32   /* OS units: the top of the track this near a cut: a drag there makes a dissolve */
+#define TRACK_TOP (-RULER_H - 8) /* the track's top and bottom (work area) */
+#define TRACK_BOTTOM (TRACK_TOP - TRACK_H)
 
-enum { DRAG_NONE, DRAG_SCRUB, DRAG_IN, DRAG_OUT, DRAG_MOVE };
+/* What a drag does: the playhead (on the ruler); on the track, a clip's
+   start or end trimmed, a clip moved, a dissolve made at a cut (from the
+   cut's top corner), a dissolve's start or end dragged (longer, shorter) */
+enum { DRAG_NONE, DRAG_SCRUB, DRAG_IN, DRAG_OUT, DRAG_MOVE, DRAG_DISSOLVE, DRAG_MIX_IN, DRAG_MIX_OUT };
 
 static struct
 {
@@ -43,7 +58,8 @@ static struct
     /* the item dragged: as it was when the drag began */
     int d_item, d_in, d_out, d_start, d_f0;
     int d_before, d_line; /* moving: where it would go (before item d_before), the line's frame (-1: none) */
-} T = {0, 4.0, 0, 0, 0, 0, 0, "Timeline", DRAG_NONE, 0, 0, 0, 0, 0, -1, -1};
+    int d_mix, d_len;     /* a dissolve: the item made or dragged (-1: none yet), its length when the drag began */
+} T = {0, 4.0, 0, 0, 0, 0, 0, "Timeline", DRAG_NONE, 0, 0, 0, 0, 0, -1, -1, -1, 0};
 
 static int x_of(int frame)
 {
@@ -276,6 +292,13 @@ static void rect(int x0, int y0, int x1, int y1) /* inclusive, screen */
     plot(96 + 5, x1, y1);
 }
 
+static void triangle(int x0, int y0, int x1, int y1, int x2, int y2) /* filled, screen */
+{
+    plot(4, x0, y0);
+    plot(4, x1, y1);
+    plot(80 + 5, x2, y2);
+}
+
 static void text(const char *s, int x, int y, unsigned fg, unsigned bg)
 {
     _kernel_swi_regs r;
@@ -327,6 +350,35 @@ static void mark_label(char *buf, int size, int f, double fps)
         snprintf(buf, size, "%d:%02d", s / 60, s % 60);
 }
 
+/* A dissolve: the clip colour giving way to a lighter one along a diagonal,
+   in a dark band; its name if there's room */
+static void draw_dissolve(const re_item *it, int selected, int x0, int x1, int y0, int y1, int cx0, int cy0, int cx1,
+                          int cy1)
+{
+    colour(selected ? 0x2080F000 : 0x20202000);
+    rect(x0, y0, x1, y1);
+    int inset = selected ? 6 : 2, a0 = x0 + inset, a1 = x1 - inset, b0 = y0 + inset, b1 = y1 - inset;
+    if (a1 <= a0)
+        return;
+    colour(0xC0905000); /* (the clips' colour, below the diagonal) */
+    triangle(a0, b0, a1, b0, a0, b1);
+    colour(0xF0D8B000);
+    triangle(a1, b1, a0, b1, a1, b0);
+    if (selected && x1 - x0 > 4 * inset) { /* its ends' handles: drag to lengthen or shorten */
+        colour(0x2080F000);
+        rect(x0, y0 + 20, x0 + inset + 4, y1 - 20);
+        rect(x1 - inset - 4, y0 + 20, x1, y1 - 20);
+    }
+    if (a1 - a0 > 140) {
+        int c0 = a0 > cx0 ? a0 : cx0, c1 = a1 < cx1 ? a1 : cx1, r0 = b0 > cy0 ? b0 : cy0, r1 = b1 < cy1 ? b1 : cy1;
+        if (c1 > c0 && r1 > r0) {
+            clip(c0, r0, c1, r1);
+            text(it->name, a0 + 8, y0 + 12, 0xFFFFFF00, 0xC0905000);
+            clip(cx0, cy0, cx1, cy1);
+        }
+    }
+}
+
 static void draw(int *b)
 {
     int ox = b[1] - b[5], oy = b[4] - b[6]; /* screen position of work area 0,0 */
@@ -361,6 +413,10 @@ static void draw(int *b)
             int x0 = ox + x_of(it.start), x1 = ox + x_of(it.start + it.length) - 2;
             if (x1 < x0)
                 x1 = x0;
+            if (it.mix) {
+                draw_dissolve(&it, i == A.sel, x0, x1, track_y0, track_y1, cx0, cy0, cx1, cy1);
+                continue;
+            }
             /* selected: the clip's own colour inside a bright outline (a fill
                hid its name, Pi test) */
             unsigned fill = 0xC0905000;
@@ -386,6 +442,19 @@ static void draw(int *b)
                         text(it.name, nx, track_y1 - 36, 0xFFFFFF00, fill);
                 clip(cx0, cy0, cx1, cy1);
             }
+        }
+    }
+    /* the cuts' corners: a drag there makes a dissolve */
+    if (A.proj && T.drag == DRAG_NONE) {
+        for (int i = 0; i + 1 < re_project_items(A.proj); i++) {
+            re_item a, b;
+            re_project_item(A.proj, i, &a);
+            re_project_item(A.proj, i + 1, &b);
+            if (a.gap || a.mix || b.gap || b.mix || b.start < f0 || b.start > f1)
+                continue;
+            int cx = ox + x_of(b.start) - 1;
+            colour(0xFFFFFF00);
+            triangle(cx - 12, track_y1, cx + 12, track_y1, cx, track_y1 - 16);
         }
     }
     /* moving a clip: where it would go */
@@ -432,15 +501,28 @@ static void redraw_frames(int f0, int f1) /* (the track between two frames, a li
     ro_swi(Wimp_ForceRedraw, &r);
 }
 
-/* What a drag at a work area x would do: the clip, and trim its start
-   (DRAG_IN), its end (DRAG_OUT), or move it (DRAG_MOVE); DRAG_NONE for
-   none. The item is the one under the pointer (at a cut: the one after
-   it); just past the end, the last one's end. */
-static int drag_mode_at(int wx, int *item)
+/* What a drag at a work area x, y on the track would do (DRAG_NONE:
+   nothing), and the item it acts on:
+   - the top corner at a cut between two clips: a dissolve made there
+     (DRAG_DISSOLVE; the clip before the cut);
+   - a dissolve's ends: it made longer or shorter (DRAG_MIX_IN, _OUT); a
+     clip's end in a dissolve is the dissolve's;
+   - a clip's ends: trimmed (DRAG_IN, DRAG_OUT); its middle: moved.
+   The item is the one under the pointer (at a cut: the one after it); just
+   past the end, the last one's end. */
+static int drag_mode_at(int wx, int wy, int *item)
 {
     int len = re_project_length(A.proj);
     int fi = (int) ((wx - LEFT) / T.scale); /* (the frame the pointer is over, not the nearest edge) */
     int i;
+    if (wy > TRACK_TOP - CORNER) {
+        int c = re_project_dissolve_cut(A.proj, frame_of(wx));
+        re_item after;
+        if (c >= 0 && !re_project_item(A.proj, c + 1, &after) && abs(wx - x_of(after.start)) <= EDGE) {
+            *item = c;
+            return DRAG_DISSOLVE;
+        }
+    }
     if (fi >= len) {
         if (len <= 0 || wx - x_of(len) > EDGE)
             return DRAG_NONE;
@@ -448,24 +530,46 @@ static int drag_mode_at(int wx, int *item)
     } else {
         i = re_project_item_at(A.proj, fi < 0 ? 0 : fi);
     }
-    re_item it;
+    re_item it, next;
     if (i < 0 || re_project_item(A.proj, i, &it) || it.gap)
         return DRAG_NONE;
-    *item = i;
     int x0 = x_of(it.start), x1 = x_of(it.start + it.length), edge = (x1 - x0) / 3;
     if (edge > EDGE)
         edge = EDGE;
-    return wx - x0 < edge ? DRAG_IN : x1 - wx <= edge ? DRAG_OUT : DRAG_MOVE;
+    int side = wx - x0 < edge ? -1 : x1 - wx <= edge ? 1 : 0;
+    *item = i;
+    if (it.mix)
+        return side < 0 ? DRAG_MIX_IN : side > 0 ? DRAG_MIX_OUT : DRAG_NONE;
+    if (side < 0 && i > 0 && !re_project_item(A.proj, i - 1, &next) && next.mix) {
+        *item = i - 1;
+        return DRAG_MIX_OUT;
+    }
+    if (side > 0 && !re_project_item(A.proj, i + 1, &next) && next.mix) {
+        *item = i + 1;
+        return DRAG_MIX_IN;
+    }
+    return side < 0 ? DRAG_IN : side > 0 ? DRAG_OUT : DRAG_MOVE;
 }
 
-/* A drag begun on a clip: its edges trim it, its middle moves it */
-static void drag_start(int f, int wx, int *b, int *st)
+static const char *const drag_names[] = {"", "scrubbing", "trimming the start of", "trimming the end of", "moving",
+                                         "making a dissolve after", "lengthening the start of",
+                                         "lengthening the end of"};
+
+/* The middle of a dissolve on show, as it's dragged */
+static void show_dissolve(int mix)
 {
-    (void) f;
-    int i = -1, mode = drag_mode_at(wx, &i);
+    re_item it;
+    if (mix >= 0 && !re_project_item(A.proj, mix, &it))
+        app_seek(it.start + it.length / 2);
+}
+
+/* A drag begun on the track: see drag_mode_at */
+static void drag_start(int f, int wx, int wy, int *b, int *st)
+{
+    int i = -1, mode = drag_mode_at(wx, wy, &i);
     re_item it;
     if (mode == DRAG_NONE || re_project_item(A.proj, i, &it)) {
-        app_log("timeline: a drag at x %d, on no clip", wx);
+        app_log("timeline: a drag at %d,%d, on no clip", wx, wy);
         return;
     }
     app_set_speed(0);
@@ -476,7 +580,10 @@ static void drag_start(int f, int wx, int *b, int *st)
     T.d_f0 = f;
     T.d_before = -1;
     T.d_line = -1;
-    tl_select(i);
+    T.d_mix = mode == DRAG_MIX_IN || mode == DRAG_MIX_OUT ? i : -1;
+    T.d_len = it.length;
+    if (mode != DRAG_DISSOLVE)
+        tl_select(i);
     /* the pointer kept to the window's visible part */
     int d[10];
     _kernel_swi_regs r;
@@ -489,12 +596,17 @@ static void drag_start(int f, int wx, int *b, int *st)
     if (ro_swi(Wimp_DragBox, &r))
         return;
     T.drag = mode;
-    app_log("timeline: %s clip %d (frames %d-%d), from x %d", mode == DRAG_IN ? "trimming the start of"
-            : mode == DRAG_OUT ? "trimming the end of" : "moving", i, it.start, it.start + it.length - 1, wx);
-    if (mode != DRAG_MOVE) {
-        re_project_begin(A.proj); /* (one undo for the whole drag) */
+    app_log("timeline: %s item %d (frames %d-%d), from %d,%d", drag_names[mode], i, it.start,
+            it.start + it.length - 1, wx, wy);
+    if (mode == DRAG_MOVE)
+        return;
+    re_project_begin(A.proj); /* (one undo for the whole drag) */
+    if (mode == DRAG_IN || mode == DRAG_OUT)
         app_seek(mode == DRAG_IN ? it.start : it.start + it.length - 1);
-    }
+    else if (mode != DRAG_DISSOLVE)
+        show_dissolve(i);
+    if (mode == DRAG_DISSOLVE)
+        redraw_all(); /* (the corners go while dragging) */
 }
 
 /* Where a moved clip would go: the cut (an item's start, or the end)
@@ -533,8 +645,30 @@ static void drag_tick(int f)
         if (!re_project_item(A.proj, T.d_item, &it))
             app_seek(it.start + it.length - 1); /* (its last frame now) */
         break;
+    case DRAG_DISSOLVE: { /* (as long as the pointer has come from the cut, either way) */
+        int length = delta < 0 ? -delta : delta;
+        if (length < 1)
+            break;
+        if (T.d_mix < 0) {
+            T.d_mix = re_project_dissolve(A.proj, T.d_item, length, 1);
+            if (T.d_mix >= 0)
+                A.sel = T.d_mix;
+        } else if (!re_project_dissolve_length(A.proj, T.d_mix, length)) {
+            break;
+        }
+        app_edited();
+        show_dissolve(T.d_mix);
+        break;
+    }
+    case DRAG_MIX_IN: /* (its start: dragged back, longer) */
+    case DRAG_MIX_OUT:
+        if (re_project_dissolve_length(A.proj, T.d_mix, T.d_len + (T.drag == DRAG_MIX_IN ? -delta : delta))) {
+            app_edited();
+            show_dissolve(T.d_mix);
+        }
+        break;
     case DRAG_MOVE: {
-        int before, at;
+        int before = 0, at = -1;
         move_target(f, &before, &at);
         if (before == T.d_item || before == T.d_item + 1)
             at = -1; /* (where it is: nowhere to show) */
@@ -600,7 +734,7 @@ void tl_click(int *b)
     }
     /* the track: clips are selected, trimmed and moved; the playhead stays */
     if (drag) {
-        drag_start(f, wx, b, st);
+        drag_start(f, wx, wy, b, st);
         return;
     }
     int i = re_project_item_at(A.proj, f);
@@ -707,10 +841,7 @@ void tl_drag_end(int *b)
     tl_scrub_tick();
     int mode = T.drag;
     T.drag = DRAG_NONE;
-    if (mode == DRAG_IN || mode == DRAG_OUT) {
-        re_project_end(A.proj);
-        app_edited();
-    } else if (mode == DRAG_MOVE) {
+    if (mode == DRAG_MOVE) {
         if (T.d_line >= 0)
             redraw_frames(T.d_line, T.d_line);
         T.d_line = -1;
@@ -722,5 +853,8 @@ void tl_drag_end(int *b)
             if (!re_project_item(A.proj, j, &it))
                 app_seek(it.start);
         }
+    } else if (mode != DRAG_SCRUB) { /* (trims and dissolves: one undo) */
+        re_project_end(A.proj);
+        app_edited();
     }
 }

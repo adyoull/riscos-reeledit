@@ -941,6 +941,25 @@ static void split(void)
         app_edited();
 }
 
+/* D: a dissolve, a second long, at the cut between two clips nearest the
+   playhead (from the clips' frames beyond the cut if they have them, the
+   project's length kept; else overlapping them). Selected: Delete takes it
+   out, its ends drag. */
+static void dissolve_at_cut(void)
+{
+    if (!A.proj)
+        return;
+    int c = re_project_dissolve_cut(A.proj, app_position());
+    int m = c < 0 ? -1 : re_project_dissolve(A.proj, c, re_project_frames(A.proj, 1.0), 0);
+    re_item it;
+    if (m < 0 || re_project_item(A.proj, m, &it))
+        return;
+    app_log("dissolve: %d frames from %d", it.length, it.start);
+    A.sel = m;
+    app_edited();
+    app_seek(it.start);
+}
+
 static void delete_selected(int ripple)
 {
     if (!A.proj || A.sel < 0)
@@ -1001,10 +1020,11 @@ typedef struct
 
 static MENU(3) m_file = {"File", 7, 2, 7, 0, 280, 44, 0,
                          {{0, -1, IT("New")}, {0, -1, IT("Save          F3")}, {0x80, -1, IT("Save as...")}}};
-static MENU(8) m_edit = {"Edit", 7, 2, 7, 0, 520, 44, 0,
+static MENU(9) m_edit = {"Edit", 7, 2, 7, 0, 520, 44, 0,
                          {{0, -1, IT("Undo                     F8")}, {2, -1, IT("Redo                     F9")},
                           {0, -1, IT("Split at the playhead     S")}, {0, -1, IT("Trim the start to it      Q")},
-                          {2, -1, IT("Trim the end to it        W")}, {0, -1, IT("Delete               Delete")},
+                          {0, -1, IT("Trim the end to it        W")}, {2, -1, IT("Dissolve at the cut       D")},
+                          {0, -1, IT("Delete               Delete")},
                           {0, -1, IT("Delete, leaving a gap   \x8b" "Del")}, {0x80, -1, IT("Clear the selection      ^Z")}}};
 static char play_item[24] = "Play           Space";
 static MENU(3) m_play = {"Play", 7, 2, 7, 0, 340, 44, 0,
@@ -1041,7 +1061,8 @@ void app_menu(int x, int y)
     shade(&m_edit.item[1].iflags, !A.proj || !re_project_can_redo(A.proj));
     for (int i = 2; i <= 4; i++)
         shade(&m_edit.item[i].iflags, !has);
-    for (int i = 5; i <= 7; i++)
+    shade(&m_edit.item[5].iflags, !A.proj || re_project_dissolve_cut(A.proj, app_position()) < 0);
+    for (int i = 6; i <= 8; i++)
         shade(&m_edit.item[i].iflags, A.sel < 0);
     m_view.item[4].flags = (m_view.item[4].flags & ~1) | (A.snap ? 1 : 0);
     for (int i = 0; i < 3; i++)
@@ -1095,9 +1116,10 @@ static void menu_select(int *b)
         case 2: split(); break;
         case 3: trim(0); break;
         case 4: trim(1); break;
-        case 5: delete_selected(1); break;
-        case 6: delete_selected(0); break;
-        case 7: tl_select(-1); break;
+        case 5: dissolve_at_cut(); break;
+        case 6: delete_selected(1); break;
+        case 7: delete_selected(0); break;
+        case 8: tl_select(-1); break;
         }
         break;
     case 2: /* Play */
@@ -1167,6 +1189,7 @@ int app_key(int k)
     case 0x18F: to_cut(-1); return 1;             /* Up: the cut before */
     case 0x18E: to_cut(1); return 1;              /* Down: the cut after */
     case 'q': case 'Q': trim(0); return 1;
+    case 'd': case 'D': dissolve_at_cut(); return 1;
     case 'w': case 'W': trim(1); return 1;
     case 'n': case 'N': snap_toggle(); return 1;
     case 'Z': case '\\': tl_zoom(-1); return 1;    /* Shift-Z, \\: the whole project */
@@ -1296,6 +1319,8 @@ static const char *help_for(int win, int icon)
         return "This is the Timeline.|MClick or drag on the ruler (the strip with the times) to move the playhead; "
                "click a clip to select it "
                "(Adjust: select or not).|MDrag a clip's edge to trim it, its middle to move it.|M"
+               "Drag from the white mark at the top of a cut to make a dissolve there; drag a dissolve's ends to "
+               "change its length.|M"
                "Ctrl and the scroll wheel zoom; N turns snapping to cuts on or off.";
     if (win == -2)
         return "This is the Reel Edit icon.|MClick Select to open the editor; drop video files on it to add them "

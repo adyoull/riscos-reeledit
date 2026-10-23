@@ -13,7 +13,7 @@ it works.
 |---|---|---|
 | The project is MLT XML | Shotcut, Kdenlive | Projects open in Shotcut and Kdenlive on other machines, and theirs open here when they use only what Reel Edit supports (core, avformat, xml services). Unknown services are kept and shown as "not supported here", never dropped. |
 | A main storyline that closes up after a delete | Final Cut Pro (the magnetic timeline), Shotcut (ripple) | Track V1 ripples by default: delete or trim a clip and everything after it moves. A Ripple toggle on the toolbar turns it off. Tracks above V1 never ripple. |
-| Overlap two clips to cross-fade them | Shotcut | Drag a clip's start over the end of the one before it on the same track: the overlap becomes a dissolve, which is exactly MLT's playlist mix. |
+| Overlap two clips to cross-fade them | Shotcut | On the same track: drag from the white mark at the top of a cut, and the clips overlap by as far as you drag; the overlap becomes a dissolve, which is exactly MLT's playlist mix. (Done from the cut's corner rather than by dragging a clip's start, which trims.) D makes a one-second dissolve at the cut nearest the playhead from the clips' spare frames, as Premiere's and Resolve's at-the-cut dissolves do, so nothing moves. |
 | Mark in and out, then insert or overwrite | Avid, DaVinci Resolve (three-point editing) | I and O mark the source in the Viewer; Insert and Overwrite put that range at the playhead. |
 | J, K, L to shuttle | every professional editor | J back, K stop, L forward; pressed again they go faster (x2, x4). |
 | Split at the playhead | Shotcut (S), Resolve (blade) | S splits the selected clips at the playhead, or all of them when none is selected. |
@@ -234,6 +234,7 @@ need the Wimp front end.
 | Engine wrapper | `src/engine.c` | Plays a project from Wimp null events: pacing, skipping, seeking, sound. No RISC OS calls: the display, sound and clock are callbacks, so it's tested on Linux |
 | Display | `src/riscos/display.c` | Pictures to VideoOverlay as YV12 while playing with nothing over them; otherwise a 32bpp sprite in the window, converted by swscale (Reel's code) |
 | Sound | `src/riscos/sound.c` | SharedSoundBuffer and StreamManager (reelcore's code) |
-| Project | `src/project.c` | The editing model: MLT's tractor with V1 a playlist (Shotcut's layout); add, split, remove (ripple or gap), save and open MLT XML. No RISC OS calls |
-| Wimp front end | `src/riscos/viewer.c`, `timeline.c`, `savebox.c` | The icon bar icon; the editor: the Viewer (picture, transport, toolbar) with the Timeline under it (ruler, playhead, V1), the menus and keys, the Save as box (0.2). Clips and Inspector windows, more tracks, dissolves, trimming and export are to come |
+| Project | `src/project.c`, `src/project.h` | The editing model: MLT's tractor with V1 a playlist (Shotcut's layout); add, split, trim, move, remove (ripple or gap), undo (XML snapshots), save and open MLT XML. No RISC OS calls |
+| Dissolves | `src/dissolve.c` (shares `src/project_internal.h` with project.c) | Dissolves between clips on V1: MLT playlist mixes made (from spare frames or by overlapping), resized, removed back to the cut they came from; MLT's in-memory links between a mix and its clips made again after every edit and every load (undo restores from XML, which doesn't keep them) |
+| Wimp front end | `src/riscos/viewer.c`, `timeline.c`, `savebox.c` | The icon bar icon; the editor: the Viewer (picture, transport, toolbar) with the Timeline under it (ruler, playhead, V1), the menus and keys, the Save as box (0.2); trimming, moving and dissolves by dragging (0.3). Clips and Inspector windows, more tracks, fades and export are to come |
 | Export | `src/export.c` (to come) | melt in a TaskWindow, presets, progress |

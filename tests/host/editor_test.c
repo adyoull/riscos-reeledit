@@ -37,6 +37,7 @@
  * Part of riscos-reeledit. GPL version 2 or later.
  */
 #include <kernel.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -124,9 +125,15 @@ static unsigned ssb_bytes, ssb_added, ssb_played, ssb_play_cs;
 static double ssb_level;
 static _kernel_oserror err = {1, "fake: not here"};
 
-static void fail_quit(const char *why)
+static void fail_quit(const char *why, ...) __attribute__((format(printf, 1, 2)));
+static void fail_quit(const char *why, ...)
 {
-    printf("FAIL (phase %d): %s\n", phase, why);
+    va_list ap;
+    printf("FAIL (phase %d): ", phase);
+    va_start(ap, why);
+    vprintf(why, ap);
+    va_end(ap);
+    printf("\n");
     exit(1);
 }
 
@@ -507,7 +514,8 @@ static const char *layout(void)
     for (int i = 0; p && i < re_project_items(p); i++) {
         re_item it;
         re_project_item(p, i, &it);
-        snprintf(s + strlen(s), sizeof(s) - strlen(s), "%s%c%d", i ? " " : "", it.gap ? 'g' : 'c', it.length);
+        snprintf(s + strlen(s), sizeof(s) - strlen(s), "%s%c%d", i ? " " : "", it.gap ? 'g' : it.mix ? 'm' : 'c',
+                 it.length);
     }
     return s;
 }
@@ -1152,6 +1160,83 @@ static int script(int *b, int mask)
             return 0;
         CHECK(pos == 50 && !strcmp(layout(), "c30 c75"), "after a drag on a clip at the playhead: at %d, %s", pos,
               layout());
+        next(117);
+        return key_to(b, TL, 'd');
+    /* ---- dissolves: D at the cut nearest the playhead; dragged from a cut's corner; a dissolve's end dragged;
+       selected and deleted ---- */
+    case 117:
+        if (nulls)
+            return 0;
+        CHECK(!strcmp(layout(), "c30 m25 c50") && re_test_selected() == 1 && pos == 30,
+              "D at 50: %s (from the first clip's spare frames, the length kept), selected %d, at %d", layout(),
+              re_test_selected(), pos);
+        shot("11-dissolve-by-key");
+        next(118);
+        return key_to(b, TL, 0x188);
+    case 118:
+        if (nulls)
+            return 0;
+        CHECK(!strcmp(layout(), "c30 c75"), "undoing D: %s", layout());
+        mark = drags;
+        /* (the cut's corner: the top of the track, at the cut) */
+        b[0] = W[1].box[0] - W[1].scroll_x + 16 + 30 * 4 + 2; b[1] = W[1].box[3] - 48 - 8 - 10; b[2] = 0x40;
+        b[3] = TL; b[4] = -1;
+        ptr[0] = b[0] + 10 * 4; ptr[1] = b[1];
+        next(119);
+        return 6;
+    case 119:
+        if (strcmp(layout(), "c20 m10 c65")) {
+            if (fake_cs - phase_cs > 100)
+                fail_quit("dragging from a cut's corner 10 frames: no dissolve (%s, drags %d)", layout(), drags - mark);
+            return 0;
+        }
+        CHECK(re_test_selected() == 1 && pos >= 20 && pos < 30, "dragging a dissolve: selected %d, at %d (not in it)",
+              re_test_selected(), pos);
+        shot("12-dissolve-by-dragging");
+        next(120);
+        return 7; /* dropped */
+    case 120:
+        if (nulls)
+            return 0;
+        CHECK(!strcmp(layout(), "c20 m10 c65"), "after dragging a dissolve: %s", layout());
+        mark = drags;
+        b[0] = W[1].box[0] - W[1].scroll_x + 16 + 30 * 4 - 6; b[1] = W[1].box[3] - 48 - 8 - 48; b[2] = 0x40;
+        b[3] = TL; b[4] = -1; /* (its end) */
+        ptr[0] = b[0] + 5 * 4; ptr[1] = b[1];
+        next(121);
+        return 6;
+    case 121:
+        if (strcmp(layout(), "c15 m15 c60")) {
+            if (fake_cs - phase_cs > 100)
+                fail_quit("dragging a dissolve's end 5 frames: %s", layout());
+            return 0;
+        }
+        next(122);
+        return 7;
+    case 122:
+        if (nulls)
+            return 0;
+        next(123);
+        return key_to(b, TL, 0x188);
+    case 123:
+        if (nulls)
+            return 0;
+        CHECK(!strcmp(layout(), "c20 m10 c65"), "one F8 for dragging a dissolve's end: %s", layout());
+        next(124);
+        return click_tl(b, 25, 0, 0x400);
+    case 124:
+        CHECK(re_test_selected() == 1, "a click on a dissolve selected %d", re_test_selected());
+        next(125);
+        return key_to(b, TL, 0x7F);
+    case 125:
+        if (nulls)
+            return 0;
+        CHECK(!strcmp(layout(), "c30 c75") && re_test_selected() == -1, "a dissolve deleted: %s", layout());
+        next(126);
+        return click_tl(b, 50, 1, 0x400); /* (the playhead back on the second clip, for Video information) */
+    case 126:
+        if (nulls)
+            return 0;
         next(24);
         b[0] = W[0].box[0] + 50; b[1] = W[0].box[3] - 50; b[2] = 2; b[3] = VIEWER; b[4] = -1;
         return 6; /* Menu */

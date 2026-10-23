@@ -9,33 +9,13 @@
  */
 #include "project.h"
 #include "engine.h"
+#include "project_internal.h"
 
 #include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-struct re_project
-{
-    mlt_profile profile;
-    mlt_tractor tractor;   /* NULL while empty */
-    mlt_playlist v1;
-    int own_v1;            /* V1 made here (a reference of ours, besides the tractor's) */
-    unsigned state, next_state, saved_state; /* each edit a new state; modified: not the saved one */
-    unsigned changes;
-    /* undo and redo: the project as MLT XML before each edit */
-    struct snap
-    {
-        char *xml;         /* "" for an empty project */
-        unsigned state;
-    } *undo, *redo;
-    int n_undo, n_redo;
-    /* an edit of many steps (re_project_begin): its undo point's state, and
-       the state before it */
-    int in_edit;
-    unsigned edit_state;
-};
 
 #define UNDO_MAX 100
 
@@ -50,8 +30,9 @@ static void fit_tractor(re_project *p)
     mlt_producer_set_in_and_out(MLT_TRACTOR_PRODUCER(p->tractor), 0, len > 0 ? len - 1 : 0);
 }
 
-static void changed(re_project *p)
+void rp_changed(re_project *p)
 {
+    rp_relink(p);
     fit_tractor(p);
     p->state = ++p->next_state;
     p->changes++;
@@ -70,6 +51,7 @@ static char *snapshot(re_project *p)
     if (!c)
         return NULL;
     mlt_properties_set_int(MLT_CONSUMER_PROPERTIES(c), "no_meta", 1);
+    mlt_properties_set(MLT_CONSUMER_PROPERTIES(c), "store", "shotcut"); /* (a tractor's own properties: only these are kept) */
     mlt_consumer_connect(c, MLT_PRODUCER_SERVICE(MLT_TRACTOR_PRODUCER(p->tractor)));
     mlt_consumer_start(c);
     mlt_consumer_stop(c);
@@ -106,14 +88,14 @@ static int push(struct snap **v, int *n, char *xml, unsigned state)
 }
 
 /* Before an edit: the project as it is, to go back to (and nothing to redo) */
-static void checkpoint(re_project *p)
+void rp_checkpoint(re_project *p)
 {
     push(&p->undo, &p->n_undo, snapshot(p), p->state);
     drop_snaps(p->redo, &p->n_redo);
 }
 
 /* An edit that didn't happen: its checkpoint dropped */
-static void no_edit(re_project *p)
+void rp_no_edit(re_project *p)
 {
     if (p->n_undo > 0)
         free(p->undo[--p->n_undo].xml);
@@ -284,6 +266,7 @@ static int adopt(re_project *p, mlt_producer prod)
         p->tractor = NULL;
         return -1;
     }
+    rp_relink(p);
     return 0;
 }
 
@@ -387,8 +370,13 @@ int re_project_item(re_project *p, int i, re_item *item)
     item->in = info.frame_in;
     item->out = info.frame_out;
     item->gap = mlt_playlist_is_blank(p->v1, i);
+    item->mix = rp_mix_of(p, i) != NULL;
     item->source_length = info.length;
-    if (!item->gap && info.resource) {
+    if (item->mix) {
+        item->in = 0;
+        item->out = item->length - 1;
+        snprintf(item->name, sizeof(item->name), "Dissolve");
+    } else if (!item->gap && info.resource) {
         const char *leaf = info.resource;
         for (const char *c = info.resource; *c; c++)
             if (*c == '/' || *c == '\\')
@@ -431,9 +419,9 @@ int re_project_add_length(re_project *p, const char *file, int frame, int length
         mlt_producer_close(clip); /* (endless to MLT: its length to be found) */
         return RE_ADD_MEASURE;
     }
-    checkpoint(p);
+    rp_checkpoint(p);
     if (make_tracks(p) < 0) {
-        no_edit(p);
+        rp_no_edit(p);
         mlt_producer_close(clip);
         return -1;
     }
@@ -450,7 +438,7 @@ int re_project_add_length(re_project *p, const char *file, int frame, int length
     else
         mlt_playlist_insert(p->v1, clip, at, -1, -1);
     mlt_producer_close(clip); /* (the playlist keeps its own reference) */
-    changed(p);
+    rp_changed(p);
     return at;
 }
 
@@ -458,15 +446,15 @@ int re_project_split(re_project *p, int frame)
 {
     int i = re_project_item_at(p, frame);
     re_item it;
-    if (i < 0 || re_project_item(p, i, &it) || frame <= it.start || frame >= it.start + it.length)
+    if (i < 0 || re_project_item(p, i, &it) || it.mix || frame <= it.start || frame >= it.start + it.length)
         return 0;
     /* (the first part: its in to the frame before) */
-    checkpoint(p);
+    rp_checkpoint(p);
     if (mlt_playlist_split(p->v1, i, frame - it.start - 1)) {
-        no_edit(p);
+        rp_no_edit(p);
         return 0;
     }
-    changed(p);
+    rp_changed(p);
     return 1;
 }
 
@@ -474,16 +462,30 @@ int re_project_remove(re_project *p, int item, int ripple)
 {
     if (!p->v1 || item < 0 || item >= mlt_playlist_count(p->v1))
         return 0;
-    checkpoint(p);
-    if (ripple || mlt_playlist_is_blank(p->v1, item)) {
+    rp_checkpoint(p);
+    if (rp_is_clip(p, item)) { /* (its dissolves first: the clips beside it as they were) */
+        if (rp_mix_of(p, item + 1))
+            rp_unmix(p, item + 1);
+        if (rp_mix_of(p, item - 1)) {
+            rp_unmix(p, item - 1);
+            item--;
+        }
+        rp_relink(p);
+    }
+    if (rp_mix_of(p, item)) {
+        if (rp_unmix(p, item)) {
+            rp_no_edit(p);
+            return 0;
+        }
+    } else if (ripple || mlt_playlist_is_blank(p->v1, item)) {
         if (mlt_playlist_remove(p->v1, item)) {
-            no_edit(p);
+            rp_no_edit(p);
             return 0;
         }
     } else {
         mlt_producer gone = mlt_playlist_replace_with_blank(p->v1, item);
         if (!gone) {
-            no_edit(p);
+            rp_no_edit(p);
             return 0;
         }
         mlt_producer_close(gone);
@@ -492,7 +494,7 @@ int re_project_remove(re_project *p, int item, int ripple)
     int n = mlt_playlist_count(p->v1);
     if (n > 0 && mlt_playlist_is_blank(p->v1, n - 1))
         mlt_playlist_remove(p->v1, n - 1);
-    changed(p);
+    rp_changed(p);
     return 1;
 }
 
@@ -500,19 +502,21 @@ int re_project_trim(re_project *p, int frame, int end)
 {
     int i = re_project_item_at(p, frame);
     re_item it;
-    if (i < 0 || re_project_item(p, i, &it) || it.gap || frame <= it.start || frame >= it.start + it.length)
+    if (i < 0 || re_project_item(p, i, &it) || it.gap || it.mix || frame <= it.start || frame >= it.start + it.length)
+        return 0;
+    if (rp_mix_of(p, end ? i + 1 : i - 1)) /* (that end is in a dissolve: its length is changed instead) */
         return 0;
     int in = it.in, out = it.out, k = frame - it.start;
     if (end)
         out = it.in + k - 1; /* the end: the frame before the playhead the last */
     else
         in = it.in + k;      /* the start: the playhead's frame the first */
-    checkpoint(p);
+    rp_checkpoint(p);
     if (mlt_playlist_resize_clip(p->v1, i, in, out)) {
-        no_edit(p);
+        rp_no_edit(p);
         return 0;
     }
-    changed(p);
+    rp_changed(p);
     return 1;
 }
 
@@ -520,7 +524,7 @@ void re_project_begin(re_project *p)
 {
     if (p->in_edit)
         return;
-    checkpoint(p);
+    rp_checkpoint(p);
     p->in_edit = 1;
     p->edit_state = p->state;
 }
@@ -534,7 +538,7 @@ void re_project_end(re_project *p)
     const char *before = p->n_undo > 0 ? p->undo[p->n_undo - 1].xml : NULL;
     char *now = snapshot(p);
     if (before && now && !strcmp(before, now)) {
-        no_edit(p);
+        rp_no_edit(p);
         p->state = p->edit_state;
     }
     free(now);
@@ -543,8 +547,13 @@ void re_project_end(re_project *p)
 int re_project_set_in_out(re_project *p, int item, int in, int out)
 {
     re_item it;
-    if (re_project_item(p, item, &it) || it.gap)
+    if (re_project_item(p, item, &it) || it.gap || it.mix)
         return 0;
+    /* (an end in a dissolve stays: the dissolve's length is changed instead) */
+    if (rp_mix_of(p, item - 1))
+        in = it.in;
+    if (rp_mix_of(p, item + 1))
+        out = it.out;
     if (in < 0)
         in = 0;
     if (it.source_length > 0 && out > it.source_length - 1)
@@ -554,13 +563,13 @@ int re_project_set_in_out(re_project *p, int item, int in, int out)
     if (in == it.in && out == it.out)
         return 0;
     if (!p->in_edit)
-        checkpoint(p);
+        rp_checkpoint(p);
     if (mlt_playlist_resize_clip(p->v1, item, in, out)) {
         if (!p->in_edit)
-            no_edit(p);
+            rp_no_edit(p);
         return 0;
     }
-    changed(p);
+    rp_changed(p);
     return 1;
 }
 
@@ -569,15 +578,19 @@ int re_project_move(re_project *p, int item, int before)
     int n = re_project_items(p);
     if (item < 0 || item >= n || before < 0 || before > n || before == item || before == item + 1)
         return -1;
+    /* (not a dissolve, nor a clip in one, nor into one: remove the dissolve first) */
+    if (rp_mix_of(p, item) || rp_mix_of(p, item - 1) || rp_mix_of(p, item + 1) || rp_mix_of(p, before)
+        || rp_mix_of(p, before - 1))
+        return -1;
     int dest = before > item ? before - 1 : before; /* (its index once it's out of its place) */
     if (!p->in_edit)
-        checkpoint(p);
+        rp_checkpoint(p);
     if (mlt_playlist_move(p->v1, item, dest)) {
         if (!p->in_edit)
-            no_edit(p);
+            rp_no_edit(p);
         return -1;
     }
-    changed(p);
+    rp_changed(p);
     return dest;
 }
 
@@ -724,6 +737,7 @@ int re_project_save(re_project *p, const char *file)
         mlt_properties_set(MLT_CONSUMER_PROPERTIES(c), "root", root);
     }
     mlt_properties_set_int(MLT_CONSUMER_PROPERTIES(c), "no_meta", 1);
+    mlt_properties_set(MLT_CONSUMER_PROPERTIES(c), "store", "shotcut"); /* (a tractor's own properties: only these are kept) */
     mlt_consumer_connect(c, MLT_PRODUCER_SERVICE(re_project_producer(p)));
     mlt_consumer_start(c); /* (the xml consumer writes the file here) */
     mlt_consumer_stop(c);
