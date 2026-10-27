@@ -665,6 +665,10 @@ static void overlays(const char *a, const char *b, const char *snd, const char *
           "overlays: the logo: %d %d, place %d, size %d", o.start, o.length, o.place, o.size);
     re_engine_refresh(e);
     int in = luma_xy(e, 5, 290, 20), out_of = luma_xy(e, 5, 200, 20), below = luma_xy(e, 5, 290, 60);
+    luma_xy(e, 5, 0, 0);
+    int edge_in = shown_luma[20 * 320 + 241], edge_out = shown_luma[20 * 320 + 237];
+    CHECK(edge_in > 200 && abs(edge_out - red) <= 4, "overlays: the logo's left edge (x 240): %d at 241, %d at 237",
+          edge_in, edge_out);
     CHECK(in > 200 && abs(out_of - red) <= 4 && abs(below - red) <= 4,
           "overlays: the logo: luma %d in its box, %d left of it, %d below (red %d)", in, out_of, below, red);
     CHECK(re_project_overlay_set(p, 0, RE_PLACE_BOTTOM_LEFT, 30, -1) == 1, "overlays: placed bottom left");

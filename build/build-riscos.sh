@@ -101,7 +101,7 @@ echo "built $O/melt,ff8"
 
 # ---- bench (tools/bench.c): pictures made as Reel Edit's player asks for them
 CC="$RISCOS_TOOLCHAIN/bin/arm-riscos-gnueabihf-gcc"
-"$CC" -O2 $CFLAGS_EXTRA -DMLT_STATIC_DEFINE -I"$STAGE/include/mlt-7" -I"$DK/include" "$TOP/tools/bench.c" -o "$O/bench" \
+"$CC" -O2 $CFLAGS_EXTRA -DMLT_STATIC_DEFINE -I"$STAGE/include/mlt-7" -I"$DK/include" "$TOP/tools/bench.c" "$TOP/src/still.c" -o "$O/bench" \
   -static -L"$STAGE/lib" -L"$DK/lib" -lmlt-static-modules -lmltcore -lmltavformat -lmltxml -lmltnormalize -lmlt-7 -lxml2 \
   $FF_LIBS -lm
 "$RCD_DIR/checks/check-all.sh" "$O/bench" > /dev/null || { "$RCD_DIR/checks/check-all.sh" "$O/bench"; exit 1; }

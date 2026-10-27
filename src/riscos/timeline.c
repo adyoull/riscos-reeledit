@@ -362,19 +362,38 @@ static void text(const char *s, int x, int y, unsigned fg, unsigned bg)
 
 /* A text as it fits a width (OS units) in the desktop font: cut short with
    an ellipsis (RISC OS's character &8C) if it doesn't */
-static void fit_text(char *out, int size, const char *s, int width)
+static int text_width(const char *s)
 {
     _kernel_swi_regs r;
+    r.r[0] = 1; r.r[1] = (intptr_t) s; r.r[2] = 0;
+    return ro_swi(Wimp_TextOp, &r) ? 0 : (int) r.r[0];
+}
+
+static void fit_text(char *out, int size, const char *s, int width)
+{
     snprintf(out, size, "%s", s);
     int n = (int) strlen(out);
-    for (;;) {
-        r.r[0] = 1; r.r[1] = (intptr_t) out; r.r[2] = 0;
-        if (ro_swi(Wimp_TextOp, &r) || (int) r.r[0] <= width || n <= 1)
-            return;
-        n--; /* (a character fewer, and the ellipsis) */
-        out[n - 1] = (char) 0x8C;
-        out[n] = 0;
+    if (n <= 1 || text_width(out) <= width)
+        return;
+    /* the most characters (then the ellipsis) that fit: found by halving,
+       a few Wimp_TextOps rather than one for each character taken off (a
+       long name in a short clip, each time the playhead passed) */
+    char full[256];
+    snprintf(full, sizeof(full), "%s", out);
+    int lo = 0, hi = n - 1; /* (lo characters fit; hi + 1 don't) */
+    while (lo < hi) {
+        int mid = (lo + hi + 1) / 2;
+        memcpy(out, full, (size_t) mid);
+        out[mid] = (char) 0x8C;
+        out[mid + 1] = 0;
+        if (text_width(out) <= width)
+            lo = mid;
+        else
+            hi = mid - 1;
     }
+    memcpy(out, full, (size_t) lo);
+    out[lo] = (char) 0x8C;
+    out[lo + 1] = 0; /* (none fit: the ellipsis alone, as before) */
 }
 
 static void clip(int x0, int y0, int x1, int y1) /* inclusive */
@@ -530,6 +549,18 @@ static void draw_overlays(int ox, int y0, int y1, int f0, int f1, int cx0, int c
     }
 }
 
+/* The first item a redraw from frame f0 needs (the one there, and the one
+   before it: a dissolve's clips run on under it), so a redraw of a strip
+   (the playhead's, as it plays) looks at the items in it, not all of them */
+static int first_item(int f0)
+{
+    int len = re_project_length(A.proj);
+    if (f0 >= len)
+        return re_project_items(A.proj) > 0 ? re_project_items(A.proj) - 1 : 0;
+    int i = re_project_item_at(A.proj, f0 < 0 ? 0 : f0);
+    return i > 0 ? i - 1 : 0;
+}
+
 static void draw(int *b)
 {
     int ox = b[1] - b[5], oy = b[4] - b[6]; /* screen position of work area 0,0 */
@@ -570,10 +601,12 @@ static void draw(int *b)
     rect(cx0, track_y0 - 8, cx1, v2_y1 + 8 - 1);
     draw_overlays(ox, v2_y0, v2_y1, f0, f1, cx0, cy0, cx1, cy1);
     if (A.proj) {
-        for (int i = 0; i < re_project_items(A.proj); i++) {
+        for (int i = first_item(f0); i < re_project_items(A.proj); i++) {
             re_item it;
             re_project_item(A.proj, i, &it);
-            if (it.gap || it.start + it.length < f0 || it.start > f1)
+            if (it.start > f1)
+                break;
+            if (it.gap || it.start + it.length < f0)
                 continue;
             int x0 = ox + x_of(it.start), x1 = ox + x_of(it.start + it.length) - 2;
             if (x1 < x0)
@@ -619,21 +652,25 @@ static void draw(int *b)
         }
     }
     /* the dissolves, over the clips */
-    for (int i = 0; A.proj && i < re_project_items(A.proj); i++) {
+    for (int i = A.proj ? first_item(f0) : 0; A.proj && i < re_project_items(A.proj); i++) {
         re_item it;
         re_project_item(A.proj, i, &it);
-        if (!it.mix || it.start + it.length < f0 || it.start > f1)
+        if (it.start > f1)
+            break;
+        if (!it.mix || it.start + it.length < f0)
             continue;
         int x0 = ox + x_of(it.start), x1 = ox + x_of(it.start + it.length) - 2;
         draw_dissolve(&it, i == A.sel, x0, x1 < x0 ? x0 : x1, track_y0, track_y1, cx0, cy0, cx1, cy1);
     }
     /* the cuts' marks at the track's bottom: a drag there makes a dissolve */
     if (A.proj && T.drag == DRAG_NONE) {
-        for (int i = 0; i + 1 < re_project_items(A.proj); i++) {
+        for (int i = first_item(f0); i + 1 < re_project_items(A.proj); i++) {
             re_item a, b;
             re_project_item(A.proj, i, &a);
             re_project_item(A.proj, i + 1, &b);
-            if (a.gap || a.mix || b.gap || b.mix || b.start < f0 || b.start > f1)
+            if (b.start > f1)
+                break;
+            if (a.gap || a.mix || b.gap || b.mix || b.start < f0)
                 continue;
             int cx = ox + x_of(b.start) - 1;
             colour(0xFFFFFF00);

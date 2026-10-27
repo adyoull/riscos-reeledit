@@ -1,0 +1,229 @@
+From 9eb456da7d9d2fafa83bc072f0280d2c9ed85fac Mon Sep 17 00:00:00 2001
+From: Andrew Youll <andrewyoull86@gmail.com>
+Date: Tue, 27 Oct 2026 22:52:21 +0000
+Subject: [PATCH 9/9] composite: yuv420p pictures composited as they are
+
+Asked for yuv420p, a plain composite (no luma wipe, operator, titles,
+crop, alpha overrides, inverting or fields) now takes the a picture and
+the b picture (with its alpha) as yuv420p and blends each plane where the
+b picture falls: luma by each pixel's alpha, chroma by the average of its
+2x2 pixels, at the geometry's place made even. The yuv422 way converted
+the whole a picture to yuv422 and back for every frame under an overlay
+(and the b picture to yuv422). Anything else still goes the yuv422 way.
+---
+ src/modules/core/transition_composite.c | 177 +++++++++++++++++++++++-
+ 1 file changed, 176 insertions(+), 1 deletion(-)
+
+diff --git a/src/modules/core/transition_composite.c b/src/modules/core/transition_composite.c
+index 1733f25..c12c107 100644
+--- a/src/modules/core/transition_composite.c
++++ b/src/modules/core/transition_composite.c
+@@ -709,15 +709,33 @@ static uint16_t *get_luma(mlt_transition self, mlt_properties properties, int wi
+ /** Get the properly sized image from b_frame.
+ */
+ 
++static int get_b_frame_image_as(mlt_transition self,
++                                mlt_frame b_frame,
++                                uint8_t **image,
++                                int *width,
++                                int *height,
++                                struct geometry_s *geometry,
++                                mlt_image_format format);
++
+ static int get_b_frame_image(mlt_transition self,
+                              mlt_frame b_frame,
+                              uint8_t **image,
+                              int *width,
+                              int *height,
+                              struct geometry_s *geometry)
++{
++    return get_b_frame_image_as(self, b_frame, image, width, height, geometry, mlt_image_yuv422);
++}
++
++static int get_b_frame_image_as(mlt_transition self,
++                                mlt_frame b_frame,
++                                uint8_t **image,
++                                int *width,
++                                int *height,
++                                struct geometry_s *geometry,
++                                mlt_image_format format)
+ {
+     int error = 0;
+-    mlt_image_format format = mlt_image_yuv422;
+ 
+     // Get the properties objects
+     mlt_properties b_props = MLT_FRAME_PROPERTIES(b_frame);
+@@ -943,6 +961,160 @@ static void composite_calculate(mlt_transition self, struct geometry_s *result,
+ /** Get the image.
+ */
+ 
++/* yuv420p: the b picture (yuv420p, with its alpha or opaque) over the a
++   one, both 8-bit planar, at the geometry's place (made even, so the
++   chroma lines up), each plane blended where it falls: luma by the pixel's
++   alpha, chroma by the average of its 2x2 pixels'. As composite_line_yuv
++   mixes (no luma wipe). */
++static void composite_yuv420p(uint8_t *dest,
++                              int width_dest,
++                              int height_dest,
++                              uint8_t *src,
++                              int width_src,
++                              int height_src,
++                              uint8_t *alpha_b,
++                              uint8_t *alpha_a,
++                              const struct geometry_s *g)
++{
++    int weight = ((1 << 16) * g->item.o + 50) / 100;
++    int x = rint(g->item.x * width_dest / g->nw), y = rint(g->item.y * height_dest / g->nh);
++    int sx = 0, sy = 0, w = width_src, h = height_src;
++    x &= ~1;
++    y &= ~1;
++    if (x < 0) {
++        sx = -x;
++        w -= sx;
++        x = 0;
++    }
++    if (y < 0) {
++        sy = -y;
++        h -= sy;
++        y = 0;
++    }
++    if (x + w > width_dest)
++        w = width_dest - x;
++    if (y + h > height_dest)
++        h = height_dest - y;
++    if (w <= 0 || h <= 0 || weight <= 0)
++        return;
++    struct mlt_image_s d, s;
++    mlt_image_set_values(&d, dest, mlt_image_yuv420p, width_dest, height_dest);
++    mlt_image_set_values(&s, src, mlt_image_yuv420p, width_src, height_src);
++    for (int j = 0; j < h; j++) {
++        uint8_t *dp = d.planes[0] + (size_t) (y + j) * d.strides[0] + x;
++        const uint8_t *sp = s.planes[0] + (size_t) (sy + j) * s.strides[0] + sx;
++        const uint8_t *a = alpha_b ? alpha_b + (size_t) (sy + j) * width_src + sx : NULL;
++        uint8_t *aa = alpha_a ? alpha_a + (size_t) (y + j) * width_dest + x : NULL;
++        if (!a && weight >= (1 << 16)) { /* (opaque: a copy) */
++            memcpy(dp, sp, w);
++            if (aa)
++                memset(aa, 255, w);
++            continue;
++        }
++        for (int i = 0; i < w; i++) {
++            int al = a ? a[i] : 255;
++            if (!al)
++                continue; /* (see-through: nothing to do; most of a logo's box) */
++            int mix = (weight * (al + 1)) >> 8;
++            dp[i] = mix >= (1 << 16) ? sp[i] : (sp[i] * mix + dp[i] * ((1 << 16) - mix)) >> 16;
++            if (aa)
++                aa[i] |= mix >> 8;
++        }
++    }
++    int cw = (w + 1) / 2, ch = (h + 1) / 2;
++    if (x / 2 + cw > width_dest / 2)
++        cw = width_dest / 2 - x / 2;
++    if (y / 2 + ch > (height_dest + 1) / 2)
++        ch = (height_dest + 1) / 2 - y / 2;
++    for (int j = 0; j < ch; j++) {
++        int r0 = sy + 2 * j, r1 = r0 + 1 < height_src ? r0 + 1 : r0;
++        uint8_t *du = d.planes[1] + (size_t) (y / 2 + j) * d.strides[1] + x / 2;
++        uint8_t *dv = d.planes[2] + (size_t) (y / 2 + j) * d.strides[2] + x / 2;
++        const uint8_t *su = s.planes[1] + (size_t) (sy / 2 + j) * s.strides[1] + sx / 2;
++        const uint8_t *sv = s.planes[2] + (size_t) (sy / 2 + j) * s.strides[2] + sx / 2;
++        const uint8_t *a0 = alpha_b ? alpha_b + (size_t) r0 * width_src : NULL;
++        const uint8_t *a1 = alpha_b ? alpha_b + (size_t) r1 * width_src : NULL;
++        for (int i = 0; i < cw; i++) {
++            int al = 255;
++            if (a0) {
++                int c0 = sx + 2 * i, c1 = c0 + 1 < width_src ? c0 + 1 : c0;
++                al = (a0[c0] + a0[c1] + a1[c0] + a1[c1] + 2) >> 2;
++                if (!al)
++                    continue;
++            }
++            int mix = (weight * (al + 1)) >> 8;
++            if (mix >= (1 << 16)) {
++                du[i] = su[i];
++                dv[i] = sv[i];
++            } else {
++                du[i] = (su[i] * mix + du[i] * ((1 << 16) - mix)) >> 16;
++                dv[i] = (sv[i] * mix + dv[i] * ((1 << 16) - mix)) >> 16;
++            }
++        }
++    }
++}
++
++/* The yuv420p way (asked for yuv420p, a plain composite: no luma, operator,
++   titles, crop, alpha overrides, inverting or fields): no conversion of
++   either picture to yuv422 and back. 1 done; 0: the yuv422 way instead. */
++static int composite_as_yuv420p(mlt_transition self,
++                                mlt_frame a_frame,
++                                mlt_frame b_frame,
++                                double position,
++                                uint8_t **image,
++                                mlt_image_format *format,
++                                int *width,
++                                int *height)
++{
++    mlt_properties properties = MLT_TRANSITION_PROPERTIES(self);
++    mlt_properties a_props = MLT_FRAME_PROPERTIES(a_frame);
++    static const char *const refuse[] = {"luma", "operator", "crop", "alpha_a", "alpha_b", NULL};
++    if (*format != mlt_image_yuv420p || !b_frame || a_frame == b_frame
++        || mlt_properties_get_int(properties, "invert") || mlt_properties_get_int(properties, "titles")
++        || mlt_properties_get_int(properties, "crop_to_fill") || mlt_properties_get_int(properties, "no_alpha")
++        || mlt_properties_get_int(properties, "deinterlace")
++        || !(mlt_properties_get_int(a_props, "consumer.progressive")
++             || mlt_properties_get_int(properties, "progressive")))
++        return 0;
++    for (int i = 0; refuse[i]; i++)
++        if (mlt_properties_get(properties, refuse[i]))
++            return 0;
++    struct geometry_s result;
++    mlt_profile profile = mlt_service_profile(MLT_TRANSITION_SERVICE(self));
++    int width_b = *width > 0 ? *width : profile->width;
++    int height_b = *height > 0 ? *height : profile->height;
++    mlt_service_lock(MLT_TRANSITION_SERVICE(self));
++    composite_calculate(self, &result, position);
++    mlt_service_unlock(MLT_TRANSITION_SERVICE(self));
++    mlt_image_format fmt = mlt_image_yuv420p;
++    if (mlt_frame_get_image(a_frame, image, &fmt, width, height, 1) || fmt != mlt_image_yuv420p) {
++        *format = fmt;
++        return 1; /* (the a picture as it came: the caller converts it) */
++    }
++    *format = mlt_image_yuv420p;
++    if (result.item.o == 0 || (result.item.w == 0 && result.item.h == 0))
++        return 1;
++    uint8_t *image_b = NULL;
++    mlt_properties b_props = MLT_FRAME_PROPERTIES(b_frame);
++    if (!get_b_frame_image_as(self, b_frame, &image_b, &width_b, &height_b, &result, mlt_image_yuv420p)
++        || !image_b || mlt_properties_get_int(b_props, "format") != mlt_image_yuv420p)
++        return 1;
++    mlt_service_lock(MLT_TRANSITION_SERVICE(self));
++    composite_calculate(self, &result, position);
++    mlt_service_unlock(MLT_TRANSITION_SERVICE(self));
++    alignment_calculate(&result); /* (as the yuv422 way: sw, sh from get_b_frame_image) */
++    composite_yuv420p(*image,
++                      *width,
++                      *height,
++                      image_b,
++                      width_b,
++                      height_b,
++                      mlt_frame_get_alpha(b_frame),
++                      mlt_frame_get_alpha(a_frame),
++                      &result);
++    return 1;
++}
++
+ static int transition_get_image(mlt_frame a_frame,
+                                 uint8_t **image,
+                                 mlt_image_format *format,
+@@ -978,6 +1150,9 @@ static int transition_get_image(mlt_frame a_frame,
+         b_frame = c;
+     }
+ 
++    if (composite_as_yuv420p(self, a_frame, b_frame, position, image, format, width, height))
++        return 0;
++
+     // This compositer is yuv422 only
+     *format = mlt_image_yuv422;
+ 
+-- 
+2.43.0
+

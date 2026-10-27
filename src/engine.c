@@ -502,15 +502,24 @@ static int picture_of(re_engine *e, mlt_frame frame, int position, re_picture *p
 /* Draw a frame: its picture to show(), and its sound. */
 static void render(re_engine *e, int position)
 {
+    unsigned t0 = now_cs(e);
     mlt_frame frame = frame_at(e, position);
+    unsigned t1 = now_cs(e);
+    e->stats.cs_frame += t1 - t0;
     if (!frame)
         return;
     re_picture p;
-    if (!picture_of(e, frame, position, &p, 1))
+    int ok = !picture_of(e, frame, position, &p, 1);
+    unsigned t2 = now_cs(e);
+    e->stats.cs_picture += t2 - t1;
+    if (ok)
         e->io.show(e->io.ctx, &p);
+    unsigned t3 = now_cs(e);
+    e->stats.cs_show += t3 - t2;
     if (!sound_clock(e))
         take_sound(e, frame, position);
     mlt_frame_close(frame);
+    e->stats.cs_sound += now_cs(e) - t3;
     e->shown = position;
     e->stats.rendered++;
 }
@@ -518,11 +527,15 @@ static void render(re_engine *e, int position)
 /* A frame left out: only its sound is taken. */
 static void skip(re_engine *e, int position)
 {
+    unsigned t0 = now_cs(e);
     mlt_frame frame = frame_at(e, position);
+    unsigned t1 = now_cs(e);
+    e->stats.cs_frame += t1 - t0;
     if (frame) {
         take_sound(e, frame, position);
         mlt_frame_close(frame);
     }
+    e->stats.cs_sound += now_cs(e) - t1;
     e->stats.skipped++;
 }
 

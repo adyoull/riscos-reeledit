@@ -75,6 +75,10 @@ typedef struct
     int reverse_fills;  /* runs of frames decoded forwards and kept, to be shown going backwards */
     int clock_moves;    /* times the picture clock was steered to the sound heard */
     int slowed;         /* pictures the clock waited for (decoding slower than playing) */
+    /* where playing's time went (clock_cs, summed: each reading's rounding
+       evens out over many): MLT making a frame (decoding, the tracks, the
+       transitions), its picture (converting, compositing), show(), sound */
+    unsigned cs_frame, cs_picture, cs_show, cs_sound;
 } re_engine_stats;
 
 /* Open a project or clip, at the project's own size and frame rate (a

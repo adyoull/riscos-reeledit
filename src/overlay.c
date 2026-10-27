@@ -64,16 +64,11 @@ int re_project_overlays(re_project *p)
 /* The playlist index of overlay i, or -1 */
 static int entry(re_project *p, int i)
 {
-    int n = re_project_overlays(p);
-    if (i < 0 || i >= n)
-        return -1;
-    int *at = malloc(n * sizeof(int)), e = -1;
-    if (at) {
-        list(p, at, n);
-        e = at[i];
-        free(at);
-    }
-    return e;
+    int k = p->v2 && i >= 0 ? mlt_playlist_count(p->v2) : 0;
+    for (int e = 0; e < k; e++)
+        if (!mlt_playlist_is_blank(p->v2, e) && i-- == 0)
+            return e;
+    return -1;
 }
 
 static int place_of(const char *s)

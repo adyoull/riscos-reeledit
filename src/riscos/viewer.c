@@ -109,6 +109,9 @@ static struct
     int idle_cs;          /* from the engine: -1 nothing to do */
     unsigned poll_cs;     /* when the engine was last polled */
     unsigned last_ctl_cs, log_cs, slept_cs, log_slept;
+    /* (where the desktop's time went while playing: the Timeline's redraws,
+       the Viewer's controls; cs, summed) */
+    unsigned tl_cs, ctl_cs, log_tl, log_ctl;
     re_engine_stats log_st;
     int log_nulls;
     char log_decoder[32];
@@ -1275,7 +1278,9 @@ static void redraw(int *b)
 {
     _kernel_swi_regs r;
     if (b[0] == tl_window()) {
+        unsigned t0 = ro_now_cs();
         tl_redraw(b);
+        V.tl_cs += ro_now_cs() - t0;
         return;
     }
     if (info_window() && b[0] == info_window()) {
@@ -1504,7 +1509,9 @@ static void tick(void)
         update_controls(0);
     } else if (t - V.last_ctl_cs >= 20) {
         V.last_ctl_cs = t;
+        unsigned c0 = ro_now_cs();
         update_controls(0);
+        V.ctl_cs += ro_now_cs() - c0;
         /* a window or menu opened over the picture: the next picture (within
            a frame) is drawn in the window */
         re_display_check_covered();
@@ -1525,6 +1532,15 @@ static void tick(void)
                 st.slowed - V.log_st.slowed, st.resyncs - V.log_st.resyncs, (t - V.log_cs) / 100.0, V.log_nulls,
                 (V.slept_cs - V.log_slept) * 100 / (t - V.log_cs), ds.overlay_pictures, ds.sprite_pictures,
                 ds.overlay_waited, ds.overlay_skipped, re_sound_queued(V.snd), re_sound_refused(V.snd));
+        int made = st.rendered - V.log_st.rendered;
+        if (made > 0) /* (where the time went: ms a picture made) */
+            app_log("  time a picture: frame %.1f ms, picture %.1f, show %.1f, sound %.1f; Timeline drawn %.1f, "
+                    "controls %.1f",
+                    (st.cs_frame - V.log_st.cs_frame) * 10.0 / made, (st.cs_picture - V.log_st.cs_picture) * 10.0 / made,
+                    (st.cs_show - V.log_st.cs_show) * 10.0 / made, (st.cs_sound - V.log_st.cs_sound) * 10.0 / made,
+                    (V.tl_cs - V.log_tl) * 10.0 / made, (V.ctl_cs - V.log_ctl) * 10.0 / made);
+        V.log_tl = V.tl_cs;
+        V.log_ctl = V.ctl_cs;
         V.log_st = st;
         V.log_cs = t;
         V.log_nulls = 0;

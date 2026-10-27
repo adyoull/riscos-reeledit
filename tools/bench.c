@@ -14,6 +14,7 @@
  * decoder being handed over) and the slowest, and the first picture
  * separately (opening and the first decode).
  */
+#include "../src/still.h"
 #include <framework/mlt.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -132,6 +133,7 @@ int main(int argc, char **argv)
     mlt_static_modules_register();
 #endif
     mlt_factory_init(NULL);
+    re_still_register(); /* (pictures as Reel Edit reads them) */
     mlt_log_set_level(MLT_LOG_INFO);
     mlt_profile profile = mlt_profile_init(NULL);
     mlt_producer producer = mlt_factory_producer(profile, NULL, argv[1]);
@@ -157,6 +159,7 @@ int main(int argc, char **argv)
         double t0 = now();
         mlt_producer_seek(producer, i);
         mlt_frame frame = mlt_consumer_get_frame(consumer);
+        mlt_properties_set_int(MLT_FRAME_PROPERTIES(frame), "consumer.source_colours", 1); /* (as Reel Edit's player) */
         mlt_image_format format = mlt_image_yuv420p;
         int w = w0, h = h0;
         uint8_t *image = NULL;
