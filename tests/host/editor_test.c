@@ -566,6 +566,7 @@ static void next(int p)
 }
 
 static char saved_layout[256];
+static int menus_mark;
 static int plots_mark, ovd_mark, ssb_mark, closes_mark, pos_mark, pos_min = 1000, mark, scroll_mark;
 
 static int script(int *b, int mask)
@@ -1178,20 +1179,20 @@ static int script(int *b, int mask)
             return 0;
         CHECK(!strcmp(layout(), "c30 c75"), "undoing D: %s", layout());
         mark = drags;
-        /* (the cut's corner: the top of the track, at the cut) */
-        b[0] = W[1].box[0] - W[1].scroll_x + 16 + 30 * 4 + 2; b[1] = W[1].box[3] - 48 - 8 - 10; b[2] = 0x40;
+        /* (the cut's mark: the bottom of the track, at the cut) */
+        b[0] = W[1].box[0] - W[1].scroll_x + 16 + 30 * 4 + 2; b[1] = W[1].box[3] - 48 - 8 - 128 + 10; b[2] = 0x40;
         b[3] = TL; b[4] = -1;
         ptr[0] = b[0] + 10 * 4; ptr[1] = b[1];
         next(119);
         return 6;
-    case 119:
-        if (strcmp(layout(), "c20 m10 c65")) {
+    case 119: /* (the pointer resting: the Viewer shows the dissolve's middle) */
+        if (strcmp(layout(), "c20 m10 c65") || pos < 20 || pos >= 30) {
             if (fake_cs - phase_cs > 100)
-                fail_quit("dragging from a cut's corner 10 frames: no dissolve (%s, drags %d)", layout(), drags - mark);
+                fail_quit("dragging from a cut's mark 10 frames: %s, drags %d, at %d (not in the dissolve)", layout(),
+                          drags - mark, pos);
             return 0;
         }
-        CHECK(re_test_selected() == 1 && pos >= 20 && pos < 30, "dragging a dissolve: selected %d, at %d (not in it)",
-              re_test_selected(), pos);
+        CHECK(re_test_selected() == 1, "dragging a dissolve: selected %d", re_test_selected());
         shot("12-dissolve-by-dragging");
         next(120);
         return 7; /* dropped */
@@ -1256,11 +1257,29 @@ static int script(int *b, int mask)
         re_project_item(re_test_project(), 1, &it);
         CHECK(it.fade_out == 25 && it.fade_in == 0, "Edit > Fade out: fades %d, %d", it.fade_in, it.fade_out);
         shot("13-fade-out");
+        next(140);
+        menus_mark = menus;
+        return click_tl(b, 15, 0, 2); /* Menu over the first clip: its context menu */
+    }
+    /* ---- the context menu: Fade in on the first clip; its box's edge dragged; one undo ---- */
+    case 140:
+        CHECK(menus == menus_mark + 1 && re_test_selected() == 0, "Menu over a clip: menus %d, selected %d",
+              menus - menus_mark, re_test_selected());
+        shot("15-clip-context-menu");
+        next(141);
+        b[0] = 0; b[1] = -1; /* Fade in */
+        return 9;
+    case 141: {
+        if (nulls)
+            return 0;
+        re_item it;
+        re_project_item(re_test_project(), 0, &it);
+        CHECK(it.fade_in == 25, "the context menu's Fade in: %d", it.fade_in);
         mark = drags;
-        /* the first clip's fade handle: the top of its start (the project's start) */
-        b[0] = W[1].box[0] - W[1].scroll_x + 16 + 2; b[1] = W[1].box[3] - 48 - 8 - 6; b[2] = 0x40;
+        /* its box's inner edge (frame 25), at the top of the track; dragged to frame 10 */
+        b[0] = W[1].box[0] - W[1].scroll_x + 16 + 25 * 4 - 2; b[1] = W[1].box[3] - 48 - 8 - 10; b[2] = 0x40;
         b[3] = TL; b[4] = -1;
-        ptr[0] = b[0] + 10 * 4; ptr[1] = b[1];
+        ptr[0] = b[0] - 15 * 4; ptr[1] = b[1];
         next(130);
         return 6;
     }
@@ -1269,7 +1288,7 @@ static int script(int *b, int mask)
         re_project_item(re_test_project(), 0, &it);
         if (it.fade_in != 10) {
             if (fake_cs - phase_cs > 100)
-                fail_quit("dragging a fade handle 10 frames: fade %d (drags %d)", it.fade_in, drags - mark);
+                fail_quit("dragging a fade's box's edge back 15 frames: fade %d (drags %d)", it.fade_in, drags - mark);
             return 0;
         }
         CHECK(!strcmp(layout(), "c30 c75"), "a fade dragged changed the clips: %s", layout());
@@ -1288,7 +1307,120 @@ static int script(int *b, int mask)
         re_item it, it1;
         re_project_item(re_test_project(), 0, &it);
         re_project_item(re_test_project(), 1, &it1);
-        CHECK(it.fade_in == 0 && it1.fade_out == 25, "one F8 for a fade dragged: %d, %d", it.fade_in, it1.fade_out);
+        CHECK(it.fade_in == 25 && it1.fade_out == 25, "one F8 for a fade dragged: %d, %d", it.fade_in, it1.fade_out);
+        next(142);
+        return click_tl(b, 15, 0, 2);
+    }
+    case 142:
+        next(143);
+        b[0] = 0; b[1] = -1; /* Fade in again: taken away */
+        return 9;
+    case 143: {
+        if (nulls)
+            return 0;
+        re_item it;
+        re_project_item(re_test_project(), 0, &it);
+        CHECK(it.fade_in == 0, "the context menu's Fade in again: %d (not taken away)", it.fade_in);
+        next(144);
+        return click_tl(b, 15, 0, 2);
+    }
+    case 144:
+        next(145);
+        b[0] = 3; b[1] = -1; /* Dissolve into the clip after */
+        return 9;
+    case 145:
+        if (nulls)
+            return 0;
+        CHECK(!strcmp(layout(), "c30 m25 c50") && re_test_selected() == 1, "the context menu's dissolve: %s, sel %d",
+              layout(), re_test_selected());
+        next(146);
+        return click_tl(b, 40, 0, 2); /* Menu over the dissolve */
+    case 146:
+        next(147);
+        b[0] = 0; b[1] = -1; /* Delete */
+        return 9;
+    case 147:
+        if (nulls)
+            return 0;
+        CHECK(!strcmp(layout(), "c30 c75"), "the dissolve's context menu: Delete: %s", layout());
+        next(148);
+        return click_tl(b, 60, 0, 2);
+    case 148:
+        next(149);
+        b[0] = 0; b[1] = -1; /* Fade in on the second clip, where it meets the first */
+        return 9;
+    case 149:
+        if (nulls)
+            return 0;
+        next(134);
+        return click_tl(b, 50, 1, 0x400);
+    /* the second clip's fade (where it meets the first) dragged a frame at a time: the box follows each step,
+       the Viewer's picture only once the pointer rests */
+    case 134: {
+        if (nulls)
+            return 0;
+        re_item it;
+        re_project_item(re_test_project(), 1, &it);
+        CHECK(pos == 50 && it.fade_in == 25, "the second clip's fade in: %d, at %d", it.fade_in, pos);
+        mark = drags;
+        b[0] = W[1].box[0] - W[1].scroll_x + 16 + (30 + 25) * 4 - 2; b[1] = W[1].box[3] - 48 - 8 - 10; b[2] = 0x40;
+        b[3] = TL; b[4] = -1;
+        ptr[0] = b[0]; ptr[1] = b[1];
+        scroll_mark = 0;
+        next(135);
+        return 6;
+    }
+    case 135: {
+        re_item it;
+        re_project_item(re_test_project(), 1, &it);
+        if (scroll_mark > 0)
+            CHECK(it.fade_in <= 25 - scroll_mark + 1 && pos == 50,
+                  "a fade dragged a frame a step: step %d, fade %d, at %d (the picture made while moving)", scroll_mark,
+                  it.fade_in, pos);
+        if (scroll_mark < 8) {
+            scroll_mark++;
+            ptr[0] -= 4; /* (a frame back) */
+            if (!nulls)
+                fail_quit("no null events while dragging a fade");
+            return 0;
+        }
+        CHECK(drags == mark + 1 && it.fade_in <= 18, "the second clip's fade at the cut, dragged: fade %d", it.fade_in);
+        next(136);
+        return 0;
+    }
+    case 136: { /* (resting: the fade's middle shown) */
+        re_item it;
+        re_project_item(re_test_project(), 1, &it);
+        if (pos == 50) {
+            if (fake_cs - phase_cs > 100)
+                fail_quit("the pointer rested, but the Viewer didn't show the fade (at %d)", pos);
+            return 0;
+        }
+        CHECK(pos >= 30 && pos < 30 + it.fade_in, "rested: at %d, not in the fade (30, %d frames)", pos, it.fade_in);
+        next(137);
+        return 7;
+    }
+    case 137:
+        if (nulls)
+            return 0;
+        next(138);
+        return key_to(b, TL, 0x188);
+    case 138: {
+        if (nulls)
+            return 0;
+        re_item it;
+        re_project_item(re_test_project(), 1, &it);
+        CHECK(it.fade_in == 25 && it.fade_out == 25, "undoing the drag of the fade at the cut: %d, %d", it.fade_in,
+              it.fade_out);
+        next(139);
+        return key_to(b, TL, 0x188);
+    }
+    case 139: {
+        if (nulls)
+            return 0;
+        re_item it;
+        re_project_item(re_test_project(), 1, &it);
+        CHECK(it.fade_in == 0, "undoing the context menu's fade in: %d", it.fade_in);
         next(133);
         return click_tl(b, 50, 1, 0x400);
     }

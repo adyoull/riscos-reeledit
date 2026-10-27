@@ -26,6 +26,7 @@
  * Part of riscos-reeledit. GPL version 2 or later.
  */
 #include "app.h"
+#include "menu.h"
 #include "../measure.h"
 #include "display.h"
 #include "sound.h"
@@ -663,7 +664,7 @@ static void engine_open(void)
         re_display_place(V.win, V.pic);
 }
 
-void app_edited(void)
+static void edited(int picture)
 {
     if (!A.proj)
         return;
@@ -672,8 +673,10 @@ void app_edited(void)
         engine_close();
     } else if (!A.e) {
         engine_open();
-    } else {
+    } else if (picture) {
         re_engine_refresh(A.e);
+    } else {
+        re_engine_invalidate(A.e);
     }
     if (A.sel >= re_project_items(A.proj))
         A.sel = -1;
@@ -681,6 +684,16 @@ void app_edited(void)
     info_edited();
     update_title();
     update_controls(1);
+}
+
+void app_edited(void)
+{
+    edited(1);
+}
+
+void app_edited_dragging(void)
+{
+    edited(0);
 }
 
 void app_saved(const char *path)
@@ -941,46 +954,13 @@ static void split(void)
         app_edited();
 }
 
-/* D: a dissolve, a second long, at the cut between two clips nearest the
-   playhead (from the clips' frames beyond the cut if they have them, the
-   project's length kept; else overlapping them). Selected: Delete takes it
-   out, its ends drag. */
-static void dissolve_at_cut(void)
+void app_delete(int item, int ripple)
 {
-    if (!A.proj)
-        return;
-    int c = re_project_dissolve_cut(A.proj, app_position());
-    int m = c < 0 ? -1 : re_project_dissolve(A.proj, c, re_project_frames(A.proj, 1.0), 0);
-    re_item it;
-    if (m < 0 || re_project_item(A.proj, m, &it))
-        return;
-    app_log("dissolve: %d frames from %d", it.length, it.start);
-    A.sel = m;
-    app_edited();
-    app_seek(it.start);
-}
-
-/* Edit > Fade in, Fade out: the selected clip's fade, a second long, or
-   taken away if it has one (the Timeline's fade handles change the length) */
-static void fade_toggle(int end)
-{
-    re_item it;
-    if (!A.proj || A.sel < 0 || re_project_item(A.proj, A.sel, &it))
-        return;
-    int has = end ? it.fade_out : it.fade_in;
-    if (re_project_fade(A.proj, A.sel, end, has ? 0 : re_project_frames(A.proj, 1.0))) {
-        app_log("fade %s: %s", end ? "out" : "in", has ? "taken away" : "made");
-        app_edited();
-    }
-}
-
-static void delete_selected(int ripple)
-{
-    if (!A.proj || A.sel < 0)
+    if (!A.proj || item < 0)
         return;
     re_item it;
-    re_project_item(A.proj, A.sel, &it);
-    if (re_project_remove(A.proj, A.sel, ripple)) {
+    re_project_item(A.proj, item, &it);
+    if (re_project_remove(A.proj, item, ripple)) {
         A.sel = -1;
         app_edited();
         app_seek(it.start);
@@ -1010,27 +990,6 @@ static void save(int x, int y)
 
 /* ---- the menu ------------------------------------------------------------------------------------ */
 
-/* Menus: indirected items (the texts longer than 12 characters) */
-typedef struct
-{
-    int flags;          /* bit 0 ticked, bit 7 the last */
-    intptr_t sub;       /* a submenu, or -1 */
-    int iflags;
-    const char *text;
-    const char *valid;
-    int len;
-} menu_item;
-#define MENU(n)                                                                                                    \
-    struct                                                                                                         \
-    {                                                                                                              \
-        char title[12];                                                                                            \
-        unsigned char tfg, tbg, wfg, wbg;                                                                          \
-        int w, h, gap;                                                                                             \
-        menu_item item[n];                                                                                         \
-    }
-#define ITEM_FLAGS 0x07000121 /* text, filled, indirected, black on white */
-#define SHADED     (1 << 22)
-#define IT(t) ITEM_FLAGS, t, (const char *) -1, sizeof(t)
 
 static MENU(3) m_file = {"File", 7, 2, 7, 0, 280, 44, 0,
                          {{0, -1, IT("New")}, {0, -1, IT("Save          F3")}, {0x80, -1, IT("Save as...")}}};
@@ -1054,13 +1013,8 @@ static MENU(5) m_main = {"Reel Edit", 7, 2, 7, 0, 340, 44, 0,
                           {0x80, -1, IT("Video information...")}}};
 static MENU(2) m_bar = {"Reel Edit", 7, 2, 7, 0, 160, 44, 0,
                         {{0, -1, IT("Info")}, {0x80, -1, IT("Quit")}}};
-static int menu_is; /* 0 none, 1 the icon bar's, 2 the editor's */
+static int menu_is; /* 0 none, 1 the icon bar's, 2 the editor's, 3 the Timeline's context menu (effects.c) */
 static int menu_x, menu_y;
-
-static void shade(int *iflags, int off)
-{
-    *iflags = off ? (*iflags | SHADED) : (*iflags & ~SHADED);
-}
 
 void app_menu(int x, int y)
 {
@@ -1070,30 +1024,30 @@ void app_menu(int x, int y)
     m_main.item[2].sub = (intptr_t) &m_play;
     m_main.item[3].sub = (intptr_t) &m_view;
     int has = A.proj && re_project_length(A.proj) > 0;
-    shade(&m_file.item[1].iflags, !has);
-    shade(&m_file.item[2].iflags, !has);
-    shade(&m_edit.item[0].iflags, !A.proj || !re_project_can_undo(A.proj));
-    shade(&m_edit.item[1].iflags, !A.proj || !re_project_can_redo(A.proj));
+    menu_shade(&m_file.item[1].iflags, !has);
+    menu_shade(&m_file.item[2].iflags, !has);
+    menu_shade(&m_edit.item[0].iflags, !A.proj || !re_project_can_undo(A.proj));
+    menu_shade(&m_edit.item[1].iflags, !A.proj || !re_project_can_redo(A.proj));
     for (int i = 2; i <= 4; i++)
-        shade(&m_edit.item[i].iflags, !has);
-    shade(&m_edit.item[5].iflags, !A.proj || re_project_dissolve_cut(A.proj, app_position()) < 0);
+        menu_shade(&m_edit.item[i].iflags, !has);
+    menu_shade(&m_edit.item[5].iflags, !A.proj || re_project_dissolve_cut(A.proj, app_position()) < 0);
     re_item sel;
     int clip = A.proj && A.sel >= 0 && !re_project_item(A.proj, A.sel, &sel) && !sel.gap && !sel.mix;
     for (int i = 6; i <= 7; i++) { /* (ticked: it has one) */
-        shade(&m_edit.item[i].iflags, !clip);
+        menu_shade(&m_edit.item[i].iflags, !clip);
         m_edit.item[i].flags = (m_edit.item[i].flags & ~1) | (clip && (i == 6 ? sel.fade_in : sel.fade_out) ? 1 : 0);
     }
     for (int i = 8; i <= 10; i++)
-        shade(&m_edit.item[i].iflags, A.sel < 0);
+        menu_shade(&m_edit.item[i].iflags, A.sel < 0);
     m_view.item[4].flags = (m_view.item[4].flags & ~1) | (A.snap ? 1 : 0);
     for (int i = 0; i < 3; i++)
-        shade(&m_play.item[i].iflags, !has);
+        menu_shade(&m_play.item[i].iflags, !has);
     snprintf(play_item, sizeof(play_item), "%s", A.e && re_engine_speed(A.e) != 0 ? "Stop           Space"
                                                                                 : "Play           Space");
     for (int i = 0; i < 3; i++)
-        shade(&m_view.item[i].iflags, !has);
+        menu_shade(&m_view.item[i].iflags, !has);
     m_view.item[3].flags = (m_view.item[3].flags & ~1) | (A.attached ? 1 : 0); /* ticked */
-    shade(&m_main.item[4].iflags, !has);
+    menu_shade(&m_main.item[4].iflags, !has);
     menu_is = 2;
     menu_x = x;
     menu_y = y;
@@ -1104,10 +1058,21 @@ void app_menu(int x, int y)
     re_display_check_covered();
 }
 
+void app_context_menu(int x, int y, int item)
+{
+    menu_is = 3;
+    fx_menu_open(x, y, item);
+    re_display_check_covered();
+}
+
 static void menu_select(int *b)
 {
     _kernel_swi_regs r;
     int p[5];
+    if (menu_is == 3) {
+        fx_menu_select(b);
+        return;
+    }
     if (menu_is == 1) {
         if (b[0] == 0) {
             char text[200];
@@ -1137,11 +1102,11 @@ static void menu_select(int *b)
         case 2: split(); break;
         case 3: trim(0); break;
         case 4: trim(1); break;
-        case 5: dissolve_at_cut(); break;
-        case 6: fade_toggle(0); break;
-        case 7: fade_toggle(1); break;
-        case 8: delete_selected(1); break;
-        case 9: delete_selected(0); break;
+        case 5: fx_dissolve_at_cut(); break;
+        case 6: fx_fade_toggle(A.sel, 0); break;
+        case 7: fx_fade_toggle(A.sel, 1); break;
+        case 8: app_delete(A.sel, 1); break;
+        case 9: app_delete(A.sel, 0); break;
         case 10: tl_select(-1); break;
         }
         break;
@@ -1203,7 +1168,7 @@ int app_key(int k)
     case 0x1E: app_seek(0); return 1;             /* Home */
     case 0x18B: if (A.e) app_seek(re_engine_length(A.e) - 1); return 1; /* Copy (End) */
     case 's': case 'S': split(); return 1;
-    case 0x7F: case 8: delete_selected(!shift_down()); return 1; /* Delete, Backspace */
+    case 0x7F: case 8: app_delete(A.sel, !shift_down()); return 1; /* Delete, Backspace */
     case '+': case '=': tl_zoom(1); return 1;
     case '-': case '_': tl_zoom(0); return 1;
     case 0x1A: tl_select(-1); return 1;           /* ^Z: clear the selection */
@@ -1212,7 +1177,7 @@ int app_key(int k)
     case 0x18F: to_cut(-1); return 1;             /* Up: the cut before */
     case 0x18E: to_cut(1); return 1;              /* Down: the cut after */
     case 'q': case 'Q': trim(0); return 1;
-    case 'd': case 'D': dissolve_at_cut(); return 1;
+    case 'd': case 'D': fx_dissolve_at_cut(); return 1;
     case 'w': case 'W': trim(1); return 1;
     case 'n': case 'N': snap_toggle(); return 1;
     case 'Z': case '\\': tl_zoom(-1); return 1;    /* Shift-Z, \\: the whole project */
@@ -1298,7 +1263,7 @@ static void click(int *b)
     case I_FWD: app_seek(pos + ((buttons & 1) ? fps1 : 1)); break;
     case I_END: if (A.e) app_seek(re_engine_length(A.e) - 1); break;
     case I_SPLIT: split(); break;
-    case I_DELETE: delete_selected(!(buttons & 1)); break; /* Adjust: leaving a gap */
+    case I_DELETE: app_delete(A.sel, !(buttons & 1)); break; /* Adjust: leaving a gap */
     case I_ZOOMOUT: tl_zoom(0); break;
     case I_ZOOMIN: tl_zoom(1); break;
     case I_FIT: tl_zoom(-1); break;
@@ -1342,9 +1307,8 @@ static const char *help_for(int win, int icon)
         return "This is the Timeline.|MClick or drag on the ruler (the strip with the times) to move the playhead; "
                "click a clip to select it "
                "(Adjust: select or not).|MDrag a clip's edge to trim it, its middle to move it.|M"
-               "Drag from the white mark at the top of a cut to make a dissolve there; drag a dissolve's ends to "
-               "change its length.|MDrag the small white square at the top of a clip's end to fade it in or "
-               "out.|M"
+               "Menu over a clip gives its effects (fades, dissolves); drag an effect's edge to change its "
+               "length.|M"
                "Ctrl and the scroll wheel zoom; N turns snapping to cuts on or off.";
     if (win == -2)
         return "This is the Reel Edit icon.|MClick Select to open the editor; drop video files on it to add them "

@@ -41,24 +41,27 @@ and the Viewer shows the frame at the edge as you drag. Drag the middle of
 a clip to move it: a line shows where it will go (the nearest cut), and it
 goes there when you let go. Each drag is one step for Undo (F8).
 
-Dissolves (one shot fading into the next): at each cut between two clips
-there's a small white mark at the top of the track. Drag from it, left or
-right: the clips overlap by as far as you drag, and the overlap becomes a
-dissolve (shown as a band with a diagonal), the project that much
-shorter; the Viewer shows its middle as you drag. Or press D (Edit >
-Dissolve at the cut): a dissolve a second long at the cut nearest the
-playhead, made from the clips' frames beyond the cut if they have any
-(trimmed clips do), so nothing moves. Click a dissolve to select it, drag
-its ends to make it longer or shorter, Delete takes it out (the clips as
-they were). The sound crossfades too.
-
-Fades (from black at a clip's start, to black at its end; the sound
-fades too): where a clip's end doesn't meet another clip (the start or
-the end of the project, or beside a gap) there's a small white square at
-the top of the clip. Drag it along the clip: the fade is as long as you
-drag, shown as a dark wedge. Or select a clip and use Edit > Fade in or
-Fade out (a second; again takes it away). A fade stays at the clip's end
-as you trim it; at an end in a dissolve there's none.
+Effects (fades and dissolves): press Menu over a clip on the Timeline
+for its own menu ("Clip"):
+  Fade in, Fade out   a fade from black at its start, or to black at its
+                      end, a second long (ticked when it has one: choose
+                      it again to take it away); the sound fades too
+  Dissolve from the clip before, Dissolve into the clip after
+                      a dissolve a second long at that cut (the one shot
+                      fading into the other, the sound crossfading), made
+                      from the clips' frames beyond the cut if they have
+                      any (trimmed clips do), so nothing moves
+  Delete, Video information...
+Each effect is shown as a box of its own over the part of the clip it
+covers: a fade along the top of the clip, a dissolve as a band with a
+diagonal between the two clips. Drag a fade's box by its white inner edge,
+or a dissolve's ends, to make it longer or shorter; the Viewer shows its
+middle when you stop moving. Menu over a dissolve: Delete takes it out
+(the clips as they were); or click it and press Delete. Also: D (Edit >
+Dissolve at the cut) puts a dissolve at the cut nearest the playhead, and
+dragging from the small white mark at the bottom of a cut overlaps the
+clips by as far as you drag, the overlap a dissolve. A fade stays at the
+clip's end as you trim it; at an end in a dissolve there's none.
 
 The Timeline: the playhead moves only from the ruler (the strip with the
 times along the top). Click the ruler to move the playhead there (the

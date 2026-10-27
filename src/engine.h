@@ -90,6 +90,10 @@ re_engine *re_engine_open_producer(struct mlt_profile_s *profile, struct mlt_pro
 /* The producer has changed (an edit): its length read again, the frames
    kept for going backwards forgotten, and stopped, the picture made again. */
 void re_engine_refresh(re_engine *e);
+/* As re_engine_refresh, but the picture on show isn't made again (unless
+   it's now past the end): for edits made many times a second (a drag),
+   where decoding a picture each time would hold the desktop up. */
+void re_engine_invalidate(re_engine *e);
 void re_engine_close(re_engine *e);
 
 int re_engine_length(re_engine *e);  /* frames */

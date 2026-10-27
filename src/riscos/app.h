@@ -6,6 +6,9 @@
  *   timeline.c  the Timeline window: ruler, playhead, V1's clips
  *   savebox.c   the Save as box (a draggable file icon, as every RISC OS
  *               program's)
+ *   effects.c   fades and dissolves from the menus; the Timeline's context menu
+ *   info.c      the Video information window
+ *   display.c, sound.c   the picture (overlay or sprite) and the sound
  *
  * Part of riscos-reeledit. GPL version 2 or later.
  */
@@ -35,6 +38,10 @@ void app_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 void app_report(const char *text);
 /* The project was edited: the engine sees it, the windows show it. */
 void app_edited(void);
+/* The same, in the middle of a drag (each step of it): the Viewer's
+   picture isn't made again (the Timeline asks for one when the pointer
+   rests), so the desktop keeps up with the pointer. */
+void app_edited_dragging(void);
 /* Saved: the title loses its star. */
 void app_saved(const char *path);
 int app_position(void);   /* the frame on show (0 when empty) */
@@ -47,6 +54,10 @@ void app_load(const char *path, int filetype, int frame);
 int app_key(int key);
 /* The editor's menu, at the pointer. */
 void app_menu(int x, int y);
+/* The Timeline's context menu for an item (effects.c's), at the pointer. */
+void app_context_menu(int x, int y, int item);
+/* An item removed (ripple: what follows closes up; else a gap is left). */
+void app_delete(int item, int ripple);
 /* The Unix name MLT wants for a RISC OS one. */
 const char *app_mlt_name(const char *path, char *buf, int size);
 void app_timecode(char *buf, int size, int frame);
@@ -71,6 +82,13 @@ void tl_drag_end(int *block);
 /* Scroll_Request: the wheel scrolls the Timeline sideways; Ctrl+wheel zooms
    about the pointer */
 void tl_scroll(int *block);
+
+/* ---- effects.c: fades and dissolves, from the menus ---- */
+int fx_fade_toggle(int item, int end);   /* a clip's fade (end 0 in, 1 out), a second; or taken away. 1 changed */
+int fx_dissolve(int before);             /* a second's dissolve at the cut after item `before`: its index, or -1 */
+int fx_dissolve_at_cut(void);            /* D: at the cut nearest the playhead */
+void fx_menu_open(int x, int y, int item);
+void fx_menu_select(int *block);
 
 /* ---- info.c ---- */
 void info_open(void);          /* Video information: the selected clip (or the one at the playhead), the project */

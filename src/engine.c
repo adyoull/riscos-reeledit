@@ -234,17 +234,27 @@ re_engine *re_engine_open_producer(mlt_profile profile, mlt_producer producer, d
     return setup(e, preview_scale);
 }
 
-void re_engine_refresh(re_engine *e)
+static void refresh(re_engine *e, int picture)
 {
     e->length = mlt_producer_get_length(e->producer);
     for (int i = 0; i < RC_SLOTS; i++)
         e->rc[i].pos = -1; /* (what was kept may have changed) */
     e->rc_end = -1;
     int at = re_engine_position(e);
-    if (e->speed == 0)
-        re_engine_seek(e, at < 0 ? 0 : at); /* the picture again, as it is now */
-    else if (at >= e->length)
+    if (at >= e->length)
         re_engine_seek(e, e->length - 1);
+    else if (e->speed == 0 && picture)
+        re_engine_seek(e, at < 0 ? 0 : at); /* the picture again, as it is now */
+}
+
+void re_engine_refresh(re_engine *e)
+{
+    refresh(e, 1);
+}
+
+void re_engine_invalidate(re_engine *e)
+{
+    refresh(e, 0);
 }
 
 static re_engine *setup(re_engine *e, double preview_scale)
