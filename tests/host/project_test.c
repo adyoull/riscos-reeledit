@@ -37,12 +37,18 @@ static int fails;
 static int shown_y = -1, shown_pos = -1, shown_w, shown_h, shown_cs;
 static double shown_dar;
 static uint8_t shown_luma[320 * 180]; /* (the picture's luma, when it's 320x180) */
+static uint8_t shown_cb[160 * 90], shown_cr[160 * 90]; /* (and its chroma) */
 static void show(void *ctx, const re_picture *p)
 {
     (void) ctx;
     if (p->width == 320 && p->height == 180)
-        for (int y = 0; y < 180; y++)
+        for (int y = 0; y < 180; y++) {
             memcpy(shown_luma + y * 320, p->planes[0] + y * p->strides[0], 320);
+            if (y < 90) {
+                memcpy(shown_cb + y * 160, p->planes[1] + y * p->strides[1], 160);
+                memcpy(shown_cr + y * 160, p->planes[2] + y * p->strides[2], 160);
+            }
+        }
     shown_w = p->width;
     shown_h = p->height;
     shown_cs = p->colorspace;
@@ -565,6 +571,18 @@ static void stills(const char *full)
     CHECK(img && w == 160 && h == 90 && img[(45 * 160 + 40) * 4 + 3] == 0 && img[(45 * 160 + 120) * 4 + 3] == 255,
           "stills: smaller: %dx%d", w, h);
     mlt_frame_close(f);
+    /* the rescale filter's way: asked at its own size, told the size wanted (made so: nothing scaled after) */
+    mlt_producer bare = mlt_factory_producer(prof, "qimage", (char *) full); /* (no loader: no filters) */
+    f = NULL;
+    mlt_service_get_frame(MLT_PRODUCER_SERVICE(bare), &f, 0);
+    mlt_properties_set_int(MLT_FRAME_PROPERTIES(f), "rescale_width", 80);
+    mlt_properties_set_int(MLT_FRAME_PROPERTIES(f), "rescale_height", 46);
+    fmt = mlt_image_rgba;
+    w = 320, h = 180;
+    mlt_frame_get_image(f, &img, &fmt, &w, &h, 0);
+    CHECK(w == 80 && h == 46, "stills: rescale_width asked for 80x46: %dx%d", w, h);
+    mlt_frame_close(f);
+    mlt_producer_close(bare);
     mlt_producer_close(pic);
     mlt_profile_close(prof);
 }
@@ -597,8 +615,18 @@ static void overlays(const char *a, const char *b, const char *snd, const char *
           "overlays: added: %d %d, place %d, opacity %d, \"%s\"", o.start, o.length, o.place, o.opacity, o.name);
     CHECK(re_project_length(p) == 150, "overlays: the project's length: %d", re_project_length(p));
     re_engine_refresh(e);
+    luma_xy(e, 5, 80, 90);
+    int cb0 = shown_cb[45 * 160 + 40], cr0 = shown_cr[45 * 160 + 40]; /* (red's colour, no overlay) */
     int l = luma_xy(e, 20, 80, 90), r = luma_xy(e, 20, 240, 90), before = luma_xy(e, 5, 240, 90),
         after = luma_xy(e, 140, 240, 90);
+    luma_xy(e, 20, 80, 90);
+    CHECK(abs(shown_cb[45 * 160 + 40] - cb0) <= 3 && abs(shown_cr[45 * 160 + 40] - cr0) <= 3
+              && abs(shown_cb[45 * 160 + 120] - 128) <= 3 && abs(shown_cr[45 * 160 + 120] - 128) <= 3
+              && abs(shown_luma[90 * 320 + 81] - red) <= 4,
+          "overlays: colours: red's %d,%d under the clear half (%d,%d without), %d,%d under the white; luma %d at "
+          "an odd x",
+          shown_cb[45 * 160 + 40], shown_cr[45 * 160 + 40], cb0, cr0, shown_cb[45 * 160 + 120],
+          shown_cr[45 * 160 + 120], shown_luma[90 * 320 + 81]);
     CHECK(abs(l - red) <= 4 && abs(r - white) <= 4 && abs(before - red) <= 4,
           "overlays: shown: luma %d left, %d right (red %d), %d before it", l, r, red, before);
     CHECK(abs(after - blue) <= 4, "overlays: after it (over b): %d", after);

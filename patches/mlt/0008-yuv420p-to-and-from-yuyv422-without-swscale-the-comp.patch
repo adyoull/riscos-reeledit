@@ -1,0 +1,164 @@
+From cd95322fc878b79a52c505dd72c5b025582d6feb Mon Sep 17 00:00:00 2001
+From: Andrew Youll <andrewyoull86@gmail.com>
+Date: Tue, 27 Oct 2026 22:03:35 +0000
+Subject: [PATCH 8/8] yuv420p to and from yuyv422 without swscale: the
+ composite's round trip
+
+Under an overlay (the composite transition, yuv422 only), each frame of
+the clip went yuv420p -> yuyv422 in the avformat producer and back to
+yuv420p in the avcolour_space converter. swscale, with MLT's flags
+(accurate rounding, full chroma), took no unscaled shortcut: profiled
+on Linux, the conversions cost twice the H.264 decoding, and the
+producer made a context for every slice of every frame. On RISC OS for
+Linux, playing 640x360 with a picture over it dropped from 19 to 5
+pictures a second.
+
+common.c: mlt_avformat_yuv420p_to_yuyv422 (chroma interpolated 3:1
+between rows, as for progressive video) and mlt_avformat_yuyv422_to_yuv420p
+(chroma rows averaged), 8-bit, the same size. Used when the colours stay
+as they are (matrix and range): by the avformat producer for progressive
+yuv420p asked for as yuv422, and by avcolour_space's av_convert_image.
+---
+ src/modules/avformat/common.c                | 47 ++++++++++++++++++++
+ src/modules/avformat/common.h                | 13 ++++++
+ src/modules/avformat/filter_avcolour_space.c | 14 ++++++
+ src/modules/avformat/producer_avformat.c     | 14 ++++++
+ 4 files changed, 88 insertions(+)
+
+diff --git a/src/modules/avformat/common.c b/src/modules/avformat/common.c
+index 2799aa7..1048953 100644
+--- a/src/modules/avformat/common.c
++++ b/src/modules/avformat/common.c
+@@ -702,3 +702,50 @@ void mlt_avformat_graph_threads(struct AVFilterGraph *graph)
+     if (graph && mlt_threads_disabled())
+         graph->nb_threads = 1;
+ }
++
++void mlt_avformat_yuv420p_to_yuyv422(uint8_t *const src[3], const int src_stride[3], uint8_t *dst, int dst_stride,
++                                     int width, int height)
++{
++    int ch = (height + 1) / 2, half = width / 2;
++    for (int y = 0; y < height; y++) {
++        /* (a chroma row lies between two luma rows: weighted 3:1 with the next one up or down) */
++        int c = y / 2, n = (y & 1) ? c + 1 : c - 1;
++        if (n < 0)
++            n = 0;
++        if (n >= ch)
++            n = ch - 1;
++        const uint8_t *l = src[0] + (size_t) y * src_stride[0];
++        const uint8_t *u0 = src[1] + (size_t) c * src_stride[1], *u1 = src[1] + (size_t) n * src_stride[1];
++        const uint8_t *v0 = src[2] + (size_t) c * src_stride[2], *v1 = src[2] + (size_t) n * src_stride[2];
++        uint8_t *d = dst + (size_t) y * dst_stride;
++        for (int x = 0; x < half; x++) {
++            d[0] = l[0];
++            d[1] = (uint8_t) ((3 * u0[x] + u1[x] + 2) >> 2);
++            d[2] = l[1];
++            d[3] = (uint8_t) ((3 * v0[x] + v1[x] + 2) >> 2);
++            d += 4;
++            l += 2;
++        }
++    }
++}
++
++void mlt_avformat_yuyv422_to_yuv420p(const uint8_t *src, int src_stride, uint8_t *const dst[3],
++                                     const int dst_stride[3], int width, int height)
++{
++    int half = width / 2;
++    for (int y = 0; y < height; y += 2) {
++        const uint8_t *a = src + (size_t) y * src_stride, *b = y + 1 < height ? a + src_stride : a;
++        uint8_t *l0 = dst[0] + (size_t) y * dst_stride[0], *l1 = y + 1 < height ? l0 + dst_stride[0] : NULL;
++        uint8_t *u = dst[1] + (size_t) (y / 2) * dst_stride[1], *v = dst[2] + (size_t) (y / 2) * dst_stride[2];
++        for (int x = 0; x < half; x++) {
++            l0[2 * x] = a[4 * x];
++            l0[2 * x + 1] = a[4 * x + 2];
++            if (l1) {
++                l1[2 * x] = b[4 * x];
++                l1[2 * x + 1] = b[4 * x + 2];
++            }
++            u[x] = (uint8_t) ((a[4 * x + 1] + b[4 * x + 1] + 1) >> 1);
++            v[x] = (uint8_t) ((a[4 * x + 3] + b[4 * x + 3] + 1) >> 1);
++        }
++    }
++}
+diff --git a/src/modules/avformat/common.h b/src/modules/avformat/common.h
+index 2e78f73..1019b9d 100644
+--- a/src/modules/avformat/common.h
++++ b/src/modules/avformat/common.h
+@@ -61,4 +61,17 @@ struct AVFilterGraph;
+ int mlt_avformat_thread_count(int requested);
+ void mlt_avformat_graph_threads(struct AVFilterGraph *graph);
+ 
++/* 8-bit 4:2:0 planar (yuv420p) to and from 4:2:2 packed (yuyv422) at the
++   same size, the colours as they are (no change of matrix or range): the
++   composite transition's round trip for each frame of a clip under an
++   overlay. swscale, with MLT's flags (accurate rounding, full chroma),
++   took no unscaled shortcut and cost twice the decoding (and a context
++   made for every slice of every frame). Chroma is interpolated between
++   rows (to 4:2:2) or averaged (to 4:2:0), as for progressive video.
++   width even. */
++void mlt_avformat_yuv420p_to_yuyv422(uint8_t *const src[3], const int src_stride[3], uint8_t *dst, int dst_stride,
++                                     int width, int height);
++void mlt_avformat_yuyv422_to_yuv420p(const uint8_t *src, int src_stride, uint8_t *const dst[3],
++                                     const int dst_stride[3], int width, int height);
++
+ #endif // COMMON_H
+diff --git a/src/modules/avformat/filter_avcolour_space.c b/src/modules/avformat/filter_avcolour_space.c
+index 5de1536..7a16657 100644
+--- a/src/modules/avformat/filter_avcolour_space.c
++++ b/src/modules/avformat/filter_avcolour_space.c
+@@ -105,6 +105,20 @@ static int av_convert_image(uint8_t *out,
+     int flags = mlt_get_sws_flags(in_width, in_height, in_fmt, out_width, out_height, out_fmt);
+     int error = -1;
+ 
++    /* (yuv420p to and from yuyv422, the same size and colours: no swscale) */
++    if (in_width == out_width && in_height == out_height && !(in_width & 1) && src_colorspace == dst_colorspace
++        && src_full_range == dst_full_range
++        && ((in_fmt == AV_PIX_FMT_YUV420P && out_fmt == AV_PIX_FMT_YUYV422)
++            || (in_fmt == AV_PIX_FMT_YUYV422 && out_fmt == AV_PIX_FMT_YUV420P))) {
++        av_image_fill_arrays(in_data, in_stride, in, in_fmt, in_width, in_height, IMAGE_ALIGN);
++        av_image_fill_arrays(out_data, out_stride, out, out_fmt, out_width, out_height, IMAGE_ALIGN);
++        if (in_fmt == AV_PIX_FMT_YUV420P)
++            mlt_avformat_yuv420p_to_yuyv422(in_data, in_stride, out_data[0], out_stride[0], in_width, in_height);
++        else
++            mlt_avformat_yuyv422_to_yuv420p(in_data[0], in_stride[0], out_data, out_stride, in_width, in_height);
++        return 0;
++    }
++
+     if (in_fmt == AV_PIX_FMT_YUV422P16LE)
+         mlt_image_format_planes(in_fmt, in_width, in_height, in, in_data, in_stride);
+     else
+diff --git a/src/modules/avformat/producer_avformat.c b/src/modules/avformat/producer_avformat.c
+index 2df5228..bd71cb5 100644
+--- a/src/modules/avformat/producer_avformat.c
++++ b/src/modules/avformat/producer_avformat.c
+@@ -2632,6 +2632,19 @@ static void convert_image(producer_avformat self,
+                              height,
+                              IMAGE_ALIGN);
+ 
++#if LIBAVUTIL_VERSION_INT >= ((58 << 16) + (7 << 8) + 100)
++        int interlaced_frame = !!(frame->flags & AV_FRAME_FLAG_INTERLACED);
++#else
++        int interlaced_frame = frame->interlaced_frame;
++#endif
++        /* (yuv420p, progressive, its colours kept: no swscale, common.h) */
++        if ((src_pix_fmt == AV_PIX_FMT_YUV420P || src_pix_fmt == AV_PIX_FMT_YUVJ420P) && !interlaced_frame
++            && !(width & 1) && self->yuv_colorspace == dst_colorspace && self->full_range == dst_full_range) {
++            mlt_avformat_yuv420p_to_yuyv422(frame->data, frame->linesize, ctx.out_data[0], ctx.out_stride[0], width,
++                                            height);
++            colorspace = dst_colorspace;
++            goto converted;
++        }
+         int sliced = !getenv("MLT_AVFORMAT_SLICED_PIXFMT_DISABLE") && src_pix_fmt != ctx.dst_format;
+         if (sliced) {
+ #if LIBAVUTIL_VERSION_INT >= ((58 << 16) + (7 << 8) + 100)
+@@ -2669,6 +2682,7 @@ static void convert_image(producer_avformat self,
+ 
+         colorspace = dst_colorspace;
+     }
++converted:
+     mlt_log_timings_end(NULL, __FUNCTION__);
+ 
+     mlt_color_primaries primaries = mlt_image_default_primaries(colorspace, height);
+-- 
+2.43.0
+

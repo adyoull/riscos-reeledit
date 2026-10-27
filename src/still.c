@@ -197,6 +197,16 @@ static int get_image(mlt_frame frame, uint8_t **buffer, mlt_image_format *format
     if (!s)
         return 1;
     int w = *width > 0 ? *width : s->width, h = *height > 0 ? *height : s->height;
+    /* (the loader's rescale filter asks for the picture at its own size and
+       says here the size it wants: made at that size, kept, it scales
+       nothing each frame) */
+    mlt_properties fp0 = MLT_FRAME_PROPERTIES(frame);
+    const char *interp = mlt_properties_get(fp0, "consumer.rescale");
+    int rw = mlt_properties_get_int(fp0, "rescale_width"), rh = mlt_properties_get_int(fp0, "rescale_height");
+    if (rw > 0 && rh > 0 && !(interp && !strcmp(interp, "none"))) {
+        w = rw;
+        h = rh;
+    }
     mlt_image_format want = *format == mlt_image_none ? mlt_image_rgba : *format;
     mlt_service_lock(MLT_PRODUCER_SERVICE(producer));
     if (!s->image || s->w != w || s->h != h || s->asked != want) {

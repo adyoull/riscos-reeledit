@@ -64,6 +64,7 @@ static struct
     int have_picture;
     int last_w, last_h;   /* the picture last converted into it (its bars) */
     struct SwsContext *sws;
+    int sws_key[7];       /* what it was made for: the picture's size, the size drawn, its colours */
     re_display_stats stats;
 } D;
 
@@ -482,11 +483,23 @@ static int sprite_convert(const re_picture *p)
         D.last_w = rw;
         D.last_h = rh;
     }
-    D.sws = sws_getCachedContext(D.sws, p->width, p->height, AV_PIX_FMT_YUV420P, rw, rh,
-                                 D.trgb ? AV_PIX_FMT_BGR0 : AV_PIX_FMT_RGB0, SWS_BILINEAR, NULL, NULL, NULL);
-    if (!D.sws)
-        return -1;
-    {
+    /* (made again only when something changes: sws_getCachedContext made
+       one for every picture, as swscale takes RGB0 to be RGBA and then
+       compares the two; on RISC OS for Linux that was most of a picture's
+       time drawn in the window) */
+    int key[7] = {p->width, p->height, rw, rh, D.trgb, p->colorspace, p->full_range};
+    if (D.sws && memcmp(key, D.sws_key, sizeof(key))) {
+        sws_freeContext(D.sws);
+        D.sws = NULL;
+    }
+    if (!D.sws) {
+        D.sws = sws_getContext(p->width, p->height, AV_PIX_FMT_YUV420P, rw, rh,
+                               D.trgb ? AV_PIX_FMT_BGR0 : AV_PIX_FMT_RGB0, SWS_BILINEAR, NULL, NULL, NULL);
+        if (!D.sws)
+            return -1;
+        memcpy(D.sws_key, key, sizeof(key));
+        lg("window: converting %dx%d to %dx%d, BT.%d %s range", p->width, p->height, rw, rh,
+                 p->colorspace == 709 ? 709 : 601, p->full_range ? "full" : "video");
         /* the picture's colours: BT.709 or 601, video or full range */
         int srcr, dstr, b, c, s2, *inv, *tab;
         if (sws_getColorspaceDetails(D.sws, &inv, &srcr, &tab, &dstr, &b, &c, &s2) >= 0) {
