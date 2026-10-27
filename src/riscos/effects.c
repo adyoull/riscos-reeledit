@@ -105,7 +105,8 @@ void fx_menu_open(int x, int y, int item)
     }
     r.r[2] = x - 64;
     r.r[3] = y;
-    ro_swi(Wimp_CreateMenu, &r);
+    _kernel_oserror *e = ro_swi(Wimp_CreateMenu, &r);
+    app_log("context menu for item %d at %d,%d%s%s", item, x, y, e ? ": " : "", e ? e->errmess : "");
 }
 
 void fx_menu_select(int *b)
