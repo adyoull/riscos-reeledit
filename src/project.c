@@ -10,6 +10,7 @@
 #include "project.h"
 #include "engine.h"
 #include "project_internal.h"
+#include "still.h"
 
 #include <limits.h>
 #include <math.h>
@@ -34,6 +35,7 @@ void rp_changed(re_project *p)
 {
     rp_relink(p);
     rp_fit_fades(p);
+    rp_fit_overlays(p);
     fit_tractor(p);
     p->state = ++p->next_state;
     p->changes++;
@@ -107,32 +109,30 @@ static int adopt(re_project *p, mlt_producer prod);
 /* The project made again from a snapshot. 0, or -1 (left as it was). */
 static int restore(re_project *p, const char *xml)
 {
-    mlt_tractor old = p->tractor;
-    mlt_playlist old_v1 = p->v1;
-    int old_own = p->own_v1;
+    re_project old = *p;
     if (!*xml) {
         p->tractor = NULL;
-        p->v1 = NULL;
-        p->own_v1 = 0;
+        p->v1 = p->v2 = NULL;
+        p->own_v1 = p->own_v2 = 0;
     } else {
         setenv("MLT_XML_DEEP", "1", 1);
         mlt_producer prod = mlt_factory_producer(p->profile, "xml-string", (char *) xml);
         unsetenv("MLT_XML_DEEP");
         p->tractor = NULL;
-        p->v1 = NULL;
-        p->own_v1 = 0;
+        p->v1 = p->v2 = NULL;
+        p->own_v1 = p->own_v2 = 0;
         if (!prod || adopt(p, prod) < 0) {
-            p->tractor = old;
-            p->v1 = old_v1;
-            p->own_v1 = old_own;
+            *p = old;
             return -1;
         }
         fit_tractor(p);
     }
-    if (old)
-        mlt_tractor_close(old);
-    if (old_own)
-        mlt_playlist_close(old_v1);
+    if (old.tractor)
+        mlt_tractor_close(old.tractor);
+    if (old.own_v1)
+        mlt_playlist_close(old.v1);
+    if (old.own_v2)
+        mlt_playlist_close(old.v2);
     p->changes++;
     return 0;
 }
@@ -213,6 +213,7 @@ static int make_tracks(re_project *p)
     mlt_service_set_profile(MLT_TRACTOR_SERVICE(p->tractor), p->profile);
     mlt_service_set_profile(MLT_MULTITRACK_SERVICE(mlt_tractor_multitrack(p->tractor)), p->profile);
     p->own_v1 = 1;
+    p->v1_track = 0;
     mlt_properties_set(MLT_PLAYLIST_PROPERTIES(p->v1), "id", "playlist0");
     mlt_properties_set(MLT_PLAYLIST_PROPERTIES(p->v1), "shotcut:name", "V1");
     mlt_tractor_set_track(p->tractor, MLT_PLAYLIST_PRODUCER(p->v1), 0);
@@ -249,17 +250,24 @@ static int adopt(re_project *p, mlt_producer prod)
         return -1;
     }
     mlt_service_set_profile(MLT_TRACTOR_SERVICE(p->tractor), p->profile);
-    /* V1: the first playlist that isn't Shotcut's black background */
+    /* V1: the first playlist that isn't Shotcut's black background (nor
+       one of its audio tracks); V2 the next */
     mlt_multitrack mt = mlt_tractor_multitrack(p->tractor);
-    p->v1 = NULL;
-    p->own_v1 = 0;
-    for (int i = 0; i < mlt_multitrack_count(mt); i++) {
+    p->v1 = p->v2 = NULL;
+    p->own_v1 = p->own_v2 = 0;
+    for (int i = 0; i < mlt_multitrack_count(mt) && !p->v2; i++) {
         mlt_producer t = mlt_multitrack_track(mt, i);
-        const char *id = mlt_properties_get(MLT_PRODUCER_PROPERTIES(t), "id");
-        if (mlt_service_identify(MLT_PRODUCER_SERVICE(t)) == mlt_service_playlist_type
-            && !(id && !strcmp(id, "background"))) {
+        mlt_properties tp = MLT_PRODUCER_PROPERTIES(t);
+        const char *id = mlt_properties_get(tp, "id");
+        if (mlt_service_identify(MLT_PRODUCER_SERVICE(t)) != mlt_service_playlist_type
+            || (id && !strcmp(id, "background")) || mlt_properties_get_int(tp, "shotcut:audio"))
+            continue;
+        if (!p->v1) {
             p->v1 = (mlt_playlist) t;
-            break;
+            p->v1_track = i;
+        } else {
+            p->v2 = (mlt_playlist) t;
+            p->v2_track = i;
         }
     }
     if (!p->v1) {
@@ -268,6 +276,7 @@ static int adopt(re_project *p, mlt_producer prod)
         return -1;
     }
     rp_relink(p);
+    rp_fit_overlays(p);
     return 0;
 }
 
@@ -317,6 +326,8 @@ void re_project_close(re_project *p)
         mlt_tractor_close(p->tractor);
     if (p->own_v1)
         mlt_playlist_close(p->v1);
+    if (p->own_v2)
+        mlt_playlist_close(p->v2);
     mlt_profile_close(p->profile);
     drop_snaps(p->undo, &p->n_undo);
     drop_snaps(p->redo, &p->n_redo);
@@ -419,6 +430,9 @@ int re_project_add_length(re_project *p, const char *file, int frame, int length
         mlt_properties_set_position(cp, "length", length);
         mlt_properties_set_position(cp, "out", length - 1);
         mlt_properties_set(cp, "eof", "pause");
+        mlt_producer_set_in_and_out(clip, 0, length - 1);
+    } else if (re_still_is(clip)) { /* (a picture: 5 seconds of it) */
+        length = re_project_frames(p, 5.0);
         mlt_producer_set_in_and_out(clip, 0, length - 1);
     } else if (mlt_producer_get_length(clip) >= INT_MAX / 2) {
         mlt_producer_close(clip); /* (endless to MLT: its length to be found) */
@@ -769,6 +783,8 @@ int re_project_info(re_project *p, char *buf, int size)
             clips++;
     ADD("Project\t%dx%d, %.3g fps, %s\n", p->profile->width, p->profile->height, re_project_fps(p), a);
     ADD("Clips\t%d on V1\n", clips);
+    if (re_project_overlays(p) > 0)
+        ADD("Overlays\t%d on V2\n", re_project_overlays(p));
     return n;
 }
 

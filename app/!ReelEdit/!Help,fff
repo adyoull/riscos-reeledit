@@ -1,12 +1,13 @@
-Reel Edit 0.3 (test 2)
-======================
+Reel Edit 0.3 (test 10)
+=======================
 
 Reel Edit is a video editor for RISC OS that is being written, on the MLT
 multimedia framework (the engine of Shotcut and Kdenlive), with the
 Raspberry Pi's video hardware through riscos-reelhwaccel. This test build
-has the Viewer and a first Timeline: one video track (V1), with cutting,
-trimming, deleting, undo and saving. Dissolves, dragging clips, more
-tracks, titles and export come next.
+has the Viewer and a Timeline: a video track (V1) with cutting, trimming,
+moving, fades, dissolves, marks, undo and saving, and above it a track of
+pictures over the video (V2: logos, overlays). Titles, more tracks and
+export come next.
 
 It needs RISC OS 5 on ARMv7 with VFP (Raspberry Pi 2, 3, 4), with
 SharedUnixLibrary and ARMEABISupport (!Run checks). H.264 is decoded on
@@ -72,20 +73,43 @@ the clips after it moving up; ; (Lift) takes it out leaving a gap. Both
 are one step for Undo; neither goes through a dissolve (delete it first).
 Play > Clear the marks takes them away. The marks aren't saved.
 
+Overlays (pictures over the video: a logo, a title made elsewhere, a
+frame): drop a PNG (its see-through parts kept), a JPEG or a sprite file
+on the Timeline's top row, V2, where you want it to start (or on the
+Viewer: at the playhead). It's shown for 5 seconds, or until the next
+overlay or the end; a picture as big as the frame (or near it) fills the
+frame, a smaller one goes top right as a logo. Drag it along V2 to move
+it, its ends to make it shorter or longer; overlays don't overlap. Press
+Menu over it for its menu ("Overlay"):
+  Place      Full frame, Centre, Top left, Top right, Bottom left,
+             Bottom right, Lower third
+  Size       the box it's fitted in, 10% to 100% of the frame (it keeps
+             its shape)
+  Opacity    100%, 75%, 50%, 25%
+  Fade in, Fade out   a second each (ticked when it has one)
+  Delete
+(Adjust keeps the menu open to try another.) A sprite is saved as a PNG
+beside its file first ("Logos" sprite "bug" becomes Logos_bug/png; the
+sprite file isn't changed), so keep it with the project. A sprite file of
+more sprites than one gives a menu to pick from; 32-bit sprites with
+alpha, masks and palettes are understood. A picture dropped on V1 is a
+clip there, 5 seconds long. Overlays are saved in the project as MLT's
+composite transitions.
+
 The Timeline: the playhead moves only from the ruler (the strip with the
 times along the top). Click the ruler to move the playhead there (the
 Viewer shows that frame), or drag along it to scrub; its timecode is shown
-beside it. Clicks and drags on the track never move the playhead: click a
-clip to select it (Adjust: select or not), click an empty part to clear
-the selection. With snapping on (N, or
+beside it. Clicks and drags on the tracks never move the playhead: click a
+clip or an overlay to select it (Adjust: select or not), click an empty
+part to clear the selection. With snapping on (N, or
 the Snap button), the playhead snaps to the cuts near it. The scroll
 wheel scrolls the Timeline; Ctrl and the wheel zoom it, about the
 pointer. The Timeline is attached under the Viewer: move or resize either
 and the other follows (View > Attach the Timeline turns that off, and on
 again).
 
-The toolbar: Split (at the playhead), Delete (the selected clip; the
-clips after it close up; Adjust: leave a gap), Undo, Redo, Snap; then
+The toolbar: Split (at the playhead), Delete (the selected clip or
+overlay; the clips after it close up; Adjust: leave a gap), Undo, Redo, Snap; then
 "Timeline zoom" - + Fit (these zoom the Timeline, never the picture), and
 Save. Interactive help (!Help) says what each does.
 
@@ -116,7 +140,8 @@ Keys (with the Viewer or the Timeline in front, clicked on):
   Return       play from the in mark to the out mark
   '  ;         Extract (the marked part out, closing up), Lift (a gap)
   D            a dissolve at the cut nearest the playhead
-  Delete       delete the selected clip or dissolve (Shift-Delete: leave a gap)
+  Delete       delete the selected clip, dissolve or overlay (Shift-Delete:
+               leave a gap)
   F8  F9       undo, redo (100 steps)
   N            snapping on / off
   +  -         zoom the Timeline in, out

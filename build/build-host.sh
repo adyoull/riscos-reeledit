@@ -13,15 +13,16 @@ CC=${CC:-gcc}
 MLT_VERSION=$(sed -n 's/^mlt-\([0-9.]*\)\.tar\.gz.*/\1/p' "$TOP/build/SOURCES")
 mkdir -p "$O/src"
 
-# ---- FFmpeg 5.1.10, static, no external libraries
+# ---- FFmpeg 5.1.10, static, no external libraries but zlib (PNG, as the RISC OS devkit has it)
 FF=$O/src/ffmpeg-5.1.10
 if [ ! -f "$O/ffmpeg/lib/libavcodec.a" ]; then
   rm -rf "$FF" && mkdir -p "$FF"
   tar xJf "$DL/ffmpeg-5.1.10.tar.xz" -C "$FF" --strip-components=1
   (cd "$FF" && ./configure --prefix="$O/ffmpeg" --cc="$CC" --disable-programs --disable-doc \
-      --disable-network --disable-autodetect --disable-x86asm --enable-gpl \
+      --disable-network --disable-autodetect --enable-zlib --disable-x86asm --enable-gpl \
       --disable-shared --enable-static > "$O/ffmpeg-configure.log" &&
     make -j"$JOBS" > "$O/ffmpeg-build.log" 2>&1 && make install > /dev/null)
+  rm -rf "$O/src/mlt-$MLT_VERSION/build" # (MLT linked again, with this FFmpeg)
 fi
 
 # ---- MLT, with patches/mlt

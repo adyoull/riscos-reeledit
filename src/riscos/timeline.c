@@ -1,6 +1,11 @@
 /* timeline.c - the Timeline window (app.h): a ruler with the playhead, and
- * track V1's clips, gaps and dissolves, scrolled sideways by the window's
+ * track V1's clips, gaps and dissolves, and V2's overlays, scrolled sideways by the window's
  * own scroll bar.
+ *
+ * Above V1, V2's row: the overlays (pictures over the video, overlays.c),
+ * each a box over the frames it's shown for; a click selects one, Menu
+ * gives its menu, a drag moves it (its middle) or trims it (its ends), and
+ * pictures dropped on the row become overlays there.
  *
  * The ruler is the only place the playhead moves from: a click puts it
  * there, a drag scrubs. On the track, a click selects a clip or a dissolve
@@ -49,9 +54,14 @@
 #define EFFECT_DARK   0x783C5800u /* (88, 60, 120) */
 #define MARKED_COLOUR 0xF8D8B000u /* (176, 216, 248): the ruler between the I/O marks */
 #define MARK_COLOUR   0xB0601800u /* (24, 96, 176): the marks' lines */
+#define OVERLAY_COLOUR 0x80A03000u /* (48, 160, 128): V2's pictures */
 #define CORNER  32   /* OS units: the track's top (fade handles) and bottom (dissolve marks) strips */
-#define TRACK_TOP (-RULER_H - 8) /* the track's top and bottom (work area) */
+#define V2_H    64   /* V2's row: the overlays (pictures over the video), above V1 */
+#define V2_TOP (-RULER_H - 8) /* the rows' tops and bottoms (work area) */
+#define V2_BOTTOM (V2_TOP - V2_H)
+#define TRACK_TOP (V2_BOTTOM - 8)
 #define TRACK_BOTTOM (TRACK_TOP - TRACK_H)
+#define WIN_H (RULER_H + 8 + V2_H + 8 + TRACK_H + 8)
 
 /* What a drag does: the playhead (on the ruler); on the track, a clip's
    start or end trimmed, a clip moved, a dissolve made at a cut (from the
@@ -59,7 +69,7 @@
    a clip's fade in or out made longer or shorter (from its handle at the
    top of the clip) */
 enum { DRAG_NONE, DRAG_SCRUB, DRAG_IN, DRAG_OUT, DRAG_MOVE, DRAG_DISSOLVE, DRAG_MIX_IN, DRAG_MIX_OUT, DRAG_FADE_IN,
-       DRAG_FADE_OUT };
+       DRAG_FADE_OUT, DRAG_OV_MOVE, DRAG_OV_IN, DRAG_OV_OUT };
 
 static struct
 {
@@ -121,17 +131,17 @@ static int create(void)
     } w;
     _kernel_swi_regs r;
     memset(&w, 0, sizeof(w));
-    w.vis.x1 = 1000; w.vis.y1 = RULER_H + TRACK_H + 16;
+    w.vis.x1 = 1000; w.vis.y1 = WIN_H;
     w.behind = -1;
     /* new format, back, close, title, toggle, horizontal scroll, adjust size, moveable */
     w.flags = (int) 0xEF000102u; /* (bit 8: Scroll_Request for the arrows and the wheel) */
     w.tfg = 7; w.tbg = 2; w.wfg = 7; w.wbg = 1;
     w.sofg = 3; w.sibg = 1; w.tfocus = 12;
-    w.ext.x0 = 0; w.ext.y0 = -(RULER_H + TRACK_H + 16); w.ext.x1 = 4096; w.ext.y1 = 0;
+    w.ext.x0 = 0; w.ext.y0 = -(WIN_H); w.ext.x1 = 4096; w.ext.y1 = 0;
     w.tflags = 0x1 | 0x4 | 0x8 | 0x10 | 0x20 | 0x100 | (7 << 24) | (2 << 28);
     w.wbutton = 10 << 12; /* click (x256), drag (x16), double click */
     w.sprites = 1;
-    w.minw = MIN_W; w.minh = RULER_H + TRACK_H + 16;
+    w.minw = MIN_W; w.minh = WIN_H;
     w.title.text = T.title;
     w.title.valid = (const char *) -1;
     w.title.len = sizeof(T.title);
@@ -150,7 +160,7 @@ static void set_extent(void)
         w = T.vis_w;
     if (w < MIN_W)
         w = MIN_W;
-    int b[4] = {0, -(RULER_H + TRACK_H + 16), w, 0};
+    int b[4] = {0, -(WIN_H), w, 0};
     _kernel_swi_regs r;
     r.r[0] = T.win;
     r.r[1] = (intptr_t) b;
@@ -161,7 +171,7 @@ static void set_extent(void)
 static void redraw_all(void)
 {
     _kernel_swi_regs r;
-    r.r[0] = T.win; r.r[1] = 0; r.r[2] = -(RULER_H + TRACK_H + 16); r.r[3] = T.extent_w; r.r[4] = 0;
+    r.r[0] = T.win; r.r[1] = 0; r.r[2] = -(WIN_H); r.r[3] = T.extent_w; r.r[4] = 0;
     ro_swi(Wimp_ForceRedraw, &r);
 }
 
@@ -172,7 +182,7 @@ void tl_open(int x0, int y1, int width)
     if (!T.win && create() < 0)
         return;
     T.vis_w = width;
-    T.vis_h = RULER_H + TRACK_H + 16;
+    T.vis_h = WIN_H;
     set_extent();
     b[0] = T.win;
     b[1] = x0; b[2] = y1 - T.vis_h; b[3] = x0 + width; b[4] = y1;
@@ -215,7 +225,27 @@ void tl_edited(void)
 void tl_select(int item)
 {
     A.sel = item;
+    A.ov_sel = -1;
     redraw_all();
+}
+
+void tl_select_overlay(int ov)
+{
+    A.ov_sel = ov;
+    A.sel = -1;
+    redraw_all();
+}
+
+int tl_on_overlays(int screen_y)
+{
+    int st[9];
+    _kernel_swi_regs r;
+    st[0] = T.win;
+    r.r[1] = (intptr_t) st;
+    if (!T.win || ro_swi(Wimp_GetWindowState, &r))
+        return 0;
+    int wy = screen_y - (st[4] - st[6]);
+    return wy <= V2_TOP + 8 && wy > V2_BOTTOM - 4;
 }
 
 /* Moves the view sideways (keeping the window where it is) */
@@ -246,10 +276,10 @@ void tl_playhead(int frame)
     T.playhead = frame;
     /* (the line, its handle, and the timecode to its right) */
     /* (from a label's width before it: the ruler labels it hides, or uncovers) */
-    r.r[0] = T.win; r.r[1] = old - MARK_TEXT_W - 8; r.r[2] = -(RULER_H + TRACK_H + 16); r.r[3] = old + LABEL_W + 4;
+    r.r[0] = T.win; r.r[1] = old - MARK_TEXT_W - 8; r.r[2] = -(WIN_H); r.r[3] = old + LABEL_W + 4;
     r.r[4] = 0;
     ro_swi(Wimp_ForceRedraw, &r);
-    r.r[0] = T.win; r.r[1] = now - MARK_TEXT_W - 8; r.r[2] = -(RULER_H + TRACK_H + 16); r.r[3] = now + LABEL_W + 4;
+    r.r[0] = T.win; r.r[1] = now - MARK_TEXT_W - 8; r.r[2] = -(WIN_H); r.r[3] = now + LABEL_W + 4;
     r.r[4] = 0;
     ro_swi(Wimp_ForceRedraw, &r);
     /* kept in view: a quarter of the way in when it goes off either side */
@@ -453,12 +483,59 @@ static void draw_dissolve(const re_item *it, int selected, int x0, int x1, int y
     }
 }
 
+/* V2's overlays: a box each over its frames, its fades purple along its
+   top, its name in it; selected, an amber outline and handles at its
+   ends. With none, a word on what the row is for. */
+static void draw_overlays(int ox, int y0, int y1, int f0, int f1, int cx0, int cy0, int cx1, int cy1)
+{
+    int n = A.proj ? re_project_overlays(A.proj) : 0;
+    if (n == 0) {
+        if (A.proj && re_project_length(A.proj) > 0)
+            text("V2: drop a picture (PNG, JPEG, sprite) here to put it over the video", ox + LEFT + 8, y0 + 20,
+                 0xCCCCCC00, 0x77777700);
+        return;
+    }
+    for (int i = 0; i < n; i++) {
+        re_overlay o;
+        if (re_project_overlay(A.proj, i, &o) || o.start + o.length < f0 || o.start > f1)
+            continue;
+        int x0 = ox + x_of(o.start), x1 = ox + x_of(o.start + o.length) - 2, sel = i == A.ov_sel;
+        if (x1 < x0)
+            x1 = x0;
+        colour(sel ? 0x2080F000 : 0x20202000);
+        rect(x0, y0, x1, y1);
+        int inset = sel ? 6 : 2;
+        colour(OVERLAY_COLOUR);
+        rect(x0 + inset, y0 + inset, x1 - inset, y1 - inset);
+        colour(EFFECT_COLOUR); /* (its fades) */
+        if (o.fade_in > 0)
+            rect(x0 + inset, y1 - inset - 12, ox + x_of(o.start + o.fade_in), y1 - inset);
+        if (o.fade_out > 0)
+            rect(ox + x_of(o.start + o.length - o.fade_out), y1 - inset - 12, x1 - inset, y1 - inset);
+        if (sel && x1 - x0 > 4 * inset) {
+            colour(0x2080F000);
+            rect(x0, y0 + 12, x0 + inset + 4, y1 - 12);
+            rect(x1 - inset - 4, y0 + 12, x1, y1 - 12);
+        }
+        int c0 = x0 + 2 > cx0 ? x0 + 2 : cx0, c1 = x1 - 2 < cx1 ? x1 - 2 : cx1;
+        int r0 = y0 > cy0 ? y0 : cy0, r1 = y1 < cy1 ? y1 : cy1;
+        if (c1 > c0 && r1 > r0) {
+            char shown[64];
+            clip(c0, r0, c1, r1);
+            fit_text(shown, sizeof(shown), o.name, x1 - x0 - 24);
+            text(shown, x0 + 10, y0 + 12, 0xFFFFFF00, OVERLAY_COLOUR);
+            clip(cx0, cy0, cx1, cy1);
+        }
+    }
+}
+
 static void draw(int *b)
 {
     int ox = b[1] - b[5], oy = b[4] - b[6]; /* screen position of work area 0,0 */
     int cx0 = b[7], cy0 = b[8], cx1 = b[9] - 1, cy1 = b[10] - 1;
     int f0 = frame_of(cx0 - ox) - 1, f1 = frame_of(cx1 - ox) + 1;
-    int ruler_y0 = oy - RULER_H, track_y1 = oy - RULER_H - 8, track_y0 = track_y1 - TRACK_H;
+    int ruler_y0 = oy - RULER_H, track_y1 = oy + TRACK_TOP, track_y0 = oy + TRACK_BOTTOM;
+    int v2_y1 = oy + V2_TOP, v2_y0 = oy + V2_BOTTOM;
     double fps = A.proj ? re_project_fps(A.proj) : 25;
 
     /* the ruler, the marked stretch on it */
@@ -487,9 +564,10 @@ static void draw(int *b)
             text(tc, x + 6, ruler_y0 + 20, 0x00000000, 0xDDDDDD00);
         }
     }
-    /* the track */
+    /* the tracks */
     colour(0x77777700);
-    rect(cx0, track_y0 - 8, cx1, track_y1 + 8 - 1);
+    rect(cx0, track_y0 - 8, cx1, v2_y1 + 8 - 1);
+    draw_overlays(ox, v2_y0, v2_y1, f0, f1, cx0, cy0, cx1, cy1);
     if (A.proj) {
         for (int i = 0; i < re_project_items(A.proj); i++) {
             re_item it;
@@ -613,7 +691,7 @@ static void redraw_frames(int f0, int f1) /* (the track between two frames, a li
 {
     _kernel_swi_regs r;
     int x0 = x_of(f0 < f1 ? f0 : f1) - 8, x1 = x_of(f0 < f1 ? f1 : f0) + 8;
-    r.r[0] = T.win; r.r[1] = x0; r.r[2] = -(RULER_H + TRACK_H + 16); r.r[3] = x1; r.r[4] = -RULER_H;
+    r.r[0] = T.win; r.r[1] = x0; r.r[2] = -(WIN_H); r.r[3] = x1; r.r[4] = -RULER_H;
     ro_swi(Wimp_ForceRedraw, &r);
 }
 
@@ -710,7 +788,8 @@ static int drag_mode_at(int wx, int wy, int *item)
 
 static const char *const drag_names[] = {"", "scrubbing", "trimming the start of", "trimming the end of", "moving",
                                          "making a dissolve after", "dragging the start of", "dragging the end of",
-                                         "fading in", "fading out"};
+                                         "fading in", "fading out", "moving overlay", "trimming the start of overlay",
+                                         "trimming the end of overlay"};
 
 /* While dragging, the Viewer shows a frame (the edge trimmed, a fade's or
    a dissolve's middle) once the pointer rests: a picture decoded at each
@@ -727,6 +806,49 @@ static void show_dissolve(int mix)
     re_item it;
     if (mix >= 0 && !re_project_item(A.proj, mix, &it))
         show_later(it.start + it.length / 2);
+}
+
+/* The pointer kept to the window's visible part while dragging. 0, or -1. */
+static int drag_box(int *b, int *st)
+{
+    int d[10];
+    _kernel_swi_regs r;
+    d[0] = T.win;
+    d[1] = 7; /* a point, nothing drawn */
+    d[2] = d[4] = b[0];
+    d[3] = d[5] = b[1];
+    d[6] = st[1]; d[7] = st[2]; d[8] = st[3] - 1; d[9] = st[4] - 1;
+    r.r[1] = (intptr_t) d;
+    return ro_swi(Wimp_DragBox, &r) ? -1 : 0;
+}
+
+/* A drag begun on V2: an overlay's middle moves it, its ends trim it */
+static void overlay_drag_start(int f, int wx, int *b, int *st)
+{
+    int i = re_project_overlay_at(A.proj, (int) ((wx - LEFT) / T.scale));
+    re_overlay o;
+    if (i < 0 || re_project_overlay(A.proj, i, &o)) {
+        app_log("timeline: a drag at %d on V2, on no overlay", wx);
+        return;
+    }
+    int x0 = x_of(o.start), x1 = x_of(o.start + o.length), edge = (x1 - x0) / 3;
+    if (edge > EDGE)
+        edge = EDGE;
+    int mode = wx - x0 < edge ? DRAG_OV_IN : x1 - wx <= edge ? DRAG_OV_OUT : DRAG_OV_MOVE;
+    app_set_speed(0);
+    T.d_item = i;
+    T.d_start = o.start;
+    T.d_len = o.length;
+    T.d_f0 = f;
+    T.d_show = -1;
+    T.d_raw = f;
+    T.d_moved_cs = ro_now_cs();
+    tl_select_overlay(i);
+    if (drag_box(b, st))
+        return;
+    T.drag = mode;
+    app_log("timeline: %s %d (frames %d-%d), from %d", drag_names[mode], i, o.start, o.start + o.length - 1, wx);
+    re_project_begin(A.proj); /* (one undo for the whole drag) */
 }
 
 /* A drag begun on the track: see drag_mode_at */
@@ -753,16 +875,7 @@ static void drag_start(int f, int wx, int wy, int *b, int *st)
     T.d_moved_cs = ro_now_cs();
     if (mode != DRAG_DISSOLVE)
         tl_select(i);
-    /* the pointer kept to the window's visible part */
-    int d[10];
-    _kernel_swi_regs r;
-    d[0] = T.win;
-    d[1] = 7; /* a point, nothing drawn */
-    d[2] = d[4] = b[0];
-    d[3] = d[5] = b[1];
-    d[6] = st[1]; d[7] = st[2]; d[8] = st[3] - 1; d[9] = st[4] - 1;
-    r.r[1] = (intptr_t) d;
-    if (ro_swi(Wimp_DragBox, &r))
+    if (drag_box(b, st))
         return;
     T.drag = mode;
     app_log("timeline: %s item %d (frames %d-%d), from %d,%d", drag_names[mode], i, it.start,
@@ -848,6 +961,31 @@ static void drag_tick(int f)
             show_dissolve(T.d_mix);
         }
         break;
+    case DRAG_OV_MOVE: /* (kept clear of the others: overlay.c) */
+    case DRAG_OV_IN:
+    case DRAG_OV_OUT: {
+        int start = T.d_start, length = T.d_len, end = T.d_start + T.d_len;
+        re_overlay o;
+        if (T.drag == DRAG_OV_MOVE) {
+            start += delta;
+        } else if (T.drag == DRAG_OV_OUT) {
+            length += delta;
+        } else {
+            int lo = T.d_item > 0 && !re_project_overlay(A.proj, T.d_item - 1, &o) ? o.start + o.length : 0;
+            start += delta;
+            if (start < lo)
+                start = lo;
+            if (start > end - 1)
+                start = end - 1;
+            length = end - start; /* (its end stays) */
+        }
+        if (re_project_overlay_span(A.proj, T.d_item, start < 0 ? 0 : start, length < 1 ? 1 : length) == 1
+            && !re_project_overlay(A.proj, T.d_item, &o)) {
+            app_edited_dragging();
+            show_later(T.drag == DRAG_OV_OUT ? o.start + o.length - 1 : o.start);
+        }
+        break;
+    }
     case DRAG_MOVE: {
         int before = 0, at = -1;
         move_target(f, &before, &at);
@@ -874,7 +1012,7 @@ void tl_click(int *b)
     int st[9];
     _kernel_swi_regs r;
     if (buttons == 2) { /* Menu: over a clip or a dissolve on the track, its context menu (its effects) */
-        int item = -1;
+        int item = -1, ov = -1;
         st[0] = T.win;
         r.r[1] = (intptr_t) st;
         if (A.proj && !ro_swi(Wimp_GetWindowState, &r)) {
@@ -882,6 +1020,12 @@ void tl_click(int *b)
             int f = (int) ((wx - LEFT) / T.scale);
             if (wy <= TRACK_TOP && wy >= TRACK_BOTTOM && f >= 0)
                 item = re_project_item_at(A.proj, f);
+            else if (wy <= V2_TOP && wy >= V2_BOTTOM && f >= 0)
+                ov = re_project_overlay_at(A.proj, f);
+        }
+        if (ov >= 0) {
+            app_overlay_menu(b[0], b[1], ov);
+            return;
         }
         re_item it;
         if (item >= 0 && !re_project_item(A.proj, item, &it) && !it.gap)
@@ -924,6 +1068,19 @@ void tl_click(int *b)
             if (!ro_swi(Wimp_DragBox, &r))
                 T.drag = DRAG_SCRUB;
         }
+        return;
+    }
+    /* V2: overlays are selected, moved and trimmed */
+    if (wy > V2_BOTTOM - 4) {
+        if (drag) {
+            overlay_drag_start(f, wx, b, st);
+            return;
+        }
+        int ov = re_project_overlay_at(A.proj, (int) ((wx - LEFT) / T.scale));
+        if (ov >= 0)
+            tl_select_overlay(adjust && A.ov_sel == ov ? -1 : ov);
+        else if (!adjust)
+            tl_select(-1);
         return;
     }
     /* the track: clips are selected, trimmed and moved; the playhead stays */
@@ -1001,6 +1158,23 @@ static int snapped(int f)
     return best;
 }
 
+const char *tl_help(int screen_y)
+{
+    int st[9];
+    _kernel_swi_regs r;
+    st[0] = T.win;
+    r.r[1] = (intptr_t) st;
+    int wy = ro_swi(Wimp_GetWindowState, &r) ? 0 : screen_y - (st[4] - st[6]);
+    if (wy > -RULER_H)
+        return "This is the Timeline's ruler.|MClick or drag here to move the playhead.|M"
+               "I and O mark a stretch on it; Return plays the stretch, ' takes it out.";
+    if (wy > V2_BOTTOM - 4)
+        return "This is V2: pictures over the video (logos, titles).|MDrop a PNG, JPEG or sprite here; "
+               "drag one to move it, its ends to trim it; Menu over it to place it, size it, fade it.";
+    return "This is V1: the clips.|MClick a clip to select it; drag its edge to trim it, its middle to move it.|M"
+           "Menu over a clip gives its effects (fades, dissolves).|MCtrl and the wheel zoom.";
+}
+
 int tl_scrubbing(void)
 {
     return T.drag != DRAG_NONE;
@@ -1054,7 +1228,7 @@ void tl_drag_end(int *b)
             if (!re_project_item(A.proj, j, &it))
                 app_seek(it.start);
         }
-    } else if (mode != DRAG_SCRUB) { /* (trims, dissolves, fades: one undo) */
+    } else if (mode != DRAG_SCRUB) { /* (trims, dissolves, fades, overlays: one undo) */
         re_project_end(A.proj);
         app_edited();
         if (T.d_show >= 0)

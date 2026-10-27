@@ -54,6 +54,7 @@ double re_test_speed(void);
 int re_test_open(void);
 re_project *re_test_project(void);
 int re_test_selected(void);
+int re_test_overlay_selected(void);
 int re_test_mark(int out);
 int re_test_snap(void);
 int re_test_measuring(void);
@@ -539,6 +540,43 @@ static void data_load(int *b, int w, int x, int type, const char *file)
     b[0] = (44 + (int) strlen(file) + 1 + 3) & ~3;
 }
 
+/* a drop on V2's row of the Timeline, at a frame */
+static void data_load_v2(int *b, int frame, int type, const char *file)
+{
+    data_load(b, TL, W[1].box[0] - W[1].scroll_x + 16 + (int) (frame * 4), type, file);
+    b[8] = W[1].box[3] - 48 - 8 - 32;
+}
+
+/* A sprite file of two sprites, "first" and "second", 4x2 32-bit (new
+   format, 90 dpi), the second white */
+static void two_sprites(const char *file)
+{
+    FILE *f = fopen(file, "wb");
+    uint32_t w[3 + 2 * (11 + 8)];
+    int k = 0;
+    w[k++] = 2;
+    w[k++] = 16;
+    w[k++] = 16 + 2 * (44 + 32);
+    for (int s = 0; s < 2; s++) {
+        w[k++] = 44 + 32;
+        char name[12] = {0};
+        strcpy(name, s ? "second" : "first");
+        memcpy(&w[k], name, 12);
+        k += 3;
+        w[k++] = 3;  /* 4 words wide */
+        w[k++] = 1;  /* 2 high */
+        w[k++] = 0;
+        w[k++] = 31;
+        w[k++] = 44; /* the picture */
+        w[k++] = 44; /* no mask */
+        w[k++] = 6u << 27 | 90 << 14 | 90 << 1 | 1;
+        for (int i = 0; i < 8; i++)
+            w[k++] = s ? 0x00FFFFFF : 0x000000FF;
+    }
+    fwrite(w, 4, (size_t) k, f);
+    fclose(f);
+}
+
 static int key_to(int *b, int w, int k)
 {
     memset(b, 0, 28);
@@ -556,11 +594,13 @@ static int click_icon(int *b, int icon)
 
 static double tl_scale = 4; /* the Timeline's OS units a frame, as it should be */
 
-/* a click (Select: 0x400 for this window's button type) on the Timeline at a frame: the ruler or the track */
+/* a click (Select: 0x400 for this window's button type) on the Timeline at a frame: the ruler (1), V1 (0),
+   or V2 (2) */
+#define TL_V1_TOP (48 + 8 + 64 + 8) /* (the ruler, V2's row, the gaps: down to V1) */
 static int click_tl(int *b, int frame, int on_ruler, int buttons)
 {
     b[0] = W[1].box[0] - W[1].scroll_x + 16 + (int) (frame * tl_scale);
-    b[1] = on_ruler ? W[1].box[3] - 10 : W[1].box[3] - 48 - 8 - 48;
+    b[1] = on_ruler == 1 ? W[1].box[3] - 10 : on_ruler == 2 ? W[1].box[3] - 48 - 8 - 32 : W[1].box[3] - TL_V1_TOP - 48;
     b[2] = buttons; b[3] = TL; b[4] = -1;
     return 6;
 }
@@ -931,11 +971,12 @@ static int script(int *b, int mask)
         CHECK(strstr(help_text, "split") != NULL, "help on Split: \"%s\"", help_text);
         help_text[0] = 0;
         b[8] = TL; b[9] = -1;
+        b[5] = W[1].box[0] + 100; b[6] = W[1].box[3] - 10; /* (on the ruler) */
         b[0] = 40; b[1] = 0x555; b[2] = 56; b[4] = 0x502;
         next(86);
         return 17;
     case 86:
-        CHECK(strstr(help_text, "Timeline") != NULL, "help on the Timeline: \"%s\"", help_text);
+        CHECK(strstr(help_text, "Timeline's ruler") != NULL, "help on the Timeline's ruler: \"%s\"", help_text);
         mark = W[1].extent_w;
         ctrl_key = 1;
         ptr[0] = W[1].box[0] + 100; ptr[1] = W[1].box[3] - 60; ptr[2] = 0; ptr[3] = TL; ptr[4] = -1;
@@ -1041,7 +1082,7 @@ static int script(int *b, int mask)
         next(101);
         /* a drag just past the second clip's end (105), where the playhead's
            line is too: trims the end, not the playhead */
-        b[0] = W[1].box[0] - W[1].scroll_x + 16 + 105 * 4 + 6; b[1] = W[1].box[3] - 48 - 8 - 48; b[2] = 0x40;
+        b[0] = W[1].box[0] - W[1].scroll_x + 16 + 105 * 4 + 6; b[1] = W[1].box[3] - TL_V1_TOP - 48; b[2] = 0x40;
         b[3] = TL; b[4] = -1;
         return 6;
     case 101:
@@ -1186,7 +1227,7 @@ static int script(int *b, int mask)
         CHECK(!strcmp(layout(), "c30 c75"), "undoing D: %s", layout());
         mark = drags;
         /* (the cut's mark: the bottom of the track, at the cut) */
-        b[0] = W[1].box[0] - W[1].scroll_x + 16 + 30 * 4 + 2; b[1] = W[1].box[3] - 48 - 8 - 128 + 10; b[2] = 0x40;
+        b[0] = W[1].box[0] - W[1].scroll_x + 16 + 30 * 4 + 2; b[1] = W[1].box[3] - TL_V1_TOP - 128 + 10; b[2] = 0x40;
         b[3] = TL; b[4] = -1;
         ptr[0] = b[0] + 10 * 4; ptr[1] = b[1];
         next(119);
@@ -1207,7 +1248,7 @@ static int script(int *b, int mask)
             return 0;
         CHECK(!strcmp(layout(), "c20 m10 c65"), "after dragging a dissolve: %s", layout());
         mark = drags;
-        b[0] = W[1].box[0] - W[1].scroll_x + 16 + 30 * 4 - 6; b[1] = W[1].box[3] - 48 - 8 - 48; b[2] = 0x40;
+        b[0] = W[1].box[0] - W[1].scroll_x + 16 + 30 * 4 - 6; b[1] = W[1].box[3] - TL_V1_TOP - 48; b[2] = 0x40;
         b[3] = TL; b[4] = -1; /* (its end) */
         ptr[0] = b[0] + 5 * 4; ptr[1] = b[1];
         next(121);
@@ -1283,7 +1324,7 @@ static int script(int *b, int mask)
         CHECK(it.fade_in == 25, "the context menu's Fade in: %d", it.fade_in);
         mark = drags;
         /* its box's inner edge (frame 25), at the top of the track; dragged to frame 10 */
-        b[0] = W[1].box[0] - W[1].scroll_x + 16 + 25 * 4 - 2; b[1] = W[1].box[3] - 48 - 8 - 10; b[2] = 0x40;
+        b[0] = W[1].box[0] - W[1].scroll_x + 16 + 25 * 4 - 2; b[1] = W[1].box[3] - TL_V1_TOP - 10; b[2] = 0x40;
         b[3] = TL; b[4] = -1;
         ptr[0] = b[0] - 15 * 4; ptr[1] = b[1];
         next(130);
@@ -1369,7 +1410,7 @@ static int script(int *b, int mask)
         re_project_item(re_test_project(), 1, &it);
         CHECK(pos == 50 && it.fade_in == 25, "the second clip's fade in: %d, at %d", it.fade_in, pos);
         mark = drags;
-        b[0] = W[1].box[0] - W[1].scroll_x + 16 + (30 + 25) * 4 - 2; b[1] = W[1].box[3] - 48 - 8 - 10; b[2] = 0x40;
+        b[0] = W[1].box[0] - W[1].scroll_x + 16 + (30 + 25) * 4 - 2; b[1] = W[1].box[3] - TL_V1_TOP - 10; b[2] = 0x40;
         b[3] = TL; b[4] = -1;
         ptr[0] = b[0]; ptr[1] = b[1];
         scroll_mark = 0;
@@ -1500,6 +1541,161 @@ static int script(int *b, int mask)
         if (nulls)
             return 0;
         CHECK(!strcmp(layout(), "c30 c75"), "undoing a lift: %s", layout());
+        menus_mark = menus;
+        next(170);
+        data_load_v2(b, 20, 0xB60, "full.png"); /* a PNG on V2 at frame 20: an overlay */
+        return 17;
+    /* ---- overlays: a picture dropped on V2; its menu; dragged; deleted; a sprite file's sprite ---- */
+    case 170: {
+        if (nulls)
+            return 0;
+        re_overlay o;
+        CHECK(re_project_overlays(re_test_project()) == 1 && !re_project_overlay(re_test_project(), 0, &o)
+                  && o.start == 20 && o.length == 85 && o.place == RE_PLACE_FULL,
+              "overlays: a PNG dropped on V2: %d, at %d for %d, place %d", re_project_overlays(re_test_project()),
+              o.start, o.length, o.place);
+        CHECK(re_test_overlay_selected() == 0 && re_test_selected() == -1 && !strcmp(layout(), "c30 c75"),
+              "overlays: dropped: selected %d (%d), %s", re_test_overlay_selected(), re_test_selected(), layout());
+        CHECK(pos == 20, "overlays: dropped: the playhead at %d, not its start", pos);
+        shot("17-overlay-dropped");
+        next(171);
+        return click_tl(b, 30, 2, 2); /* Menu over it */
+    }
+    case 171:
+        CHECK(menus == menus_mark + 1, "overlays: Menu over it: no menu");
+        next(172);
+        b[0] = 0; b[1] = 3; b[2] = -1; /* Place > Top right */
+        return 9;
+    case 172: {
+        if (nulls)
+            return 0;
+        re_overlay o;
+        re_project_overlay(re_test_project(), 0, &o);
+        CHECK(o.place == RE_PLACE_TOP_RIGHT && o.size == 33, "overlays: Place > Top right: %d, size %d", o.place,
+              o.size);
+        next(173);
+        b[0] = 2; b[1] = 2; b[2] = -1; /* Opacity > 50% */
+        return 9;
+    }
+    case 173: {
+        if (nulls)
+            return 0;
+        re_overlay o;
+        re_project_overlay(re_test_project(), 0, &o);
+        CHECK(o.opacity == 50, "overlays: Opacity > 50%%: %d", o.opacity);
+        next(174);
+        b[0] = 3; b[1] = -1; /* Fade in */
+        return 9;
+    }
+    case 174: {
+        if (nulls)
+            return 0;
+        re_overlay o;
+        re_project_overlay(re_test_project(), 0, &o);
+        CHECK(o.fade_in == 25, "overlays: Fade in: %d", o.fade_in);
+        shot("18-overlay-placed");
+        next(175);
+        return click_tl(b, 60, 2, 0x40); /* its middle dragged */
+    }
+    case 175:
+        ptr[0] = W[1].box[0] - W[1].scroll_x + 16 + 50 * 4; /* (10 frames back) */
+        ptr[1] = W[1].box[3] - 48 - 8 - 32;
+        next(176);
+        return script(b, mask);
+    case 176: {
+        re_overlay o;
+        re_project_overlay(re_test_project(), 0, &o);
+        if (o.start == 10) {
+            next(177);
+            return 7; /* dropped */
+        }
+        if (fake_cs - phase_cs > 100)
+            fail_quit("overlays: dragged 10 frames back: at %d", o.start);
+        return 0;
+    }
+    case 177: {
+        if (nulls)
+            return 0;
+        re_overlay o;
+        re_project_overlay(re_test_project(), 0, &o);
+        CHECK(o.start == 10 && o.length == 85 && o.fade_in == 25, "overlays: moved: at %d for %d, fade %d", o.start,
+              o.length, o.fade_in);
+        next(178);
+        return key_to(b, TL, 0x188); /* F8 */
+    }
+    case 178: {
+        if (nulls)
+            return 0;
+        re_overlay o;
+        re_project_overlay(re_test_project(), 0, &o);
+        CHECK(o.start == 20, "overlays: the move undone in one: at %d", o.start);
+        help_text[0] = 0;
+        memset(b, 0, 256);
+        b[0] = 40; b[1] = 0x555; b[2] = 57; b[4] = 0x502;
+        b[5] = W[1].box[0] + 100; b[6] = W[1].box[3] - 48 - 8 - 32; b[8] = TL; b[9] = -1; /* help on V2 */
+        next(179);
+        return 17;
+    }
+    case 179:
+        CHECK(strstr(help_text, "V2") && strstr(help_text, "PNG"), "help on V2: \"%s\"", help_text);
+        next(180);
+        return click_tl(b, 30, 2, 0x400); /* selected */
+    case 180:
+        if (nulls)
+            return 0;
+        CHECK(re_test_overlay_selected() == 0, "overlays: a click on it selected %d", re_test_overlay_selected());
+        next(181);
+        return key_to(b, TL, 0x7F); /* Delete */
+    case 181:
+        if (nulls)
+            return 0;
+        CHECK(re_project_overlays(re_test_project()) == 0 && !strcmp(layout(), "c30 c75")
+                  && re_test_overlay_selected() == -1,
+              "overlays: Delete: %d left, V1 %s", re_project_overlays(re_test_project()), layout());
+        two_sprites("spr2");
+        remove("spr2_second.png");
+        menus_mark = menus;
+        next(182);
+        data_load_v2(b, 0, 0xFF9, "spr2"); /* a sprite file of two: a menu of them */
+        return 17;
+    case 182:
+        CHECK(menus == menus_mark + 1, "overlays: a sprite file of two: no menu");
+        next(183);
+        b[0] = 1; b[1] = -1; /* "second" */
+        return 9;
+    case 183: {
+        if (nulls)
+            return 0;
+        re_overlay o;
+        FILE *f = fopen("spr2_second.png", "rb");
+        CHECK(f != NULL, "overlays: the sprite wasn't saved as spr2_second.png");
+        if (f)
+            fclose(f);
+        CHECK(re_project_overlays(re_test_project()) == 1 && !re_project_overlay(re_test_project(), 0, &o)
+                  && o.start == 0 && o.place == RE_PLACE_TOP_RIGHT && o.size == 20 && !strcmp(o.name, "spr2_second"),
+              "overlays: the sprite: %d, at %d, place %d, size %d, \"%s\"", re_project_overlays(re_test_project()),
+              o.start, o.place, o.size, o.name);
+        shot("19-sprite-overlay");
+        next(184);
+        data_load(b, TL, W[1].box[0] - W[1].scroll_x + 16 + 104 * 4, 0xB60, "full.png"); /* on V1: a clip */
+        return 17;
+    }
+    case 184:
+        if (nulls)
+            return 0;
+        CHECK(!strcmp(layout(), "c30 c75 c125"), "overlays: a picture on V1: %s", layout());
+        next(185);
+        return key_to(b, TL, 0x188);
+    case 185:
+        if (nulls)
+            return 0;
+        next(186);
+        return key_to(b, TL, 0x188);
+    case 186:
+        if (nulls)
+            return 0;
+        CHECK(!strcmp(layout(), "c30 c75") && re_project_overlays(re_test_project()) == 0,
+              "overlays: undone: %s, %d overlays", layout(), re_project_overlays(re_test_project()));
         next(133);
         return click_tl(b, 50, 1, 0x400);
     case 133:

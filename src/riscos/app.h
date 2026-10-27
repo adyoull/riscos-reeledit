@@ -3,11 +3,13 @@
  *
  *   viewer.c    the task: the poll loop, the Viewer window (picture,
  *               transport, toolbar), the menus, keys and messages
- *   timeline.c  the Timeline window: ruler, playhead, V1's clips
+ *   timeline.c  the Timeline window: ruler, playhead, V1's clips, V2's overlays
  *   savebox.c   the Save as box (a draggable file icon, as every RISC OS
  *               program's)
  *   effects.c   fades and dissolves from the menus; the Timeline's context menu
  *   marks.c     the in and out marks: play them, take them out
+ *   overlays.c  pictures over the video (V2): dropped, their menu; sprites
+ *               made PNGs
  *   info.c      the Video information window
  *   display.c, sound.c   the picture (overlay or sprite) and the sound
  *
@@ -32,6 +34,7 @@ typedef struct
     int attached;       /* the Timeline moves with the Viewer (View > Attach Timeline) */
     int snap;           /* the playhead snaps to cuts (N) */
     int mark_in, mark_out; /* the I/O marks: frames (-1: none; marks.c) */
+    int ov_sel;         /* the selected overlay on V2 (-1: none; not with sel) */
 } re_app;
 extern re_app A;
 
@@ -58,6 +61,16 @@ int app_key(int key);
 void app_menu(int x, int y);
 /* The Timeline's context menu for an item (effects.c's), at the pointer. */
 void app_context_menu(int x, int y, int item);
+/* An overlay's menu (overlays.c's), at the pointer. */
+void app_overlay_menu(int x, int y, int ov);
+/* A menu of overlays.c's open (its selections go there). */
+void app_overlays_menu_opened(void);
+/* A clip added to V1 at a frame (as app_load): its RISC OS name, and the
+   name MLT is to open it by. 1, or 0 (reported). */
+int app_add(const char *path, const char *mlt_name, int frame);
+/* The selection (a clip, a dissolve or an overlay) deleted (ripple: what
+   follows V1's closes up). */
+void app_delete_selection(int ripple);
 /* An item removed (ripple: what follows closes up; else a gap is left). */
 void app_delete(int item, int ripple);
 /* The Unix name MLT wants for a RISC OS one. */
@@ -75,7 +88,10 @@ void tl_edited(void);          /* the project changed: extent and redraw */
 void tl_playhead(int frame);   /* the playhead moved (playing: kept in view) */
 int tl_frame_at(int screen_x); /* for a drop */
 void tl_zoom(int in);          /* 1 in, 0 out, -1 the whole project */
-void tl_select(int item);      /* -1: none */
+void tl_select(int item);      /* -1: none (and no overlay) */
+void tl_select_overlay(int ov); /* (and no item) */
+int tl_on_overlays(int screen_y); /* a drop at this height goes on V2 */
+const char *tl_help(int screen_y); /* interactive help: the ruler, V2 or V1 */
 /* The playhead dragged along the ruler: null events while it lasts, each
    moving the playhead to the pointer */
 int tl_scrubbing(void);
@@ -99,6 +115,20 @@ void mk_play(void);       /* Return: from in to out */
 void mk_clear(void);
 void mk_take(int ripple); /* ' Extract (ripple), ; Lift (a gap) */
 void mk_edited(void);     /* after an edit: kept within the project */
+
+/* ---- overlays.c: pictures over the video ---- */
+#define FILETYPE_SPRITE 0xFF9
+#define FILETYPE_PNG    0xB60
+#define FILETYPE_JPEG   0xC85
+int ov_is_picture(const char *path, int filetype);
+/* A picture dropped at a frame: an overlay there (V2), or a clip on V1;
+   a sprite file's sprite (picked from a menu if it has more) made a PNG
+   beside it first */
+void ov_load(const char *path, int filetype, int frame, int overlay);
+void ov_menu_open(int x, int y, int ov);
+void ov_menu_select(int *block);
+int ov_fade_toggle(int ov, int end); /* a second's fade, or taken away. 1 changed */
+void ov_delete(int ov);
 
 /* ---- info.c ---- */
 void info_open(void);          /* Video information: the selected clip (or the one at the playhead), the project */

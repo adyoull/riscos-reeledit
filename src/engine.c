@@ -23,6 +23,7 @@
  * Part of riscos-reeledit. GPL version 2 or later.
  */
 #include "engine.h"
+#include "still.h"
 
 #include <framework/mlt.h>
 #include <libavutil/log.h>
@@ -106,6 +107,7 @@ int re_mlt_start(void)
 #endif
         if (!mlt_factory_init(NULL))
             return -1;
+        re_still_register();
         mlt_started = 1;
     }
     return 0;

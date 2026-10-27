@@ -125,6 +125,48 @@ int re_project_dissolve_cut(re_project *p, int frame);
    the fades away). 1 changed, 0 not. Between begin and end too. */
 int re_project_fade(re_project *p, int item, int end, int length);
 
+/* Overlays: pictures over the video (logos, titles), on V2, the track
+   above V1 (overlay.c). Each is a still picture (PNG, with its alpha, or
+   JPEG: still.h) shown for a stretch of the project, fitted in a box where
+   it's placed, so opaque, fading in and out. They don't overlap, and are
+   kept within the project (edits put each where there's room). Saved
+   with the project as MLT's composite transitions, the pictures as qimage
+   producers, as Shotcut saves its own (not tried in Shotcut yet). */
+enum { RE_PLACE_FULL, RE_PLACE_CENTRE, RE_PLACE_TOP_LEFT, RE_PLACE_TOP_RIGHT, RE_PLACE_BOTTOM_LEFT,
+       RE_PLACE_BOTTOM_RIGHT, RE_PLACE_LOWER_THIRD, RE_PLACES };
+typedef struct
+{
+    int start, length;     /* in the project, frames */
+    int place;             /* RE_PLACE_: all the frame, or a box in its middle, a corner, the lower third */
+    int size;              /* the box: % of the frame's width and height (the lower third's: its height) */
+    int opacity;           /* % */
+    int fade_in, fade_out; /* frames (0: none) */
+    char name[64];         /* the file's leaf name */
+} re_overlay;
+/* Their number, and each (in order, from 0). 0, or -1. */
+int re_project_overlays(re_project *p);
+int re_project_overlay(re_project *p, int i, re_overlay *o);
+/* The overlay at a frame, or -1 */
+int re_project_overlay_at(re_project *p, int frame);
+/* A picture put over the video from a frame, so long (0: 5 seconds),
+   where there's room (after an overlay the frame's in; shortened to fit).
+   A picture as big as the frame, or near it, fills it; a smaller one is a
+   logo, top right. Its index; -1 (no room, an empty project), or: */
+#define RE_OVERLAY_NOT_PICTURE (-2)
+int re_project_overlay_add(re_project *p, const char *file, int frame, int length);
+/* An overlay moved (start changed, length kept) or trimmed (either end):
+   kept clear of the others and within the project. 1 changed, 0 already
+   so, -1 not. Between begin and end too. */
+int re_project_overlay_span(re_project *p, int i, int start, int length);
+/* Its place (RE_PLACE_), size and opacity (%; each -1: kept). 1 changed,
+   0 not. */
+int re_project_overlay_set(re_project *p, int i, int place, int size, int opacity);
+/* Its fade in (end 0) or out (end 1), frames (0: none). 1 changed, 0 not.
+   Between begin and end too. */
+int re_project_overlay_fade(re_project *p, int i, int end, int length);
+/* Taken away. 1 done, 0 not. */
+int re_project_overlay_remove(re_project *p, int i);
+
 /* Undo and redo (up to 100 edits): the project as it was before the last
    edit, and back. 1 done, 0 nothing to do. The producer changes: an
    engine playing it must be opened again. */

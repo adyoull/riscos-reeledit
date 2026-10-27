@@ -94,7 +94,7 @@ typedef struct
 #define IF_CLICK  (3 << 12)
 #define IF_COL(fg, bg) (((fg) << 24) | ((bg) << 28))
 
-re_app A = {0, NULL, NULL, "", -1, 1, 1, -1, -1};
+re_app A = {0, NULL, NULL, "", -1, 1, 1, -1, -1, -1};
 
 static struct
 {
@@ -680,6 +680,8 @@ static void edited(int picture)
     }
     if (A.sel >= re_project_items(A.proj))
         A.sel = -1;
+    if (A.ov_sel >= re_project_overlays(A.proj))
+        A.ov_sel = -1;
     mk_edited();
     tl_edited();
     info_edited();
@@ -710,7 +712,7 @@ static void open_editor(void)
     if (!A.proj) {
         A.proj = re_project_new();
         A.path[0] = 0;
-        A.sel = -1;
+        A.sel = A.ov_sel = -1;
         if (!A.proj) {
             app_report("MLT couldn't start.");
             return;
@@ -772,7 +774,7 @@ static int close_editor(void)
     re_project_close(A.proj);
     A.proj = NULL;
     A.path[0] = 0;
-    A.sel = -1;
+    A.sel = A.ov_sel = -1;
     A.mark_in = A.mark_out = -1;
     app_log("editor closed");
     return 1;
@@ -871,15 +873,24 @@ void app_load(const char *path, int filetype, int frame)
             return;
         }
         snprintf(A.path, sizeof(A.path), "%s", path);
-        A.sel = -1;
+        A.sel = A.ov_sel = -1;
         open_editor();
         app_edited();
         return;
     }
+    if (ov_is_picture(path, filetype)) { /* (on V1: overlays come from V2's row, ov_load) */
+        ov_load(path, filetype, frame, 0);
+        return;
+    }
+    app_add(path, name, frame);
+}
+
+int app_add(const char *path, const char *name, int frame)
+{
     if (!A.proj || !V.win)
         open_editor();
     if (!A.proj)
-        return;
+        return 0;
     app_log("adding %s (%s) at %d", path, name, frame);
     int at = re_project_add(A.proj, name, frame);
     if (at == RE_ADD_MEASURE) { /* (raw MPEG-2 and the like: read through for the length) */
@@ -891,16 +902,17 @@ void app_load(const char *path, int filetype, int frame)
             V.ms_frame = frame;
             V.ms_cs = ro_now_cs();
             update_controls(1);
-            return;
+            return 1;
         }
     }
     if (at < 0) {
         char t[300];
         snprintf(t, sizeof(t), "Reel Edit can't open %s: is it a video?", leaf(path));
         app_report(t);
-        return;
+        return 0;
     }
     added(at);
+    return 1;
 }
 
 /* ---- editing ------------------------------------------------------------------------------------ */
@@ -915,7 +927,7 @@ static void undo(int redo)
     engine_close();
     int done = redo ? re_project_redo(A.proj) : re_project_undo(A.proj);
     app_log("%s: %s", redo ? "redo" : "undo", done ? "done" : "nothing");
-    A.sel = -1;
+    A.sel = A.ov_sel = -1;
     app_edited();
     app_seek(pos);
 }
@@ -969,6 +981,14 @@ void app_delete(int item, int ripple)
     }
 }
 
+void app_delete_selection(int ripple)
+{
+    if (A.ov_sel >= 0)
+        ov_delete(A.ov_sel);
+    else
+        app_delete(A.sel, ripple);
+}
+
 static void save(int x, int y)
 {
     if (A.proj && A.path[0] && re_project_producer(A.proj)) {
@@ -1019,7 +1039,7 @@ static MENU(5) m_main = {"Reel Edit", 7, 2, 7, 0, 340, 44, 0,
                           {0x80, -1, IT("Video information...")}}};
 static MENU(2) m_bar = {"Reel Edit", 7, 2, 7, 0, 160, 44, 0,
                         {{0, -1, IT("Info")}, {0x80, -1, IT("Quit")}}};
-static int menu_is; /* 0 none, 1 the icon bar's, 2 the editor's, 3 the Timeline's context menu (effects.c) */
+static int menu_is; /* 0 none, 1 the icon bar's, 2 the editor's, 3 the Timeline's context menu (effects.c), 4 overlays.c's */
 static int menu_x, menu_y;
 
 void app_menu(int x, int y)
@@ -1044,11 +1064,11 @@ void app_menu(int x, int y)
         m_edit.item[i].flags = (m_edit.item[i].flags & ~1) | (clip && (i == 6 ? sel.fade_in : sel.fade_out) ? 1 : 0);
     }
     for (int i = 8; i <= 9; i++)
-        menu_shade(&m_edit.item[i].iflags, A.sel < 0);
+        menu_shade(&m_edit.item[i].iflags, A.sel < 0 && (i == 9 || A.ov_sel < 0));
     int marked = A.mark_in >= 0 || A.mark_out >= 0;
     menu_shade(&m_edit.item[10].iflags, !marked);
     menu_shade(&m_edit.item[11].iflags, !marked);
-    menu_shade(&m_edit.item[12].iflags, A.sel < 0);
+    menu_shade(&m_edit.item[12].iflags, A.sel < 0 && A.ov_sel < 0);
     for (int i = 3; i <= 4; i++)
         menu_shade(&m_play.item[i].iflags, !has);
     menu_shade(&m_play.item[5].iflags, !marked);
@@ -1079,12 +1099,27 @@ void app_context_menu(int x, int y, int item)
     re_display_check_covered();
 }
 
+void app_overlay_menu(int x, int y, int ov)
+{
+    ov_menu_open(x, y, ov); /* (it says so: app_overlays_menu_opened) */
+}
+
+void app_overlays_menu_opened(void)
+{
+    menu_is = 4;
+    re_display_check_covered();
+}
+
 static void menu_select(int *b)
 {
     _kernel_swi_regs r;
     int p[5];
     if (menu_is == 3) {
         fx_menu_select(b);
+        return;
+    }
+    if (menu_is == 4) {
+        ov_menu_select(b);
         return;
     }
     if (menu_is == 1) {
@@ -1119,7 +1154,7 @@ static void menu_select(int *b)
         case 5: fx_dissolve_at_cut(); break;
         case 6: fx_fade_toggle(A.sel, 0); break;
         case 7: fx_fade_toggle(A.sel, 1); break;
-        case 8: app_delete(A.sel, 1); break;
+        case 8: app_delete_selection(1); break;
         case 9: app_delete(A.sel, 0); break;
         case 10: mk_take(1); break;
         case 11: mk_take(0); break;
@@ -1187,7 +1222,7 @@ int app_key(int k)
     case 0x1E: app_seek(0); return 1;             /* Home */
     case 0x18B: if (A.e) app_seek(re_engine_length(A.e) - 1); return 1; /* Copy (End) */
     case 's': case 'S': split(); return 1;
-    case 0x7F: case 8: app_delete(A.sel, !shift_down()); return 1; /* Delete, Backspace */
+    case 0x7F: case 8: app_delete_selection(!shift_down()); return 1; /* Delete, Backspace */
     case '+': case '=': tl_zoom(1); return 1;
     case '-': case '_': tl_zoom(0); return 1;
     case 0x1A: tl_select(-1); return 1;           /* ^Z: clear the selection */
@@ -1289,7 +1324,7 @@ static void click(int *b)
     case I_FWD: app_seek(pos + ((buttons & 1) ? fps1 : 1)); break;
     case I_END: if (A.e) app_seek(re_engine_length(A.e) - 1); break;
     case I_SPLIT: split(); break;
-    case I_DELETE: app_delete(A.sel, !(buttons & 1)); break; /* Adjust: leaving a gap */
+    case I_DELETE: app_delete_selection(!(buttons & 1)); break; /* Adjust: leaving a gap */
     case I_ZOOMOUT: tl_zoom(0); break;
     case I_ZOOMIN: tl_zoom(1); break;
     case I_FIT: tl_zoom(-1); break;
@@ -1327,15 +1362,10 @@ static void ack(int *b)
 }
 
 /* Interactive help: what's under the pointer */
-static const char *help_for(int win, int icon)
+static const char *help_for(int win, int icon, int y)
 {
     if (win == tl_window())
-        return "This is the Timeline.|MClick or drag on the ruler (the strip with the times) to move the playhead; "
-               "click a clip to select it "
-               "(Adjust: select or not).|MDrag a clip's edge to trim it, its middle to move it.|M"
-               "Menu over a clip gives its effects (fades, dissolves); drag an effect's edge to change its "
-               "length.|MI and O mark a stretch on the ruler; Return plays it, ' takes it out.|M"
-               "Ctrl and the scroll wheel zoom; N turns snapping to cuts on or off.";
+        return tl_help(y);
     if (win == -2)
         return "This is the Reel Edit icon.|MClick Select to open the editor; drop video files on it to add them "
                "to the project, or an MLT project to open it.";
@@ -1345,7 +1375,7 @@ static const char *help_for(int win, int icon)
         return NULL;
     switch (icon) {
     case I_SPLIT: return "Click to split the clip at the playhead (S).";
-    case I_DELETE: return "Click to delete the selected clip, closing the gap (Delete).|MAdjust leaves the gap.";
+    case I_DELETE: return "Click to delete the selected clip (or overlay), closing the gap (Delete).|MAdjust leaves the gap.";
     case I_UNDO: return "Click to undo the last edit (F8).";
     case I_REDO: return "Click to redo the edit undone (F9).";
     case I_SNAP: return "Click to turn snapping on or off (N): the playhead snaps to the cuts.";
@@ -1413,13 +1443,18 @@ static void message(int *b, int event)
         }
         snprintf(file, sizeof(file), "%s", (const char *) &b[11]);
         int type = b[10];
-        int frame = tl_window() && w == tl_window() ? tl_frame_at(b[7]) : -1;
+        int tl = tl_window() && w == tl_window(), frame = tl ? tl_frame_at(b[7]) : -1;
         ack(b);
-        app_load(file, type, frame);
+        /* a picture on V2's row, or on the Viewer (at the playhead): over the video */
+        int over = tl ? tl_on_overlays(b[8]) : w == V.win && A.proj && re_project_length(A.proj) > 0;
+        if (over && ov_is_picture(file, type))
+            ov_load(file, type, tl ? frame : app_position(), 1);
+        else
+            app_load(file, type, frame);
         break;
     }
     case MSG_HELPREQUEST: {
-        const char *h = help_for(b[8], b[9]);
+        const char *h = help_for(b[8], b[9], b[6]);
         if (!h)
             break;
         int reply[64];
@@ -1518,6 +1553,7 @@ double re_test_speed(void) { return A.e ? re_engine_speed(A.e) : 0; }
 int re_test_open(void) { return A.e != NULL; }
 re_project *re_test_project(void) { return A.proj; }
 int re_test_selected(void) { return A.sel; }
+int re_test_overlay_selected(void) { return A.ov_sel; }
 int re_test_snap(void) { return A.snap; }
 int re_test_measuring(void) { return V.ms != NULL; }
 int re_test_busy(void) { return A.e && re_engine_busy(A.e); }

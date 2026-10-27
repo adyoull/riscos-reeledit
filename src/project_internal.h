@@ -1,5 +1,6 @@
 /* project_internal.h - what project.c and dissolve.c share: the project's
- * insides and the steps every edit goes through. Not for the editor's
+ * insides and the steps every edit goes through (and fade.c and
+ * overlay.c). Not for the editor's
  * windows or the engine: they use project.h.
  *
  * An edit: rp_checkpoint (the undo point; not within re_project_begin/end),
@@ -15,8 +16,9 @@ struct re_project
 {
     mlt_profile profile;
     mlt_tractor tractor;   /* NULL while empty */
-    mlt_playlist v1;
-    int own_v1;            /* V1 made here (a reference of ours, besides the tractor's) */
+    mlt_playlist v1, v2;   /* V2: NULL until there's an overlay (overlay.c) */
+    int own_v1, own_v2;    /* made here (a reference of ours, besides the tractor's) */
+    int v1_track, v2_track; /* their places in the tractor */
     unsigned state, next_state, saved_state; /* each edit a new state; modified: not the saved one */
     unsigned changes;
     /* undo and redo: the project as MLT XML before each edit */
@@ -53,5 +55,9 @@ int rp_unmix(re_project *p, int mix);
 int rp_fade_of(re_project *p, int item, int end);
 void rp_set_fade(re_project *p, int item, int end, int length);
 void rp_fit_fades(re_project *p);
+
+/* overlay.c: the composite transitions putting V2's pictures over V1 made
+   again from their settings (after every edit, and a project read) */
+void rp_fit_overlays(re_project *p);
 
 #endif
