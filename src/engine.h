@@ -112,6 +112,9 @@ int re_engine_height(re_engine *e);
    while a run is decoded. */
 void re_engine_play(re_engine *e, double speed);
 double re_engine_speed(re_engine *e);
+/* Playing forwards (after re_engine_play): stop on this frame, shown, as at
+   the end (the in-to-out play of I/O marks). re_engine_play clears it. */
+void re_engine_play_to(re_engine *e, int frame);
 
 /* Go to a frame. Seeks asked for before the next poll replace each other:
    only the last one is drawn. */

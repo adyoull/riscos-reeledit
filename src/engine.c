@@ -65,6 +65,7 @@ struct re_engine
     int length;
     int width, height;
     double speed;
+    int stop_at;          /* playing forwards: stop on this frame (-1: at the end; re_engine_play_to) */
     double base_position; /* playing: where the clock started from... */
     unsigned base_clock;  /* ...and when */
     int shown;            /* the frame on show (-1: none yet) */
@@ -284,6 +285,7 @@ static re_engine *setup(re_engine *e, double preview_scale)
     e->width = even(e->profile->width * preview_scale);
     e->height = even(e->profile->height * preview_scale);
     e->shown = -1;
+    e->stop_at = -1;
     e->seek_to = 0;
     e->last_fetched = -2;
     {
@@ -360,11 +362,17 @@ void re_engine_play(re_engine *e, double speed)
         return;
     int from = re_engine_position(e);
     e->speed = speed;
+    e->stop_at = -1;
     e->base_position = from < 0 ? 0 : from;
     e->base_clock = now_cs(e);
     e->rc_end = -1; /* (a run half decoded: not finished) */
     e->audio_next = e->base_position + 1;
     e->snd_last_q = -1;
+}
+
+void re_engine_play_to(re_engine *e, int frame)
+{
+    e->stop_at = e->speed > 0 ? frame : -1;
 }
 
 void re_engine_seek(re_engine *e, int position)
@@ -668,9 +676,11 @@ int re_engine_poll(re_engine *e)
     /* (a hair over, so a frame due exactly now isn't missed by rounding;
        backwards, the frame due is the one not yet passed: rounded up) */
     int target = e->speed > 0 ? (int) floor(due + 1e-6) : (int) ceil(due - 1e-6);
+    if (e->stop_at >= 0 && e->speed > 0 && target >= e->stop_at && e->stop_at < e->length)
+        target = e->length; /* (played to the stop: as at the end, there) */
     if (target >= e->length || target < 0) {
         /* the end (or the start, backwards): the last frame, then stop */
-        target = clamp_position(e, target);
+        target = e->stop_at >= 0 && e->speed > 0 ? e->stop_at : clamp_position(e, target);
         if (target != e->shown)
             render(e, target);
         e->speed = 0;

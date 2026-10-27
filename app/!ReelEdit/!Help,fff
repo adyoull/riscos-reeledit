@@ -63,6 +63,15 @@ dragging from the small white mark at the bottom of a cut overlaps the
 clips by as far as you drag, the overlap a dissolve. A fade stays at the
 clip's end as you trim it; at an end in a dissolve there's none.
 
+Marks (a stretch of the project to play or take out): I marks the in
+point at the playhead, O the out point (its frame is the last one in the
+stretch); the stretch shows light blue on the ruler, with blue lines
+through the track. Shift-I and Shift-O go to the marks; Return plays from
+in to out and stops on the out mark. ' (Extract) takes the stretch out,
+the clips after it moving up; ; (Lift) takes it out leaving a gap. Both
+are one step for Undo; neither goes through a dissolve (delete it first).
+Play > Clear the marks takes them away. The marks aren't saved.
+
 The Timeline: the playhead moves only from the ruler (the strip with the
 times along the top). Click the ruler to move the playhead there (the
 Viewer shows that frame), or drag along it to scrub; its timecode is shown
@@ -83,9 +92,10 @@ Save. Interactive help (!Help) says what each does.
 The menu (Menu over the Viewer or the Timeline):
   File  New, Save (F3), Save as...
   Edit  Undo, Redo, Split, Trim the start, Trim the end, Dissolve,
-        Fade in, Fade out, Delete,
-        Leave gap, Clear selection
-  Play  Play/Stop, Start, End
+        Fade in, Fade out, Delete, Leave gap, Extract, Lift,
+        Clear selection
+  Play  Play/Stop, Start, End, Mark in, Mark out, Play in to out,
+        Clear the marks
   View  Zoom the Timeline in, out, the whole project; Attach the
         Timeline; Snapping
   Video information...  the selected clip (or the one at the playhead):
@@ -101,6 +111,10 @@ Keys (with the Viewer or the Timeline in front, clicked on):
   S            split at the playhead
   Q  W         trim the clip at the playhead: its start to it, its end to
                it (the clips after close up)
+  I  O         the in mark, the out mark at the playhead
+  Shift-I  -O  go to the in mark, the out mark
+  Return       play from the in mark to the out mark
+  '  ;         Extract (the marked part out, closing up), Lift (a gap)
   D            a dissolve at the cut nearest the playhead
   Delete       delete the selected clip or dissolve (Shift-Delete: leave a gap)
   F8  F9       undo, redo (100 steps)

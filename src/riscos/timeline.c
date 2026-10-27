@@ -39,6 +39,7 @@
 #define LEFT    16   /* frame 0's x */
 #define MIN_W   640
 #define LABEL_W 200  /* the playhead's timecode, beside it on the ruler */
+#define MARK_TEXT_W 140 /* a ruler mark's label (m:ss.ff), at most */
 #define SNAP    12   /* OS units: the playhead snaps to a cut this near */
 #define EDGE    24   /* OS units: a drag this near a clip's edge trims it (a third of a narrow clip) */
 /* Colours (BBGGRR00): video blue; effects (fades, dissolves) purple, so
@@ -46,6 +47,8 @@
 #define CLIP_COLOUR   0xC0905000u
 #define EFFECT_COLOUR 0xA0608000u /* (128, 96, 160) */
 #define EFFECT_DARK   0x783C5800u /* (88, 60, 120) */
+#define MARKED_COLOUR 0xF8D8B000u /* (176, 216, 248): the ruler between the I/O marks */
+#define MARK_COLOUR   0xB0601800u /* (24, 96, 176): the marks' lines */
 #define CORNER  32   /* OS units: the track's top (fade handles) and bottom (dissolve marks) strips */
 #define TRACK_TOP (-RULER_H - 8) /* the track's top and bottom (work area) */
 #define TRACK_BOTTOM (TRACK_TOP - TRACK_H)
@@ -242,9 +245,12 @@ void tl_playhead(int frame)
     int old = x_of(T.playhead), now = x_of(frame);
     T.playhead = frame;
     /* (the line, its handle, and the timecode to its right) */
-    r.r[0] = T.win; r.r[1] = old - 8; r.r[2] = -(RULER_H + TRACK_H + 16); r.r[3] = old + LABEL_W + 4; r.r[4] = 0;
+    /* (from a label's width before it: the ruler labels it hides, or uncovers) */
+    r.r[0] = T.win; r.r[1] = old - MARK_TEXT_W - 8; r.r[2] = -(RULER_H + TRACK_H + 16); r.r[3] = old + LABEL_W + 4;
+    r.r[4] = 0;
     ro_swi(Wimp_ForceRedraw, &r);
-    r.r[0] = T.win; r.r[1] = now - 8; r.r[2] = -(RULER_H + TRACK_H + 16); r.r[3] = now + LABEL_W + 4; r.r[4] = 0;
+    r.r[0] = T.win; r.r[1] = now - MARK_TEXT_W - 8; r.r[2] = -(RULER_H + TRACK_H + 16); r.r[3] = now + LABEL_W + 4;
+    r.r[4] = 0;
     ro_swi(Wimp_ForceRedraw, &r);
     /* kept in view: a quarter of the way in when it goes off either side */
     if (now < T.scroll_x || now > T.scroll_x + T.vis_w - 16)
@@ -322,6 +328,23 @@ static void text(const char *s, int x, int y, unsigned fg, unsigned bg)
     ro_swi(Wimp_TextOp, &r);
     r.r[0] = 2; r.r[1] = (intptr_t) s; r.r[2] = -1; r.r[3] = -1; r.r[4] = x; r.r[5] = y;
     ro_swi(Wimp_TextOp, &r);
+}
+
+/* A text as it fits a width (OS units) in the desktop font: cut short with
+   an ellipsis (RISC OS's character &8C) if it doesn't */
+static void fit_text(char *out, int size, const char *s, int width)
+{
+    _kernel_swi_regs r;
+    snprintf(out, size, "%s", s);
+    int n = (int) strlen(out);
+    for (;;) {
+        r.r[0] = 1; r.r[1] = (intptr_t) out; r.r[2] = 0;
+        if (ro_swi(Wimp_TextOp, &r) || (int) r.r[0] <= width || n <= 1)
+            return;
+        n--; /* (a character fewer, and the ellipsis) */
+        out[n - 1] = (char) 0x8C;
+        out[n] = 0;
+    }
 }
 
 static void clip(int x0, int y0, int x1, int y1) /* inclusive */
@@ -438,15 +461,27 @@ static void draw(int *b)
     int ruler_y0 = oy - RULER_H, track_y1 = oy - RULER_H - 8, track_y0 = track_y1 - TRACK_H;
     double fps = A.proj ? re_project_fps(A.proj) : 25;
 
-    /* the ruler */
+    /* the ruler, the marked stretch on it */
     colour(0xDDDDDD00);
     rect(cx0, ruler_y0, cx1, oy);
+    int m0 = -1, m1 = -1; /* (the marked stretch's x: from the in mark, or the start, to the out mark, or the end) */
+    if (A.proj && (A.mark_in >= 0 || A.mark_out >= 0)) {
+        m0 = ox + x_of(A.mark_in >= 0 ? A.mark_in : 0);
+        m1 = ox + x_of(A.mark_out >= 0 ? A.mark_out + 1 : re_project_length(A.proj));
+        colour(MARKED_COLOUR);
+        rect(m0, ruler_y0, m1, oy);
+    }
     if (A.proj) {
         int step = ruler_step(fps), len = re_project_length(A.proj);
         colour(0x55555500);
         for (int f = (f0 < 0 ? 0 : f0) / step * step; f <= f1 && f <= len; f += step) {
             int x = ox + x_of(f);
             rect(x, ruler_y0, x + 1, ruler_y0 + 16);
+            /* (a label the playhead's timecode would cover isn't drawn: half
+               hidden, it read as part of the timecode) */
+            int phx = ox + x_of(T.playhead);
+            if (len > 0 && x + 6 < phx + LABEL_W && x + 6 + MARK_TEXT_W > phx - 2)
+                continue;
             char tc[40];
             mark_label(tc, sizeof(tc), f, fps);
             text(tc, x + 6, ruler_y0 + 20, 0x00000000, 0xDDDDDD00);
@@ -495,8 +530,11 @@ static void draw(int *b)
                 /* the name at the start, and again along a long clip (so
                    it's in view however it's scrolled) */
                 for (int nx = name_x; nx == name_x || nx < x1 - 200; nx += 1000)
-                    if (nx < c1 && nx + 1000 > c0)
-                        text(it.name, nx, track_y1 - CORNER - 28, 0xFFFFFF00, fill); /* (below the fade handles) */
+                    if (nx < c1 && nx + 1000 > c0) {
+                        char shown[64];
+                        fit_text(shown, sizeof(shown), it.name, (x1 - nx < 1000 ? x1 - nx : 1000) - 12);
+                        text(shown, nx, track_y1 - CORNER - 28, 0xFFFFFF00, fill); /* (below the fade handles) */
+                    }
                 clip(cx0, cy0, cx1, cy1);
             }
         }
@@ -521,6 +559,18 @@ static void draw(int *b)
             int cx = ox + x_of(b.start) - 1;
             colour(0xFFFFFF00);
             triangle(cx - 12, track_y0, cx + 12, track_y0, cx, track_y0 + 16);
+        }
+    }
+    /* the marks: lines down through the track, with a bracket on the ruler */
+    if (m0 >= 0) {
+        colour(MARK_COLOUR);
+        if (A.mark_in >= 0) {
+            rect(m0, track_y0 - 8, m0 + 3, oy);
+            rect(m0, oy - 6, m0 + 16, oy);
+        }
+        if (A.mark_out >= 0) {
+            rect(m1 - 3, track_y0 - 8, m1, oy);
+            rect(m1 - 16, oy - 6, m1, oy);
         }
     }
     /* moving a clip: where it would go */

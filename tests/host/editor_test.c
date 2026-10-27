@@ -54,6 +54,7 @@ double re_test_speed(void);
 int re_test_open(void);
 re_project *re_test_project(void);
 int re_test_selected(void);
+int re_test_mark(int out);
 int re_test_snap(void);
 int re_test_measuring(void);
 int re_test_busy(void);
@@ -410,6 +411,11 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
     case 0x400D2: case 0x400DC: break;
     case 0x400F9:                                                   /* Wimp_TextOp: 2 plots */
         scr_textop((int) r->r[0], r->r[1], r->r[2], (int) r->r[4], (int) r->r[5]);
+        if ((r->r[0] & 0xFF) == 1) { /* the width: 16 OS units a character */
+            size_t n = strlen((const char *) r->r[1]);
+            r->r[0] = 16 * (intptr_t) (r->r[2] > 0 && (size_t) r->r[2] < n ? (size_t) r->r[2] : n);
+            break;
+        }
         if ((r->r[0] & 0xFF) == 2) {
             snprintf(last_text, sizeof(last_text), "%s", (const char *) r->r[1]);
             if (strlen(all_text) + strlen(last_text) + 2 < sizeof(all_text)) {
@@ -1421,9 +1427,81 @@ static int script(int *b, int mask)
         re_item it;
         re_project_item(re_test_project(), 1, &it);
         CHECK(it.fade_in == 0, "undoing the context menu's fade in: %d", it.fade_in);
+        next(150);
+        return click_tl(b, 10, 1, 0x400);
+    }
+    /* ---- I/O marks: I at 10, O at 40; Return plays 10 to 40 and stops on 40; Shift-I goes to 10;
+       ' (Extract) takes 10-40 out, one undo; ; (Lift) leaves a gap ---- */
+    case 150:
+        if (nulls)
+            return 0;
+        next(151);
+        return key_to(b, TL, 'i');
+    case 151:
+        CHECK(re_test_mark(0) == 10 && re_test_mark(1) == -1, "I at 10: marks %d, %d", re_test_mark(0), re_test_mark(1));
+        next(152);
+        return click_tl(b, 40, 1, 0x400);
+    case 152:
+        if (nulls)
+            return 0;
+        next(153);
+        return key_to(b, TL, 'o');
+    case 153:
+        CHECK(re_test_mark(0) == 10 && re_test_mark(1) == 40, "O at 40: marks %d, %d", re_test_mark(0), re_test_mark(1));
+        shot("16-marks");
+        next(154);
+        return key_to(b, TL, 13); /* Return */
+    case 154: /* (playing from 10; stopped on 40) */
+        if (re_test_speed() != 0 || pos != 40) {
+            if (fake_cs - phase_cs > 400)
+                fail_quit("Return: playing the marks didn't stop on 40 (at %d, speed %g)", pos, re_test_speed());
+            return 0;
+        }
+        CHECK(fake_cs - phase_cs >= 100, "Return: 10 to 40 played in %u cs (not about 120)", fake_cs - phase_cs);
+        next(155);
+        return key_to(b, TL, 'I');
+    case 155:
+        if (nulls)
+            return 0;
+        CHECK(pos == 10, "Shift-I: at %d, not the in mark (10)", pos);
+        next(156);
+        return key_to(b, TL, '\'');
+    case 156:
+        if (nulls)
+            return 0;
+        CHECK(!strcmp(layout(), "c10 c64") && pos == 10 && re_test_mark(0) == -1, "' (Extract) 10-40: %s, at %d, mark %d",
+              layout(), pos, re_test_mark(0));
+        next(157);
+        return key_to(b, TL, 0x188);
+    case 157:
+        if (nulls)
+            return 0;
+        CHECK(!strcmp(layout(), "c30 c75"), "one F8 for an extract: %s", layout());
+        next(158);
+        return key_to(b, TL, 'i'); /* (at 10) */
+    case 158:
+        next(159);
+        return click_tl(b, 40, 1, 0x400);
+    case 159:
+        if (nulls)
+            return 0;
+        next(160);
+        return key_to(b, TL, 'o');
+    case 160:
+        next(161);
+        return key_to(b, TL, ';');
+    case 161:
+        if (nulls)
+            return 0;
+        CHECK(!strcmp(layout(), "c10 g31 c64"), "; (Lift) 10-40: %s", layout());
+        next(162);
+        return key_to(b, TL, 0x188);
+    case 162:
+        if (nulls)
+            return 0;
+        CHECK(!strcmp(layout(), "c30 c75"), "undoing a lift: %s", layout());
         next(133);
         return click_tl(b, 50, 1, 0x400);
-    }
     case 133:
         if (nulls)
             return 0;

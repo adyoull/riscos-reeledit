@@ -447,23 +447,69 @@ int re_project_add_length(re_project *p, const char *file, int frame, int length
     return at;
 }
 
-int re_project_split(re_project *p, int frame)
+/* The item at a frame split there (not at its start, not a dissolve): 1
+   split, 0 not (nothing to split there). The fade out goes with the second
+   part, where the end is. No undo point of its own. */
+static int split_at(re_project *p, int frame)
 {
     int i = re_project_item_at(p, frame);
     re_item it;
     if (i < 0 || re_project_item(p, i, &it) || it.mix || frame <= it.start || frame >= it.start + it.length)
         return 0;
-    /* (the first part: its in to the frame before) */
-    rp_checkpoint(p);
     int fade_out = rp_fade_of(p, i, 1);
-    if (mlt_playlist_split(p->v1, i, frame - it.start - 1)) {
-        rp_no_edit(p);
+    /* (the first part: its in to the frame before) */
+    if (mlt_playlist_split(p->v1, i, frame - it.start - 1))
         return 0;
-    }
-    if (fade_out) { /* (the fade out goes with the second part, where the end is) */
+    if (fade_out) {
         rp_set_fade(p, i, 1, 0);
         rp_set_fade(p, i + 1, 1, fade_out);
     }
+    return 1;
+}
+
+int re_project_split(re_project *p, int frame)
+{
+    rp_checkpoint(p);
+    if (!split_at(p, frame)) {
+        rp_no_edit(p);
+        return 0;
+    }
+    rp_changed(p);
+    return 1;
+}
+
+int re_project_remove_range(re_project *p, int in, int out, int ripple)
+{
+    int len = re_project_length(p);
+    if (!p->v1 || in < 0 || out < in || in >= len)
+        return 0;
+    if (out >= len)
+        out = len - 1;
+    for (int i = 0; i < re_project_items(p); i++) { /* (not through a dissolve: remove it first) */
+        re_item it;
+        if (!re_project_item(p, i, &it) && it.mix && it.start <= out && it.start + it.length - 1 >= in)
+            return 0;
+    }
+    rp_checkpoint(p);
+    split_at(p, out + 1); /* (the end first: the item at the start keeps its index) */
+    split_at(p, in);
+    for (int i = re_project_items(p) - 1; i >= 0; i--) {
+        re_item it;
+        if (re_project_item(p, i, &it) || it.start < in || it.start + it.length - 1 > out)
+            continue;
+        if (ripple || it.gap) {
+            mlt_playlist_remove(p->v1, i);
+        } else {
+            mlt_producer gone = mlt_playlist_replace_with_blank(p->v1, i);
+            if (gone)
+                mlt_producer_close(gone);
+        }
+    }
+    if (!ripple) /* (one gap where there were several; none at the end, below) */
+        mlt_playlist_consolidate_blanks(p->v1, 1);
+    int n = mlt_playlist_count(p->v1);
+    if (n > 0 && mlt_playlist_is_blank(p->v1, n - 1))
+        mlt_playlist_remove(p->v1, n - 1);
     rp_changed(p);
     return 1;
 }

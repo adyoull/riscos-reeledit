@@ -27,7 +27,7 @@ FONT_FILE = '/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed.ttf'  # (about
 FONT = ImageFont.truetype(FONT_FILE, 14)
 FONT_B = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf', 14)
 # (RISC OS's characters &80-&9F that !ReelEdit uses: the arrows)
-RO_CHARS = {0x88: '←', 0x89: '→', 0x8A: '↓', 0x8B: '⇧'}
+RO_CHARS = {0x88: '←', 0x89: '→', 0x8A: '↓', 0x8B: '⇧', 0x8C: '…'}
 
 
 def text_of(raw):

@@ -70,6 +70,11 @@ int re_project_split(re_project *p, int frame);
    were before it; a clip removed takes its dissolves with it. 1 done, 0 not. */
 int re_project_remove(re_project *p, int item, int ripple);
 
+/* The frames in to out taken out (Premiere's Extract, with ripple: what
+   follows moves up; Lift, without: a gap is left). Clips are split at both
+   ends. Not across a dissolve (remove it first). 1 done, 0 not. */
+int re_project_remove_range(re_project *p, int in, int out, int ripple);
+
 /* Ripple trims (Premiere's Q and W): the clip at a frame trimmed so it
    starts there (end 0: the frames before it go) or ends just before it
    (end 1: it and those after go); what follows moves up. 1 done, 0 not. */

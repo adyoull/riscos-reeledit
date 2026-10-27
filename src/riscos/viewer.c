@@ -94,7 +94,7 @@ typedef struct
 #define IF_CLICK  (3 << 12)
 #define IF_COL(fg, bg) (((fg) << 24) | ((bg) << 28))
 
-re_app A = {0, NULL, NULL, "", -1, 1, 1};
+re_app A = {0, NULL, NULL, "", -1, 1, 1, -1, -1};
 
 static struct
 {
@@ -680,6 +680,7 @@ static void edited(int picture)
     }
     if (A.sel >= re_project_items(A.proj))
         A.sel = -1;
+    mk_edited();
     tl_edited();
     info_edited();
     update_title();
@@ -772,6 +773,7 @@ static int close_editor(void)
     A.proj = NULL;
     A.path[0] = 0;
     A.sel = -1;
+    A.mark_in = A.mark_out = -1;
     app_log("editor closed");
     return 1;
 }
@@ -993,17 +995,21 @@ static void save(int x, int y)
 
 static MENU(3) m_file = {"File", 7, 2, 7, 0, 280, 44, 0,
                          {{0, -1, IT("New")}, {0, -1, IT("Save          F3")}, {0x80, -1, IT("Save as...")}}};
-static MENU(11) m_edit = {"Edit", 7, 2, 7, 0, 520, 44, 0,
+static MENU(13) m_edit = {"Edit", 7, 2, 7, 0, 520, 44, 0,
                          {{0, -1, IT("Undo                     F8")}, {2, -1, IT("Redo                     F9")},
                           {0, -1, IT("Split at the playhead     S")}, {0, -1, IT("Trim the start to it      Q")},
                           {0, -1, IT("Trim the end to it        W")}, {2, -1, IT("Dissolve at the cut       D")},
                           {0, -1, IT("Fade in")}, {2, -1, IT("Fade out")},
                           {0, -1, IT("Delete               Delete")},
-                          {0, -1, IT("Delete, leaving a gap   \x8b" "Del")}, {0x80, -1, IT("Clear the selection      ^Z")}}};
+                          {2, -1, IT("Delete, leaving a gap   \x8b" "Del")},
+                          {0, -1, IT("Extract the marked part   '")}, {2, -1, IT("Lift the marked part      ;")},
+                          {0x80, -1, IT("Clear the selection      ^Z")}}};
 static char play_item[24] = "Play           Space";
-static MENU(3) m_play = {"Play", 7, 2, 7, 0, 340, 44, 0,
+static MENU(7) m_play = {"Play", 7, 2, 7, 0, 420, 44, 0,
                          {{0, -1, ITEM_FLAGS, play_item, (const char *) -1, sizeof(play_item)},
-                          {0, -1, IT("To the start   Home")}, {0x80, -1, IT("To the end     Copy")}}};
+                          {0, -1, IT("To the start   Home")}, {2, -1, IT("To the end     Copy")},
+                          {0, -1, IT("Mark in            I")}, {0, -1, IT("Mark out           O")},
+                          {0, -1, IT("Play in to out Return")}, {0x80, -1, IT("Clear the marks")}}};
 static MENU(5) m_view = {"View", 7, 2, 7, 0, 520, 44, 0,
                          {{0, -1, IT("Zoom the Timeline in       +")}, {0, -1, IT("Zoom the Timeline out      -")},
                           {2, -1, IT("The whole project     \x8bZ")}, {0, -1, IT("Attach the Timeline")},
@@ -1037,8 +1043,16 @@ void app_menu(int x, int y)
         menu_shade(&m_edit.item[i].iflags, !clip);
         m_edit.item[i].flags = (m_edit.item[i].flags & ~1) | (clip && (i == 6 ? sel.fade_in : sel.fade_out) ? 1 : 0);
     }
-    for (int i = 8; i <= 10; i++)
+    for (int i = 8; i <= 9; i++)
         menu_shade(&m_edit.item[i].iflags, A.sel < 0);
+    int marked = A.mark_in >= 0 || A.mark_out >= 0;
+    menu_shade(&m_edit.item[10].iflags, !marked);
+    menu_shade(&m_edit.item[11].iflags, !marked);
+    menu_shade(&m_edit.item[12].iflags, A.sel < 0);
+    for (int i = 3; i <= 4; i++)
+        menu_shade(&m_play.item[i].iflags, !has);
+    menu_shade(&m_play.item[5].iflags, !marked);
+    menu_shade(&m_play.item[6].iflags, !marked);
     m_view.item[4].flags = (m_view.item[4].flags & ~1) | (A.snap ? 1 : 0);
     for (int i = 0; i < 3; i++)
         menu_shade(&m_play.item[i].iflags, !has);
@@ -1107,13 +1121,18 @@ static void menu_select(int *b)
         case 7: fx_fade_toggle(A.sel, 1); break;
         case 8: app_delete(A.sel, 1); break;
         case 9: app_delete(A.sel, 0); break;
-        case 10: tl_select(-1); break;
+        case 10: mk_take(1); break;
+        case 11: mk_take(0); break;
+        case 12: tl_select(-1); break;
         }
         break;
     case 2: /* Play */
         if (b[1] == 0) app_set_speed(A.e && re_engine_speed(A.e) != 0 ? 0 : 1);
         else if (b[1] == 1) app_seek(0);
         else if (b[1] == 2 && A.e) app_seek(re_engine_length(A.e) - 1);
+        else if (b[1] == 3 || b[1] == 4) mk_set(b[1] == 4);
+        else if (b[1] == 5) mk_play();
+        else if (b[1] == 6) mk_clear();
         break;
     case 3: /* View */
         if (b[1] >= 0 && b[1] <= 2)
@@ -1178,6 +1197,13 @@ int app_key(int k)
     case 0x18E: to_cut(1); return 1;              /* Down: the cut after */
     case 'q': case 'Q': trim(0); return 1;
     case 'd': case 'D': fx_dissolve_at_cut(); return 1;
+    case 'i': mk_set(0); return 1;
+    case 'o': mk_set(1); return 1;
+    case 'I': mk_go(0); return 1;                  /* Shift-I */
+    case 'O': mk_go(1); return 1;                  /* Shift-O */
+    case 13: mk_play(); return 1;                  /* Return: in to out */
+    case '\'': mk_take(1); return 1;              /* Extract */
+    case ';': mk_take(0); return 1;                /* Lift */
     case 'w': case 'W': trim(1); return 1;
     case 'n': case 'N': snap_toggle(); return 1;
     case 'Z': case '\\': tl_zoom(-1); return 1;    /* Shift-Z, \\: the whole project */
@@ -1308,7 +1334,7 @@ static const char *help_for(int win, int icon)
                "click a clip to select it "
                "(Adjust: select or not).|MDrag a clip's edge to trim it, its middle to move it.|M"
                "Menu over a clip gives its effects (fades, dissolves); drag an effect's edge to change its "
-               "length.|M"
+               "length.|MI and O mark a stretch on the ruler; Return plays it, ' takes it out.|M"
                "Ctrl and the scroll wheel zoom; N turns snapping to cuts on or off.";
     if (win == -2)
         return "This is the Reel Edit icon.|MClick Select to open the editor; drop video files on it to add them "
@@ -1487,6 +1513,7 @@ static void iconbar_icon(void)
 #ifdef RE_TEST
 /* for tests/host/viewer_test.c */
 int re_test_position(void) { return A.e ? re_engine_position(A.e) : -1; }
+int re_test_mark(int out) { return out ? A.mark_out : A.mark_in; }
 double re_test_speed(void) { return A.e ? re_engine_speed(A.e) : 0; }
 int re_test_open(void) { return A.e != NULL; }
 re_project *re_test_project(void) { return A.proj; }

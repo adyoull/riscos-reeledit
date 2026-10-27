@@ -200,7 +200,11 @@ static int ov_create(int fw, int fh, int colour709, int full)
         r.r[2] = 1; /* must scale */
         r.r[3] = D.task;
         if (ro_swi(ov.swi[OV_CREATE], &r)) {
-            lg("overlay: Create refused YV12 %dx%d", fw, fh);
+            static int said_w, said_h; /* (once a size: it's asked again and again) */
+            if (fw != said_w || fh != said_h)
+                lg("overlay: Create refused YV12 %dx%d (said once a size)", fw, fh);
+            said_w = fw;
+            said_h = fh;
             return 0;
         }
         ov.id = r.r[0];

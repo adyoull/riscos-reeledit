@@ -13,7 +13,7 @@
 #define Wimp_TextOp 0x400F9
 #define LINE_H 44
 #define LABEL_W 300
-#define WIDTH 1200
+#define WIDTH 1700 /* (the Video line: codec, size, rate, format, colours) */
 
 static struct
 {

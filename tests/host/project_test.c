@@ -282,6 +282,37 @@ static void fades(const char *a, const char *b, const char *snd, const char *out
     re_project_close(p);
 }
 
+/* ---- a range taken out (I/O marks: Extract, Lift): clips split at both
+   ends; what follows moves up or a gap is left; fades kept at the ends
+   left; not across a dissolve */
+static void ranges(const char *a, const char *b)
+{
+    re_project *p = re_project_new();
+    re_project_add(p, a, -1);
+    re_project_add(p, b, -1);
+    re_item it;
+    CHECK(re_project_fade(p, 1, 1, 10) == 1, "ranges: fade");
+    CHECK(re_project_remove_range(p, 50, 99, 1) == 1 && !strcmp(layout(p), "c50 c50") && re_project_length(p) == 100,
+          "ranges: extract 50-99: %s, %d", layout(p), re_project_length(p));
+    re_project_item(p, 1, &it);
+    CHECK(it.in == 25 && it.fade_out == 10, "ranges: what's left of b: in %d, fade out %d", it.in, it.fade_out);
+    CHECK(re_project_undo(p) && !strcmp(layout(p), "c75 c75"), "ranges: one undo: %s", layout(p));
+    CHECK(re_project_remove_range(p, 50, 99, 0) == 1 && !strcmp(layout(p), "c50 g50 c50") && re_project_length(p) == 150,
+          "ranges: lift 50-99: %s", layout(p));
+    re_project_undo(p);
+    CHECK(re_project_remove_range(p, 75, 500, 0) == 1 && !strcmp(layout(p), "c75"), "ranges: lift to the end: %s",
+          layout(p));
+    re_project_undo(p);
+    CHECK(re_project_remove_range(p, 0, 74, 1) == 1 && !strcmp(layout(p), "c75"), "ranges: a whole clip: %s", layout(p));
+    re_project_undo(p);
+    CHECK(re_project_remove_range(p, 80, 70, 1) == 0 && re_project_remove_range(p, 200, 210, 1) == 0,
+          "ranges: out before in, or past the end");
+    CHECK(re_project_dissolve(p, 0, 10, 1) == 1 && re_project_remove_range(p, 60, 80, 1) == 0
+              && !strcmp(layout(p), "c65 m10 c65"),
+          "ranges: across a dissolve: %s", layout(p));
+    re_project_close(p);
+}
+
 int main(int argc, char **argv)
 {
     if (argc != 10) {
@@ -533,6 +564,7 @@ int main(int argc, char **argv)
 
     dissolves(a, b, argv[6], out);
     fades(a, b, argv[9], out);
+    ranges(a, b);
 
     printf("project_test: %s\n", fails ? "FAILED" : "passed");
     return fails != 0;

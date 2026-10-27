@@ -7,6 +7,7 @@
  *   savebox.c   the Save as box (a draggable file icon, as every RISC OS
  *               program's)
  *   effects.c   fades and dissolves from the menus; the Timeline's context menu
+ *   marks.c     the in and out marks: play them, take them out
  *   info.c      the Video information window
  *   display.c, sound.c   the picture (overlay or sprite) and the sound
  *
@@ -30,6 +31,7 @@ typedef struct
     int sel;            /* the selected item on V1 (-1: none) */
     int attached;       /* the Timeline moves with the Viewer (View > Attach Timeline) */
     int snap;           /* the playhead snaps to cuts (N) */
+    int mark_in, mark_out; /* the I/O marks: frames (-1: none; marks.c) */
 } re_app;
 extern re_app A;
 
@@ -89,6 +91,14 @@ int fx_dissolve(int before);             /* a second's dissolve at the cut after
 int fx_dissolve_at_cut(void);            /* D: at the cut nearest the playhead */
 void fx_menu_open(int x, int y, int item);
 void fx_menu_select(int *block);
+
+/* ---- marks.c: in and out marks ---- */
+void mk_set(int out);     /* I, O: the mark at the playhead */
+void mk_go(int out);      /* Shift-I, Shift-O: the playhead to it */
+void mk_play(void);       /* Return: from in to out */
+void mk_clear(void);
+void mk_take(int ripple); /* ' Extract (ripple), ; Lift (a gap) */
+void mk_edited(void);     /* after an edit: kept within the project */
 
 /* ---- info.c ---- */
 void info_open(void);          /* Video information: the selected clip (or the one at the playhead), the project */
