@@ -41,6 +41,11 @@
 #define LABEL_W 200  /* the playhead's timecode, beside it on the ruler */
 #define SNAP    12   /* OS units: the playhead snaps to a cut this near */
 #define EDGE    24   /* OS units: a drag this near a clip's edge trims it (a third of a narrow clip) */
+/* Colours (BBGGRR00): video blue; effects (fades, dissolves) purple, so
+   what's applied to a clip doesn't read as part of it */
+#define CLIP_COLOUR   0xC0905000u
+#define EFFECT_COLOUR 0xA0608000u /* (128, 96, 160) */
+#define EFFECT_DARK   0x783C5800u /* (88, 60, 120) */
 #define CORNER  32   /* OS units: the track's top (fade handles) and bottom (dissolve marks) strips */
 #define TRACK_TOP (-RULER_H - 8) /* the track's top and bottom (work area) */
 #define TRACK_BOTTOM (TRACK_TOP - TRACK_H)
@@ -375,7 +380,7 @@ static void draw_fades(const re_item *it, int ox, int x0, int x1, int y1, int cx
         int edge = ox + fade_handle_x(end, it), b0 = end ? edge : x0, b1 = end ? x1 : edge;
         if (b1 - b0 < 4)
             b1 = b0 + 4;
-        colour(0x30303000);
+        colour(EFFECT_COLOUR);
         rect(b0, y1 - CORNER, b1, y1);
         colour(0xFFFFFF00);
         rect(end ? b0 : b1 - 3, y1 - CORNER, end ? b0 + 3 : b1, y1);
@@ -384,7 +389,7 @@ static void draw_fades(const re_item *it, int ox, int x0, int x1, int y1, int cx
             int r1 = y1 < cy1 ? y1 : cy1;
             if (c1 > c0 && r1 > r0) {
                 clip(c0, r0, c1, r1);
-                text(end ? "Fade out" : "Fade in", b0 + 10, y1 - CORNER + 6, 0xFFFFFF00, 0x30303000);
+                text(end ? "Fade out" : "Fade in", b0 + 10, y1 - CORNER + 6, 0xFFFFFF00, EFFECT_COLOUR);
                 clip(cx0, cy0, cx1, cy1);
             }
         }
@@ -406,9 +411,9 @@ static void draw_dissolve(const re_item *it, int selected, int x0, int x1, int y
     int inset = selected ? 6 : 3, a0 = x0 + inset, a1 = x1 - inset, b0 = y0 + inset, b1 = y1 - inset;
     if (a1 <= a0)
         return;
-    colour(0xC0905000); /* (the clips' colour, below the diagonal) */
+    colour(EFFECT_DARK); /* (the one clip giving way to the other along the diagonal) */
     triangle(a0, b0, a1, b0, a0, b1);
-    colour(0xF0D8B000);
+    colour(EFFECT_COLOUR);
     triangle(a1, b1, a0, b1, a1, b0);
     if (selected && x1 - x0 > 4 * inset) { /* its ends' handles: drag to lengthen or shorten */
         colour(0x2080F000);
@@ -419,7 +424,7 @@ static void draw_dissolve(const re_item *it, int selected, int x0, int x1, int y
         int c0 = a0 > cx0 ? a0 : cx0, c1 = a1 < cx1 ? a1 : cx1, r0 = b0 > cy0 ? b0 : cy0, r1 = b1 < cy1 ? b1 : cy1;
         if (c1 > c0 && r1 > r0) {
             clip(c0, r0, c1, r1);
-            text(it->name, a0 + 8, y0 + 12, 0xFFFFFF00, 0xC0905000);
+            text(it->name, a0 + 8, y0 + 12, 0xFFFFFF00, EFFECT_DARK);
             clip(cx0, cy0, cx1, cy1);
         }
     }
@@ -470,7 +475,7 @@ static void draw(int *b)
                 x1 = ox + x_of(n.start + n.length) - 2;
             /* selected: the clip's own colour inside a bright outline (a fill
                hid its name, Pi test) */
-            unsigned fill = 0xC0905000;
+            unsigned fill = CLIP_COLOUR;
             colour(i == A.sel ? 0x2080F000 : 0x20202000); /* (BBGGRR: amber) */
             rect(x0, track_y0, x1, track_y1);
             int inset = i == A.sel ? 6 : 2;
