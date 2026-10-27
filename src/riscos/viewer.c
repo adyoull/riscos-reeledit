@@ -1449,9 +1449,11 @@ static void message(int *b, int event)
         int type = b[10];
         int tl = tl_window() && w == tl_window(), frame = tl ? tl_frame_at(b[7]) : -1;
         ack(b);
-        /* a picture on V2's row, or on the Viewer (at the playhead): over the video */
-        int over = tl ? tl_on_overlays(b[8]) : w == V.win && A.proj && re_project_length(A.proj) > 0;
-        if (over && ov_is_picture(file, type))
+        /* a picture or a video on V2's row, or a picture on the Viewer (at
+           the playhead): over the video */
+        int over = tl ? tl_on_overlays(b[8]) && !is_project(file, type)
+                      : w == V.win && A.proj && re_project_length(A.proj) > 0 && ov_is_picture(file, type);
+        if (over)
             ov_load(file, type, tl ? frame : app_position(), 1);
         else
             app_load(file, type, frame);

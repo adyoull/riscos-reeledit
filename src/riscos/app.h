@@ -8,7 +8,7 @@
  *               program's)
  *   effects.c   fades and dissolves from the menus; the Timeline's context menu
  *   marks.c     the in and out marks: play them, take them out
- *   overlays.c  pictures over the video (V2): dropped, their menu; sprites
+ *   overlays.c  pictures and videos over the video (V2): dropped, their menu; sprites
  *               made PNGs
  *   info.c      the Video information window
  *   display.c, sound.c   the picture (overlay or sprite) and the sound
@@ -121,9 +121,9 @@ void mk_edited(void);     /* after an edit: kept within the project */
 #define FILETYPE_PNG    0xB60
 #define FILETYPE_JPEG   0xC85
 int ov_is_picture(const char *path, int filetype);
-/* A picture dropped at a frame: an overlay there (V2), or a clip on V1;
-   a sprite file's sprite (picked from a menu if it has more) made a PNG
-   beside it first */
+/* A picture or a video dropped at a frame: an overlay there (V2), or a
+   clip on V1; a sprite file's sprite (picked from a menu if it has more)
+   made a PNG beside it first */
 void ov_load(const char *path, int filetype, int frame, int overlay);
 void ov_menu_open(int x, int y, int ov);
 void ov_menu_select(int *block);

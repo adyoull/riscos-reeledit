@@ -1,4 +1,4 @@
-Reel Edit 0.3 (test 11)
+Reel Edit 0.3 (test 12)
 =======================
 
 Reel Edit is a video editor for RISC OS that is being written, on the MLT
@@ -6,7 +6,7 @@ multimedia framework (the engine of Shotcut and Kdenlive), with the
 Raspberry Pi's video hardware through riscos-reelhwaccel. This test build
 has the Viewer and a Timeline: a video track (V1) with cutting, trimming,
 moving, fades, dissolves, marks, undo and saving, and above it a track of
-pictures over the video (V2: logos, overlays). Titles, more tracks and
+pictures and videos over the video (V2: logos, picture in picture). Titles, more tracks and
 export come next.
 
 It needs RISC OS 5 on ARMv7 with VFP (Raspberry Pi 2, 3, 4), with
@@ -93,7 +93,16 @@ beside its file first ("Logos" sprite "bug" becomes Logos_bug/png; the
 sprite file isn't changed), so keep it with the project. A sprite file of
 more sprites than one gives a menu to pick from; 32-bit sprites with
 alpha, masks and palettes are understood. A picture dropped on V1 is a
-clip there, 5 seconds long. Overlays are saved in the project as MLT's
+clip there, 5 seconds long.
+
+Videos on V2 (a picture in the picture, or a cutaway): drop a video on
+V2 and it goes over V1 from there, all of it (or up to the next overlay
+or the end), bottom right at a third of the size; Place > Full frame
+covers V1 completely. Its sound is mixed with V1's. Drag its start or end
+to trim it as you would a clip on V1 (its start trims into the video,
+not just later on the Timeline); Place, Size, Opacity and the fades work
+as for pictures (the fades are of the picture, not the sound). Videos on
+V2 are blue, pictures teal. Overlays are saved in the project as MLT's
 composite transitions.
 
 The Timeline: the playhead moves only from the ruler (the strip with the

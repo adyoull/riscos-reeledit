@@ -125,10 +125,11 @@ int re_project_dissolve_cut(re_project *p, int frame);
    the fades away). 1 changed, 0 not. Between begin and end too. */
 int re_project_fade(re_project *p, int item, int end, int length);
 
-/* Overlays: pictures over the video (logos, titles), on V2, the track
-   above V1 (overlay.c). Each is a still picture (PNG, with its alpha, or
-   JPEG: still.h) shown for a stretch of the project, fitted in a box where
-   it's placed, so opaque, fading in and out. They don't overlap, and are
+/* Overlays: pictures (logos, titles) and videos (a picture in the
+   picture) over the video, on V2, the track above V1 (overlay.c). Each is
+   a still picture (PNG, with its alpha, or JPEG: still.h) or a video, shown
+   for a stretch of the project, fitted in a box where it's placed, so
+   opaque, fading in and out; a video's sound mixed with V1's. They don't overlap, and are
    kept within the project (edits put each where there's room). Saved
    with the project as MLT's composite transitions, the pictures as qimage
    producers, as Shotcut saves its own (not tried in Shotcut yet). */
@@ -141,22 +142,29 @@ typedef struct
     int size;              /* the box: % of the frame's width and height (the lower third's: its height) */
     int opacity;           /* % */
     int fade_in, fade_out; /* frames (0: none) */
-    char name[64];         /* the file's leaf name */
+    int video;             /* 1: a video (else a picture) */
+    int in;                /* a video's first frame in its file (a picture's: 0) */
+    int source_length;     /* a video's file's length (frames; a picture's: 0) */
+    char name[64];         /* the file's leaf name (a picture's without .png or .jpg) */
 } re_overlay;
 /* Their number, and each (in order, from 0). 0, or -1. */
 int re_project_overlays(re_project *p);
 int re_project_overlay(re_project *p, int i, re_overlay *o);
 /* The overlay at a frame, or -1 */
 int re_project_overlay_at(re_project *p, int frame);
-/* A picture put over the video from a frame, so long (0: 5 seconds),
-   where there's room (after an overlay the frame's in; shortened to fit).
-   A picture as big as the frame, or near it, fills it; a smaller one is a
-   logo, top right. Its index; -1 (no room, an empty project), or: */
-#define RE_OVERLAY_NOT_PICTURE (-2)
+/* A picture or a video put over the video from a frame, so long (0: a
+   picture 5 seconds, a video all of it), where there's room (after an
+   overlay the frame's in; shortened to fit). A picture as big as the
+   frame, or near it, fills it; a smaller one is a logo, top right; a video
+   is a picture in the picture, bottom right, a third of the size. Its
+   index; -1 (no room, an empty project), or: */
+#define RE_OVERLAY_CANT_OPEN (-2)  /* neither a picture nor a video MLT opens */
+#define RE_OVERLAY_NO_LENGTH (-3)  /* raw video, no length known (it can go on V1) */
 int re_project_overlay_add(re_project *p, const char *file, int frame, int length);
-/* An overlay moved (start changed, length kept) or trimmed (either end):
-   kept clear of the others and within the project. 1 changed, 0 already
-   so, -1 not. Between begin and end too. */
+/* An overlay moved (start changed, length kept) or trimmed (either end;
+   its start: start changed, its end kept): kept clear of the others and
+   within the project, a video within its file (trimming its start moves
+   its in). 1 changed, 0 already so, -1 not. Between begin and end too. */
 int re_project_overlay_span(re_project *p, int i, int start, int length);
 /* Its place (RE_PLACE_), size and opacity (%; each -1: kept). 1 changed,
    0 not. */

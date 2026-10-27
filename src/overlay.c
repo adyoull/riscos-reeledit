@@ -1,8 +1,9 @@
-/* overlay.c - overlays (project.h): pictures over the video, on V2.
+/* overlay.c - overlays (project.h): pictures and videos over the video,
+ * on V2.
  *
- * V2 is a playlist of pictures and gaps, the tractor's track above V1
- * (made with the first overlay; a project from Shotcut: its first video
- * track after V1). Each picture is put over V1 by MLT's core composite
+ * V2 is a playlist of pictures, videos and gaps, the tractor's track above
+ * V1 (made with the first overlay; a project from Shotcut: its first video
+ * track after V1). Each overlay is put over V1 by MLT's core composite
  * transition over its frames (no Qt here for Shotcut's qtblend); how is
  * kept with the picture's cut (its playlist entry), saved in the project:
  *   shotcut:reeledit_place     where: full, centre, top-left, top-right,
@@ -16,8 +17,13 @@
  * shotcut:reeledit_overlay; the picture is fitted in its box keeping its
  * shape (composite's fill), and fades by the transition's opacity.
  *
- * V2's edits put its items back in a new order: the pictures' cuts (with
- * what's kept on them) where they're wanted, gaps between. Pictures don't
+ * A video's sound is mixed with V1's (summed) by a core mix transition
+ * from V2 to V1 (marked the same; Shotcut makes one for each track),
+ * unless the project has one already. A video on V2 is trimmed as a clip
+ * is: its in moves with its start, and it's kept within its file.
+ *
+ * V2's edits put its items back in a new order: the overlays' cuts (with
+ * what's kept on them) where they're wanted, gaps between. Overlays don't
  * overlap; edits keep each where there's room, within the project.
  *
  * Part of riscos-reeledit. GPL version 2 or later.
@@ -25,6 +31,7 @@
 #include "project_internal.h"
 #include "still.h"
 
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -87,22 +94,24 @@ int re_project_overlay(re_project *p, int i, re_overlay *o)
     mlt_properties cp = MLT_PRODUCER_PROPERTIES(info.cut);
     o->start = info.start;
     o->length = info.frame_count;
+    o->video = !re_still_is(info.cut);
+    o->in = o->video ? info.frame_in : 0;
+    o->source_length = o->video ? info.length : 0;
     o->place = place_of(mlt_properties_get(cp, "shotcut:reeledit_place"));
     o->size = mlt_properties_get(cp, "shotcut:reeledit_size") ? mlt_properties_get_int(cp, "shotcut:reeledit_size") : 100;
     o->opacity = mlt_properties_get(cp, "shotcut:reeledit_opacity") ? mlt_properties_get_int(cp, "shotcut:reeledit_opacity")
                                                                      : 100;
     o->fade_in = mlt_properties_get_int(cp, "shotcut:reeledit_fade_in");
     o->fade_out = mlt_properties_get_int(cp, "shotcut:reeledit_fade_out");
-    /* (its leaf name, without a /png, .png or the like: a RISC OS name or a Unix one) */
+    /* (its leaf name, a picture's without its .png or .jpg: MLT's names are Unix ones) */
     char name[256];
     snprintf(name, sizeof(name), "%s", info.resource ? info.resource : "");
     char *dot = strrchr(name, '.'), *slash = strrchr(name, '/');
-    char *ext = dot > slash ? dot : slash;
-    if (ext && (!strcmp(ext + 1, "png") || !strcmp(ext + 1, "jpg") || !strcmp(ext + 1, "jpeg")))
-        *ext = 0;
+    if (dot && dot > slash && !o->video && (!strcmp(dot, ".png") || !strcmp(dot, ".jpg") || !strcmp(dot, ".jpeg")))
+        *dot = 0;
     const char *leaf = name;
     for (const char *c = name; *c; c++)
-        if (*c == '/' || *c == '\\' || *c == '.' || *c == ':')
+        if (*c == '/' || *c == '\\')
             leaf = c + 1;
     snprintf(o->name, sizeof(o->name), "%.63s", leaf);
     return 0;
@@ -151,6 +160,7 @@ typedef struct
 {
     mlt_producer cut;
     int start, length;
+    int in; /* (a video's first frame in its file; a picture's 0) */
 } slot;
 
 static void write_v2(re_project *p, slot *s, int n)
@@ -160,8 +170,9 @@ static void write_v2(re_project *p, slot *s, int n)
     for (int i = 0; i < n; i++) {
         if (s[i].start > at)
             mlt_playlist_blank(p->v2, s[i].start - at - 1);
-        mlt_playlist_append_io(p->v2, s[i].cut, 0, s[i].length - 1);
-        mlt_playlist_resize_clip(p->v2, mlt_playlist_count(p->v2) - 1, 0, s[i].length - 1);
+        int in = s[i].in, out = s[i].in + s[i].length - 1;
+        mlt_playlist_append_io(p->v2, s[i].cut, in, out);
+        mlt_playlist_resize_clip(p->v2, mlt_playlist_count(p->v2) - 1, in, out);
         mlt_producer_close(s[i].cut);
         at = s[i].start + s[i].length;
     }
@@ -181,6 +192,7 @@ static int read_v2(re_project *p, slot **s)
         mlt_properties_inc_ref(MLT_PRODUCER_PROPERTIES(info.cut));
         (*s)[i].start = info.start;
         (*s)[i].length = info.frame_count;
+        (*s)[i].in = re_still_is(info.cut) ? 0 : info.frame_in;
     }
     return n;
 }
@@ -280,6 +292,21 @@ static void drop_composites(re_project *p)
     }
 }
 
+/* A mix of V2's sound into V1's not of ours (Shotcut's) */
+static int foreign_mix(re_project *p)
+{
+    for (mlt_service s = mlt_service_producer(MLT_TRACTOR_SERVICE(p->tractor)); s; s = mlt_service_producer(s)) {
+        if (mlt_service_identify(s) != mlt_service_transition_type)
+            break;
+        mlt_properties tp = MLT_SERVICE_PROPERTIES(s);
+        const char *svc = mlt_properties_get(tp, "mlt_service");
+        if (svc && !strcmp(svc, "mix") && !mlt_properties_get_int(tp, "shotcut:reeledit_overlay")
+            && mlt_transition_get_b_track(MLT_TRANSITION(s)) == p->v2_track)
+            return 1;
+    }
+    return 0;
+}
+
 void rp_fit_overlays(re_project *p)
 {
     if (!p->tractor)
@@ -321,6 +348,21 @@ void rp_fit_overlays(re_project *p)
         mlt_field_plant_transition(field, t, p->v1_track, p->v2_track);
         mlt_transition_close(t); /* (the field keeps it) */
     }
+    /* a video's sound, with V1's: one mix for all of V2, unless there's one */
+    int videos = 0;
+    for (int i = 0; p->v2 && !re_project_overlay(p, i, &o); i++)
+        videos += o.video;
+    if (videos && !foreign_mix(p)) {
+        mlt_transition t = mlt_factory_transition(p->profile, "mix", NULL);
+        if (!t)
+            return;
+        mlt_properties tp = MLT_TRANSITION_PROPERTIES(t);
+        mlt_properties_set_int(tp, "always_active", 1);
+        mlt_properties_set_int(tp, "sum", 1);
+        mlt_properties_set_int(tp, "shotcut:reeledit_overlay", 1);
+        mlt_field_plant_transition(field, t, p->v1_track, p->v2_track);
+        mlt_transition_close(t);
+    }
 }
 
 /* ---- edits -------------------------------------------------------------------------------- */
@@ -330,15 +372,28 @@ int re_project_overlay_add(re_project *p, const char *file, int frame, int lengt
     int pw = 0, ph = 0;
     if (!p->tractor || re_project_length(p) <= 0)
         return -1;
-    if (re_still_open(file, &pw, &ph))
-        return RE_OVERLAY_NOT_PICTURE;
-    char res[1100];
-    snprintf(res, sizeof(res), "qimage:%s", file); /* (by the loader: its filters too) */
-    mlt_producer pic = mlt_factory_producer(p->profile, NULL, res);
-    if (!pic)
-        return RE_OVERLAY_NOT_PICTURE;
-    if (length <= 0)
-        length = re_project_frames(p, 5.0);
+    int video = re_still_open(file, &pw, &ph) != 0;
+    mlt_producer pic;
+    if (video) { /* (not a picture: a video, as a clip is opened) */
+        pic = mlt_factory_producer(p->profile, NULL, file);
+        if (!pic)
+            return RE_OVERLAY_CANT_OPEN;
+        int len = mlt_producer_get_length(pic);
+        if (len >= INT_MAX / 2 || len < 1) { /* (raw video: no length known) */
+            mlt_producer_close(pic);
+            return RE_OVERLAY_NO_LENGTH;
+        }
+        if (length <= 0 || length > len)
+            length = len;
+    } else {
+        char res[1100];
+        snprintf(res, sizeof(res), "qimage:%s", file); /* (by the loader: its filters too) */
+        pic = mlt_factory_producer(p->profile, NULL, res);
+        if (!pic)
+            return RE_OVERLAY_CANT_OPEN;
+        if (length <= 0)
+            length = re_project_frames(p, 5.0);
+    }
     if (frame < 0)
         frame = 0;
     slot *s;
@@ -362,14 +417,17 @@ int re_project_overlay_add(re_project *p, const char *file, int frame, int lengt
     mlt_producer cut = mlt_producer_cut(pic, 0, length - 1);
     mlt_producer_close(pic);
     mlt_properties cp = MLT_PRODUCER_PROPERTIES(cut);
-    /* (as big as the frame, or near it: all of it; else a logo, top right) */
-    int big = pw * 2 >= p->profile->width || ph * 2 >= p->profile->height;
-    mlt_properties_set(cp, "shotcut:reeledit_place", PLACES[big ? RE_PLACE_FULL : RE_PLACE_TOP_RIGHT]);
-    mlt_properties_set_int(cp, "shotcut:reeledit_size", big ? 100 : 20);
+    /* (a picture as big as the frame, or near it: all of it; a smaller one
+       a logo, top right; a video a picture in the picture, bottom right) */
+    int big = !video && (pw * 2 >= p->profile->width || ph * 2 >= p->profile->height);
+    mlt_properties_set(cp, "shotcut:reeledit_place",
+                       PLACES[video ? RE_PLACE_BOTTOM_RIGHT : big ? RE_PLACE_FULL : RE_PLACE_TOP_RIGHT]);
+    mlt_properties_set_int(cp, "shotcut:reeledit_size", video ? 33 : big ? 100 : 20);
     mlt_properties_set_int(cp, "shotcut:reeledit_opacity", 100);
     s[n].cut = cut;
     s[n].start = frame;
     s[n].length = length;
+    s[n].in = 0;
     qsort(s, n + 1, sizeof(slot), by_start);
     write_v2(p, s, n + 1);
     free(s);
@@ -386,13 +444,25 @@ int re_project_overlay_span(re_project *p, int i, int start, int length)
     int n = read_v2(p, &s);
     if (n < 0)
         return -1;
-    if (start < 0)
-        start = 0;
     if (length < 1)
         length = 1;
-    int moved = start != o.start;
-    /* a move: kept to the room either side, its length kept; a trim: to the room after its start */
-    if (moved) {
+    int end = o.start + o.length;
+    if (start != o.start && start + length == end) {
+        /* its start trimmed (its end where it was): kept clear of the one
+           before, and a video to its file's start (its in moves with it) */
+        int lo = i > 0 ? s[i - 1].start + s[i - 1].length : 0;
+        if (o.video && o.start - o.in > lo)
+            lo = o.start - o.in;
+        if (start < lo)
+            start = lo;
+        if (start > end - 1)
+            start = end - 1;
+        length = end - start;
+        s[i].in = o.video ? o.in + (start - o.start) : 0;
+    } else if (start != o.start) {
+        if (start < 0)
+            start = 0;
+        /* a move: kept to the room either side, its length kept */
         int lo = i > 0 ? s[i - 1].start + s[i - 1].length : 0;
         int hi = i + 1 < n ? s[i + 1].start : re_project_length(p);
         if (start + length > hi)
@@ -401,8 +471,12 @@ int re_project_overlay_span(re_project *p, int i, int start, int length)
             start = lo;
         if (start + length > hi)
             length = hi - start;
-    } else if (room(p, s, n, i, &start, &length)) {
-        length = o.length;
+    } else {
+        /* its end trimmed: to the room after it, a video to its file's end */
+        if (o.video && o.source_length > 0 && length > o.source_length - o.in)
+            length = o.source_length - o.in;
+        if (room(p, s, n, i, &start, &length))
+            length = o.length;
     }
     if (length < 1 || (start == o.start && length == o.length)) {
         for (int k = 0; k < n; k++)

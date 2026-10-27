@@ -438,6 +438,94 @@ static void sprites(const char *dir)
           "sprites: a PNG taken for a sprite file");
 }
 
+/* ---- videos on V2: a picture in the picture, its sound mixed with V1's */
+static void video_overlays(const char *a, const char *b, const char *snd, const char *numbered, const char *m2v,
+                           const char *out)
+{
+    re_engine_io io = {show, NULL, clk, NULL, 48000, 2, NULL};
+    re_project *p = re_project_new();
+    re_project_add(p, a, -1);
+    re_project_add(p, b, -1);
+    re_engine *e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    int red = luma_xy(e, 20, 100, 90);
+    re_overlay o;
+    CHECK(re_project_overlay_add(p, numbered, 10, 0) == 0, "videos: not added");
+    re_project_overlay(p, 0, &o);
+    CHECK(o.video && o.start == 10 && o.length == 75 && o.in == 0 && o.source_length == 75
+              && o.place == RE_PLACE_BOTTOM_RIGHT && o.size == 33 && !strcmp(o.name, strrchr(numbered, '/') ? strrchr(numbered, '/') + 1 : numbered),
+          "videos: added: video %d, at %d for %d, in %d of %d, place %d size %d, \"%s\"", o.video, o.start, o.length,
+          o.in, o.source_length, o.place, o.size, o.name);
+    re_engine_refresh(e);
+    int in_box = luma_xy(e, 15, 250, 140), outside = luma_xy(e, 15, 100, 90);
+    CHECK(abs(in_box - (16 + 2 * 5)) <= 4 && abs(outside - red) <= 4,
+          "videos: shown bottom right: %d in its box (frame 5's %d), %d outside it (red %d)", in_box, 16 + 2 * 5,
+          outside, red);
+    CHECK(abs(luma_xy(e, 40, 250, 140) - (16 + 2 * 30)) <= 4, "videos: played on: %d at 40 (frame 30's %d)",
+          luma_xy(e, 40, 250, 140), 16 + 2 * 30);
+
+    /* trimmed at its start: its in moves, what's left stays where it was */
+    CHECK(re_project_overlay_span(p, 0, 15, 70) == 1, "videos: start trimmed");
+    re_project_overlay(p, 0, &o);
+    re_engine_refresh(e);
+    CHECK(o.start == 15 && o.length == 70 && o.in == 5 && abs(luma_xy(e, 15, 250, 140) - (16 + 2 * 5)) <= 4,
+          "videos: start trimmed: at %d for %d, in %d; luma %d at 15 (frame 5's %d)", o.start, o.length, o.in,
+          luma_xy(e, 15, 250, 140), 16 + 2 * 5);
+    CHECK(re_project_overlay_span(p, 0, 0, 85) == 1, "videos: start trimmed back");
+    re_project_overlay(p, 0, &o);
+    CHECK(o.start == 10 && o.length == 75 && o.in == 0, "videos: start trimmed back past the file's start: %d %d, in %d",
+          o.start, o.length, o.in);
+    /* its end: kept to its file */
+    CHECK(re_project_overlay_span(p, 0, 10, 40) == 1 && re_project_overlay_span(p, 0, 10, 200) == 1,
+          "videos: end trimmed");
+    re_project_overlay(p, 0, &o);
+    CHECK(o.length == 75, "videos: end trimmed past the file's end: %d", o.length);
+    CHECK(re_project_overlay_span(p, 0, 10, 200) == 0, "videos: trimmed past its file's end again: a change");
+    /* moved: its in kept */
+    re_project_overlay_span(p, 0, 15, 70);
+    CHECK(re_project_overlay_span(p, 0, 40, 70) == 1, "videos: moved");
+    re_project_overlay(p, 0, &o);
+    re_engine_refresh(e);
+    CHECK(o.start == 40 && o.in == 5 && abs(luma_xy(e, 40, 250, 140) - (16 + 2 * 5)) <= 4,
+          "videos: moved: at %d, in %d, luma %d", o.start, o.in, luma_xy(e, 40, 250, 140));
+    CHECK(re_project_overlay_add(p, m2v, 0, 0) == RE_OVERLAY_NO_LENGTH, "videos: raw video, no length, added");
+
+    /* saved, opened: the same; one mix (made when there's a video) */
+    CHECK(re_project_save(p, out) == 0 && count(out, ">mix<") == 1, "videos: saved: %d mixes", count(out, ">mix<"));
+    re_engine_close(e);
+    re_project_close(p);
+    p = re_project_open(out, 1);
+    CHECK(p && re_project_overlays(p) == 1 && !re_project_overlay(p, 0, &o) && o.video && o.in == 5 && o.start == 40,
+          "videos: opened: in %d, at %d", o.in, o.start);
+    if (!p)
+        return;
+    char again[600];
+    snprintf(again, sizeof(again), "%s-again", out);
+    CHECK(re_project_save(p, again) == 0 && count(again, ">mix<") == 1, "videos: saved again: %d mixes",
+          count(again, ">mix<"));
+    re_project_close(p);
+
+    /* the sound: V2's heard (V1 has none), both summed, V1's kept under a silent video */
+    p = re_project_new();
+    re_project_add(p, a, -1);
+    re_project_overlay_add(p, snd, 0, 0);
+    int v2_only = peak_at(p, 40);
+    re_project_close(p);
+    p = re_project_new();
+    re_project_add(p, snd, -1);
+    int loud = peak_at(p, 40);
+    re_project_overlay_add(p, snd, 0, 0);
+    int both = peak_at(p, 40);
+    re_project_close(p);
+    p = re_project_new();
+    re_project_add(p, snd, -1);
+    re_project_overlay_add(p, numbered, 0, 0);
+    int under = peak_at(p, 40);
+    re_project_close(p);
+    CHECK(loud > 1000 && abs(v2_only - loud) < loud / 10, "videos: V2's sound alone: %d (%d)", v2_only, loud);
+    CHECK(both > loud * 3 / 2, "videos: both sounds: %d (one: %d)", both, loud);
+    CHECK(abs(under - loud) < loud / 10, "videos: V1's sound under a silent video: %d (%d)", under, loud);
+}
+
 /* A still picture's producer, asked for its picture in one form, then
    another, then the first again: each as asked, the alpha kept */
 static void stills(const char *full)
@@ -492,7 +580,14 @@ static void overlays(const char *a, const char *b, const char *snd, const char *
     re_project_add(p, b, -1);
     re_engine *e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
     int red = luma_xy(e, 20, 80, 90), blue = luma_xy(e, 100, 80, 90);
-    CHECK(re_project_overlay_add(p, a, 0, 0) == RE_OVERLAY_NOT_PICTURE, "overlays: a video taken for a picture");
+    {
+        char junk[600];
+        snprintf(junk, sizeof(junk), "%s-junk", out);
+        FILE *f = fopen(junk, "w");
+        fputs("not a picture, not a video\n", f);
+        fclose(f);
+        CHECK(re_project_overlay_add(p, junk, 0, 0) == RE_OVERLAY_CANT_OPEN, "overlays: a text file opened");
+    }
 
     /* a picture as big as the frame: all of it, its alpha kept (left half clear, right white) */
     const int white = 235;
@@ -901,6 +996,7 @@ int main(int argc, char **argv)
     ranges(a, b);
     stills(argv[10]);
     overlays(a, b, argv[9], out, argv[10], argv[11], argv[12]);
+    video_overlays(a, b, argv[9], n, argv[5], out);
     char dir[512];
     snprintf(dir, sizeof(dir), "%s", out);
     char *slash = strrchr(dir, '/');

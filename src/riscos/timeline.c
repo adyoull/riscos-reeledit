@@ -2,7 +2,7 @@
  * track V1's clips, gaps and dissolves, and V2's overlays, scrolled sideways by the window's
  * own scroll bar.
  *
- * Above V1, V2's row: the overlays (pictures over the video, overlays.c),
+ * Above V1, V2's row: the overlays (pictures and videos over the video, overlays.c),
  * each a box over the frames it's shown for; a click selects one, Menu
  * gives its menu, a drag moves it (its middle) or trims it (its ends), and
  * pictures dropped on the row become overlays there.
@@ -484,14 +484,14 @@ static void draw_dissolve(const re_item *it, int selected, int x0, int x1, int y
 }
 
 /* V2's overlays: a box each over its frames, its fades purple along its
-   top, its name in it; selected, an amber outline and handles at its
+   top, its name in it (a picture teal, a video blue); selected, an amber outline and handles at its
    ends. With none, a word on what the row is for. */
 static void draw_overlays(int ox, int y0, int y1, int f0, int f1, int cx0, int cy0, int cx1, int cy1)
 {
     int n = A.proj ? re_project_overlays(A.proj) : 0;
     if (n == 0) {
         if (A.proj && re_project_length(A.proj) > 0)
-            text("V2: drop a picture (PNG, JPEG, sprite) here to put it over the video", ox + LEFT + 8, y0 + 20,
+            text("V2: drop a picture (PNG, JPEG, sprite) or a video here to put it over the video", ox + LEFT + 8, y0 + 20,
                  0xCCCCCC00, 0x77777700);
         return;
     }
@@ -505,7 +505,8 @@ static void draw_overlays(int ox, int y0, int y1, int f0, int f1, int cx0, int c
         colour(sel ? 0x2080F000 : 0x20202000);
         rect(x0, y0, x1, y1);
         int inset = sel ? 6 : 2;
-        colour(OVERLAY_COLOUR);
+        unsigned fill = o.video ? CLIP_COLOUR : OVERLAY_COLOUR; /* (a video blue, as V1's) */
+        colour(fill);
         rect(x0 + inset, y0 + inset, x1 - inset, y1 - inset);
         colour(EFFECT_COLOUR); /* (its fades) */
         if (o.fade_in > 0)
@@ -523,7 +524,7 @@ static void draw_overlays(int ox, int y0, int y1, int f0, int f1, int cx0, int c
             char shown[64];
             clip(c0, r0, c1, r1);
             fit_text(shown, sizeof(shown), o.name, x1 - x0 - 24);
-            text(shown, x0 + 10, y0 + 12, 0xFFFFFF00, OVERLAY_COLOUR);
+            text(shown, x0 + 10, y0 + 12, 0xFFFFFF00, fill);
             clip(cx0, cy0, cx1, cy1);
         }
     }
@@ -1169,7 +1170,7 @@ const char *tl_help(int screen_y)
         return "This is the Timeline's ruler.|MClick or drag here to move the playhead.|M"
                "I and O mark a stretch on it; Return plays the stretch, ' takes it out.";
     if (wy > V2_BOTTOM - 4)
-        return "This is V2: pictures over the video (logos, titles).|MDrop a PNG, JPEG or sprite here; "
+        return "This is V2: pictures and videos over the video.|MDrop a PNG, JPEG, sprite or video here; "
                "drag one to move it, its ends to trim it; Menu over it to place it, size it, fade it.";
     return "This is V1: the clips.|MClick a clip to select it; drag its edge to trim it, its middle to move it.|M"
            "Menu over a clip gives its effects (fades, dissolves).|MCtrl and the wheel zoom.";

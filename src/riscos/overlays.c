@@ -1,7 +1,10 @@
-/* overlays.c - pictures over the video (app.h): dropped on V2's row of the
+/* overlays.c - pictures and videos over the video (app.h): dropped on V2's row of the
  * Timeline (or on the Viewer: at the playhead), and their menu. What they
  * do to the project is project.h's (overlay.c); this is the desktop's
  * side: which file, which sprite, where, the menu.
+ *
+ * Videos dropped on V2 are overlays too: a picture in the picture, its
+ * sound mixed with V1's.
  *
  * Pictures: PNG (with its alpha), JPEG, and sprite files. A sprite is made
  * a PNG first (sprites.h, still.h), beside its file ("Logos" sprite "bug":
@@ -63,12 +66,17 @@ static const char *leaf(const char *path)
 
 /* ---- dropped ---------------------------------------------------------------------------------- */
 
-/* A picture (PNG or JPEG) put in: over the video, or on V1 */
-static void use(const char *path, int frame, int overlay)
+/* A picture (PNG or JPEG) put in: over the video, or on V1; or a video
+   over the video */
+static void use(const char *path, int frame, int overlay, int picture)
 {
     char unix_name[512], t[400];
     const char *name = app_mlt_name(path, unix_name, sizeof(unix_name));
     if (!overlay) {
+        if (!picture) {
+            app_add(path, name, frame);
+            return;
+        }
         char q[600];
         snprintf(q, sizeof(q), "qimage:%s", name); /* (a picture, whatever its name: still.c) */
         app_add(path, q, frame);
@@ -80,8 +88,15 @@ static void use(const char *path, int frame, int overlay)
     }
     int i = re_project_overlay_add(A.proj, name, frame < 0 ? 0 : frame, 0);
     app_log("overlay %s at %d: %d", path, frame, i);
-    if (i == RE_OVERLAY_NOT_PICTURE) {
-        snprintf(t, sizeof(t), "%.200s isn't a picture Reel Edit can read (a PNG, a JPEG or a sprite).", leaf(path));
+    if (i == RE_OVERLAY_CANT_OPEN) {
+        snprintf(t, sizeof(t), "Reel Edit can't open %.200s: is it a picture (PNG, JPEG, sprite) or a video?",
+                 leaf(path));
+        app_report(t);
+        return;
+    }
+    if (i == RE_OVERLAY_NO_LENGTH) {
+        snprintf(t, sizeof(t), "%.200s doesn't say how long it is (raw video), so it can't go on V2 yet: drop it "
+                 "on V1.", leaf(path));
         app_report(t);
         return;
     }
@@ -136,7 +151,7 @@ static void use_sprite(const char *path, int index, int frame, int overlay)
     r.r[2] = FILETYPE_PNG;
     ro_swi(0x08, &r);
 #endif
-    use(out, frame, overlay);
+    use(out, frame, overlay, 1);
 }
 
 static MENU(RE_SPRITES_MAX) m_sprites;
@@ -146,7 +161,7 @@ void ov_load(const char *path, int filetype, int frame, int overlay)
     char unix_name[512], t[400];
     int sprite = filetype == FILETYPE_SPRITE;
     if (!sprite) {
-        use(path, frame, overlay);
+        use(path, frame, overlay, ov_is_picture(path, filetype));
         return;
     }
     int n = re_sprites_names(app_mlt_name(path, unix_name, sizeof(unix_name)), O.names, RE_SPRITES_MAX);

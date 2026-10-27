@@ -1696,6 +1696,53 @@ static int script(int *b, int mask)
             return 0;
         CHECK(!strcmp(layout(), "c30 c75") && re_project_overlays(re_test_project()) == 0,
               "overlays: undone: %s, %d overlays", layout(), re_project_overlays(re_test_project()));
+        next(187);
+        data_load_v2(b, 5, 0xFFD, clip2); /* a video on V2: a picture in the picture */
+        return 17;
+    case 187: {
+        if (nulls)
+            return 0;
+        re_overlay o;
+        CHECK(re_project_overlays(re_test_project()) == 1 && !re_project_overlay(re_test_project(), 0, &o) && o.video
+                  && o.start == 5 && o.length == 75 && o.place == RE_PLACE_BOTTOM_RIGHT && !strcmp(layout(), "c30 c75"),
+              "overlays: a video on V2: %d, video %d, at %d for %d, place %d; V1 %s",
+              re_project_overlays(re_test_project()), o.video, o.start, o.length, o.place, layout());
+        shot("20-video-overlay");
+        next(188);
+        return click_tl(b, 6, 2, 0x40); /* by its start: trimmed */
+    }
+    case 188:
+        ptr[0] = W[1].box[0] - W[1].scroll_x + 16 + 16 * 4; /* (10 frames on) */
+        ptr[1] = W[1].box[3] - 48 - 8 - 32;
+        next(189);
+        return script(b, mask);
+    case 189: {
+        re_overlay o;
+        re_project_overlay(re_test_project(), 0, &o);
+        if (o.start == 15) {
+            CHECK(o.in == 10 && o.length == 65, "overlays: the video's start trimmed: in %d, %d long", o.in, o.length);
+            next(190);
+            return 7;
+        }
+        if (fake_cs - phase_cs > 100)
+            fail_quit("overlays: the video's start dragged 10 frames on: at %d", o.start);
+        return 0;
+    }
+    case 190:
+        if (nulls)
+            return 0;
+        next(191);
+        return key_to(b, TL, 0x188);
+    case 191:
+        if (nulls)
+            return 0;
+        next(192);
+        return key_to(b, TL, 0x188);
+    case 192:
+        if (nulls)
+            return 0;
+        CHECK(re_project_overlays(re_test_project()) == 0 && !strcmp(layout(), "c30 c75"),
+              "overlays: the video undone: %d, %s", re_project_overlays(re_test_project()), layout());
         next(133);
         return click_tl(b, 50, 1, 0x400);
     case 133:
