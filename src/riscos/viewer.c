@@ -38,6 +38,7 @@
 #endif
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #ifndef RE_VERSION
 #define RE_VERSION "0.2"
@@ -142,6 +143,9 @@ void app_log(const char *fmt, ...)
     va_end(ap);
     fputc('\n', V.log);
     fflush(V.log);
+    /* (on the disc now, length and all: a log left open was lost, or
+       empty, when the machine had to be reset with Ctrl-Break) */
+    fsync(fileno(V.log));
 }
 
 static void lg_line(const char *line)
