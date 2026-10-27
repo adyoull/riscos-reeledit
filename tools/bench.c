@@ -22,6 +22,7 @@
 #include <string.h>
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
+#include <libavutil/cpu.h>
 #include <libavutil/imgutils.h>
 
 static double now(void)
@@ -134,6 +135,13 @@ int main(int argc, char **argv)
 #endif
     mlt_factory_init(NULL);
     re_still_register(); /* (pictures as Reel Edit reads them) */
+    /* (as Reel Edit: NEON where there is, quick scaling; BENCH_C or
+       BENCH_ACCURATE set to any value leaves either out, to compare) */
+    int fast = !getenv("BENCH_ACCURATE");
+    if ((av_get_cpu_flags() & AV_CPU_FLAG_NEON) && !getenv("BENCH_C"))
+        mlt_environment_set("MLT_NEON", "1");
+    fprintf(stderr, "bench: NEON %s, scaling %s\n", mlt_environment("MLT_NEON") ? "on" : "off",
+            fast ? "fast" : "accurate");
     mlt_log_set_level(MLT_LOG_INFO);
     mlt_profile profile = mlt_profile_init(NULL);
     mlt_producer producer = mlt_factory_producer(profile, NULL, argv[1]);
@@ -160,6 +168,7 @@ int main(int argc, char **argv)
         mlt_producer_seek(producer, i);
         mlt_frame frame = mlt_consumer_get_frame(consumer);
         mlt_properties_set_int(MLT_FRAME_PROPERTIES(frame), "consumer.source_colours", 1); /* (as Reel Edit's player) */
+        mlt_properties_set_int(MLT_FRAME_PROPERTIES(frame), "consumer.fast_scale", fast);
         mlt_image_format format = mlt_image_yuv420p;
         int w = w0, h = h0;
         uint8_t *image = NULL;

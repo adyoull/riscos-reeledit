@@ -26,6 +26,7 @@
 #include "still.h"
 
 #include <framework/mlt.h>
+#include <libavutil/cpu.h>
 #include <libavutil/log.h>
 #include <math.h>
 #include <stdarg.h>
@@ -107,6 +108,9 @@ int re_mlt_start(void)
 #endif
         if (!mlt_factory_init(NULL))
             return -1;
+        /* (MLT's NEON loops, patches/mlt 0010, only on a CPU that has it) */
+        if (av_get_cpu_flags() & AV_CPU_FLAG_NEON)
+            mlt_environment_set("MLT_NEON", "1");
         re_still_register();
         mlt_started = 1;
     }
@@ -477,6 +481,7 @@ static int picture_of(re_engine *e, mlt_frame frame, int position, re_picture *p
     uint8_t *image = NULL;
     mlt_properties props = MLT_FRAME_PROPERTIES(frame);
     mlt_properties_set_int(props, "consumer.source_colours", 1); /* (patches/mlt 0006) */
+    mlt_properties_set_int(props, "consumer.fast_scale", 1); /* (swscale's quick paths: a preview; 0010) */
     int mw = mlt_properties_get_int(props, "meta.media.width"), mh = mlt_properties_get_int(props, "meta.media.height");
     if (native && mw > 0 && mh > 0 && (long) mw * mh <= NATIVE_MAX)
         mlt_properties_set(props, "consumer.rescale", "none");

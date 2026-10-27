@@ -1,0 +1,223 @@
+From 1ce5369e83e9d18f70a92d3fa3ca7f2999e2b43e Mon Sep 17 00:00:00 2001
+From: Andrew Youll <andrewyoull86@gmail.com>
+Date: Tue, 27 Oct 2026 23:30:00 +0000
+Subject: [PATCH 10/11] swscale: keep contexts without threads; quick scaling
+ on request
+
+Without threads, filter_scale keeps the last four swscale contexts with
+what each was made for, so the same scaling picture after picture (a
+picture in the picture) makes its context once.
+
+A frame with consumer.fast_scale set leaves out the accurate-rounding and
+full-chroma flags, so swscale takes its quick (NEON) paths: for a
+preview. Exports are unchanged.
+---
+ src/modules/avformat/filter_swscale.c | 153 +++++++++++++++++++-------
+ 1 file changed, 114 insertions(+), 39 deletions(-)
+
+diff --git a/src/modules/avformat/filter_swscale.c b/src/modules/avformat/filter_swscale.c
+index 5d31862..25ac5ab 100644
+--- a/src/modules/avformat/filter_swscale.c
++++ b/src/modules/avformat/filter_swscale.c
+@@ -73,6 +73,64 @@ static inline int convert_mlt_to_av_cs(mlt_image_format format)
+     return value;
+ }
+ 
++/* Without threads: the last few swscale contexts, each kept with what it
++   was made for, so the same scaling picture after picture (a picture in
++   the picture) makes its context once */
++#define KEPT 4
++static struct
++{
++    int key[10];
++    struct SwsContext *context;
++} kept[KEPT];
++static int kept_next;
++
++static struct SwsContext *kept_context(int iwidth,
++                                       int iheight,
++                                       int owidth,
++                                       int oheight,
++                                       int avformat,
++                                       int flags,
++                                       mlt_colorspace src_colorspace,
++                                       mlt_colorspace dst_colorspace,
++                                       int src_full_range,
++                                       int dst_full_range)
++{
++    int key[10] = {iwidth,
++                   iheight,
++                   owidth,
++                   oheight,
++                   avformat,
++                   flags,
++                   src_colorspace,
++                   dst_colorspace,
++                   src_full_range,
++                   dst_full_range};
++    for (int i = 0; i < KEPT; i++)
++        if (kept[i].context && !memcmp(kept[i].key, key, sizeof(key)))
++            return kept[i].context;
++    struct SwsContext *context = sws_alloc_context();
++    if (!context)
++        return NULL;
++    av_opt_set_int(context, "srcw", iwidth, 0);
++    av_opt_set_int(context, "srch", iheight, 0);
++    av_opt_set_int(context, "src_format", avformat, 0);
++    av_opt_set_int(context, "dstw", owidth, 0);
++    av_opt_set_int(context, "dsth", oheight, 0);
++    av_opt_set_int(context, "dst_format", avformat, 0);
++    av_opt_set_int(context, "sws_flags", flags, 0);
++    if (sws_init_context(context, NULL, NULL) < 0
++        || mlt_set_luma_transfer(context, src_colorspace, dst_colorspace, src_full_range, dst_full_range) < 0) {
++        sws_freeContext(context);
++        return NULL;
++    }
++    int i = kept_next;
++    kept_next = (kept_next + 1) % KEPT;
++    sws_freeContext(kept[i].context);
++    kept[i].context = context;
++    memcpy(kept[i].key, key, sizeof(key));
++    return context;
++}
++
+ static int filter_scale(mlt_frame frame,
+                         uint8_t **image,
+                         mlt_image_format *format,
+@@ -110,8 +168,10 @@ static int filter_scale(mlt_frame frame,
+     else if (strcmp(interps, "spline") == 0)
+         interp = SWS_SPLINE;
+ 
+-    // Set swscale flags to get good quality
+-    interp |= SWS_FULL_CHR_H_INP | SWS_FULL_CHR_H_INT | SWS_ACCURATE_RND;
++    // Set swscale flags to get good quality (not for a preview that asks
++    // for speed: then swscale's NEON and other fast paths are taken)
++    if (!mlt_properties_get_int(properties, "consumer.fast_scale"))
++        interp |= SWS_FULL_CHR_H_INP | SWS_FULL_CHR_H_INT | SWS_ACCURATE_RND;
+ 
+     // Convert the pixel formats
+     int avformat = convert_mlt_to_av_cs(*format);
+@@ -120,32 +180,15 @@ static int filter_scale(mlt_frame frame,
+     int out_size = mlt_image_format_size(*format, owidth, oheight, NULL);
+     uint8_t *outbuf = mlt_pool_alloc(out_size);
+ 
+-    // Create the context
+-    struct SwsContext *context = sws_alloc_context();
+-    if (outbuf && context) {
++    // Create the context (without threads: kept from one picture to the
++    // next while the sizes, formats and colours stay the same; making one
++    // was most of the time it took to scale a small picture)
++    int cached = mlt_threads_disabled();
++    struct SwsContext *context = cached ? NULL : sws_alloc_context();
++    if (outbuf && (cached || context)) {
+         AVFrame *avinframe = av_frame_alloc();
+         AVFrame *avoutframe = av_frame_alloc();
+ 
+-        av_opt_set_int(context, "srcw", iwidth, 0);
+-        av_opt_set_int(context, "srch", iheight, 0);
+-        av_opt_set_int(context, "src_format", avformat, 0);
+-        av_opt_set_int(context, "dstw", owidth, 0);
+-        av_opt_set_int(context, "dsth", oheight, 0);
+-        av_opt_set_int(context, "dst_format", avformat, 0);
+-        av_opt_set_int(context, "sws_flags", interp, 0);
+-#if LIBSWSCALE_VERSION_MAJOR >= 6
+-        av_opt_set_int(context, "threads", MIN(mlt_slices_count_normal(), MAX_THREADS), 0);
+-#endif
+-        result = sws_init_context(context, NULL, NULL);
+-        if (result < 0) {
+-            mlt_log_error(NULL,
+-                          "[filter swscale] Initializing swscale failed with %d (%s)\n",
+-                          result,
+-                          av_err2str(result));
+-            result = 1;
+-            goto exit;
+-        }
+-
+         mlt_profile profile = mlt_service_profile(
+             MLT_PRODUCER_SERVICE(mlt_frame_get_original_producer(frame)));
+         mlt_colorspace dst_colorspace = profile ? profile->colorspace : mlt_colorspace_bt601;
+@@ -155,18 +198,47 @@ static int filter_scale(mlt_frame frame,
+         const char *dst_color_range = mlt_properties_get(properties, "consumer.color_range");
+         int dst_full_range = mlt_image_full_range(dst_color_range);
+ 
+-        result = mlt_set_luma_transfer(context,
+-                                       src_colorspace,
+-                                       dst_colorspace,
+-                                       src_full_range,
+-                                       dst_full_range);
+-        if (result < 0) {
+-            mlt_log_error(NULL,
+-                          "[filter swscale] Setting swscale color options failed with %d (%s)\n",
+-                          result,
+-                          av_err2str(result));
+-            result = 1;
+-            goto exit;
++        if (cached) {
++            context = kept_context(iwidth, iheight, owidth, oheight, avformat, interp, src_colorspace,
++                                   dst_colorspace, src_full_range, dst_full_range);
++            if (!context) {
++                result = 1;
++                goto exit;
++            }
++        } else {
++            av_opt_set_int(context, "srcw", iwidth, 0);
++            av_opt_set_int(context, "srch", iheight, 0);
++            av_opt_set_int(context, "src_format", avformat, 0);
++            av_opt_set_int(context, "dstw", owidth, 0);
++            av_opt_set_int(context, "dsth", oheight, 0);
++            av_opt_set_int(context, "dst_format", avformat, 0);
++            av_opt_set_int(context, "sws_flags", interp, 0);
++#if LIBSWSCALE_VERSION_MAJOR >= 6
++            av_opt_set_int(context, "threads", MIN(mlt_slices_count_normal(), MAX_THREADS), 0);
++#endif
++            result = sws_init_context(context, NULL, NULL);
++            if (result < 0) {
++                mlt_log_error(NULL,
++                              "[filter swscale] Initializing swscale failed with %d (%s)\n",
++                              result,
++                              av_err2str(result));
++                result = 1;
++                goto exit;
++            }
++
++            result = mlt_set_luma_transfer(context,
++                                           src_colorspace,
++                                           dst_colorspace,
++                                           src_full_range,
++                                           dst_full_range);
++            if (result < 0) {
++                mlt_log_error(NULL,
++                              "[filter swscale] Setting swscale color options failed with %d (%s)\n",
++                              result,
++                              av_err2str(result));
++                result = 1;
++                goto exit;
++            }
+         }
+ 
+         // Setup the input image
+@@ -224,8 +296,10 @@ static int filter_scale(mlt_frame frame,
+             result = 1;
+             goto exit;
+         }
+-        sws_freeContext(context);
++        if (!cached)
++            sws_freeContext(context);
+         context = NULL;
++        cached = 0; /* (from here, a context of this call's own: freed at exit) */
+ 
+         // Sanity check the output frame
+         if (owidth != avoutframe->width || oheight != avoutframe->height) {
+@@ -377,7 +451,8 @@ static int filter_scale(mlt_frame frame,
+     exit:
+         av_frame_free(&avinframe);
+         av_frame_free(&avoutframe);
+-        sws_freeContext(context);
++        if (!cached)
++            sws_freeContext(context);
+     }
+     return result;
+ }
+-- 
+2.43.0
+

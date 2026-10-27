@@ -109,6 +109,13 @@ CC="$RISCOS_TOOLCHAIN/bin/arm-riscos-gnueabihf-gcc"
 "$RISCOS_TOOLCHAIN/bin/elf2aif" -e "$O/bench.elf" "$O/bench,ff8" > /dev/null
 echo "built $O/bench,ff8"
 
+# ---- neon_check (tools/neon_check.c): MLT's NEON loops against the C
+"$CC" -O2 $CFLAGS_EXTRA -I"$STAGE/include/mlt-7" -I"$M/src/modules/core" "$TOP/tools/neon_check.c" \
+  "$M/src/modules/core/core_neon.c" -mfpu=neon -o "$O/neon_check" -static
+"$RISCOS_TOOLCHAIN/bin/arm-riscos-gnueabihf-strip" -o "$O/neon_check.elf" "$O/neon_check"
+"$RISCOS_TOOLCHAIN/bin/elf2aif" -e "$O/neon_check.elf" "$O/neon_check,ff8" > /dev/null
+echo "built $O/neon_check,ff8"
+
 # ---- !ReelEdit (src/): the engine and the desktop front end
 RE_VERSION=${RE_VERSION:-0.1}
 "$RCD_DIR/checks/check-unaligned.sh" -I"$STAGE/include/mlt-7" -I"$DK/include" -I"$TOP/src" "$TOP"/src/*.c "$TOP"/src/riscos/*.c

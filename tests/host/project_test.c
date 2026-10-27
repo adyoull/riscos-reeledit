@@ -232,6 +232,11 @@ static void fades(const char *a, const char *b, const char *snd, const char *out
           y12, y30, red);
     CHECK(y149 <= 20 && abs(y100 - blue) <= 4, "fades: out: luma %d at the end, %d before (blue %d)", y149, y100,
           blue);
+    /* (the colour fades towards grey with the luma: red's Cr from 128 up) */
+    int cr0 = (luma_at(e, 0), shown_cr[45 * 160 + 80]), cr12 = (luma_at(e, 12), shown_cr[45 * 160 + 80]);
+    int cr30 = (luma_at(e, 30), shown_cr[45 * 160 + 80]);
+    CHECK(shown_w == 320 && cr30 > 180 && abs(cr0 - 128) <= 4 && cr12 > 138 && cr12 < cr30 - 10,
+          "fades: in: Cr %d, %d, %d", cr0, cr12, cr30);
     CHECK(re_project_fade(p, 0, 0, 25) == 0, "fades: the same again changed it");
 
     /* trimmed: the fade stays at the start; kept to the clip's length; undo */

@@ -1,0 +1,500 @@
+From 46be47caadbc743a6fbf10fdb03138b139a6a9b9 Mon Sep 17 00:00:00 2001
+From: Andrew Youll <andrewyoull86@gmail.com>
+Date: Tue, 27 Oct 2026 23:30:00 +0000
+Subject: [PATCH 11/11] core: yuv420p brightness; NEON loops for mixes and
+ overlays
+
+brightness works on yuv420p as it is (luma towards black, chroma towards
+grey) instead of converting to yuv422 and back.
+
+core_neon.c has NEON versions of the dissolve's mix, brightness's scale
+and composite's yuv420p blends, built with -mfpu=neon on 32-bit ARM
+only. They run only when the application sets MLT_NEON=1 in MLT's
+environment (the CPU has NEON); otherwise the C loops run. 8.8 fixed
+point: a result can differ by one from the C.
+
+composite passes consumer.fast_scale on to the b frame.
+---
+ src/modules/core/CMakeLists.txt         |   7 +
+ src/modules/core/core_neon.c            | 213 ++++++++++++++++++++++++
+ src/modules/core/core_neon.h            |  53 ++++++
+ src/modules/core/filter_brightness.c    |  58 ++++++-
+ src/modules/core/transition_composite.c |  13 +-
+ src/modules/core/transition_luma.c      |   6 +-
+ 6 files changed, 341 insertions(+), 9 deletions(-)
+ create mode 100644 src/modules/core/core_neon.c
+ create mode 100644 src/modules/core/core_neon.h
+
+diff --git a/src/modules/core/CMakeLists.txt b/src/modules/core/CMakeLists.txt
+index fe8eeee..1b39592 100644
+--- a/src/modules/core/CMakeLists.txt
++++ b/src/modules/core/CMakeLists.txt
+@@ -1,6 +1,7 @@
+ add_library(mltcore ${MLT_MODULE_TYPE}
+   consumer_multi.c
+   consumer_null.c
++  core_neon.c core_neon.h
+   factory.c
+   filter_audiochannels.c
+   filter_audioconvert.c
+@@ -76,6 +77,12 @@ if(CPU_SSE)
+   target_compile_definitions(mltcore PRIVATE USE_SSE)
+ endif()
+ 
++# NEON for core_neon.c alone on 32-bit ARM: used only when the application
++# says the CPU has it (core_neon.h)
++if(CMAKE_SYSTEM_PROCESSOR MATCHES "^arm")
++  set_source_files_properties(core_neon.c PROPERTIES COMPILE_OPTIONS "-mfpu=neon")
++endif()
++
+ if(CPU_X86_64)
+   target_sources(mltcore PRIVATE composite_line_yuv_sse2_simple.c)
+   target_compile_definitions(mltcore PRIVATE ARCH_X86_64)
+diff --git a/src/modules/core/core_neon.c b/src/modules/core/core_neon.c
+new file mode 100644
+index 0000000..b0b3a19
+--- /dev/null
++++ b/src/modules/core/core_neon.c
+@@ -0,0 +1,213 @@
++/*
++ * core_neon.c -- NEON versions of the core module's hottest loops
++ * Copyright (C) 2026 Andrew Youll
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
++ */
++
++/* Built with -mfpu=neon on 32-bit ARM (CMakeLists.txt); elsewhere each
++   function returns 0. See core_neon.h. */
++
++#include "core_neon.h"
++
++#include <framework/mlt_factory.h>
++#include <stdlib.h>
++#include <string.h>
++
++#if defined(__ARM_NEON) || defined(__ARM_NEON__)
++#include <arm_neon.h>
++
++static int neon = -1;
++
++int mlt_core_neon(void)
++{
++    if (neon < 0) {
++        const char *e = mlt_environment("MLT_NEON");
++        neon = e && atoi(e) > 0;
++    }
++    return neon;
++}
++
++/* 16.16 to 8.8, 0 .. 256 */
++static inline int to8(int32_t v)
++{
++    v = (v + 128) >> 8;
++    return v < 0 ? 0 : v > 256 ? 256 : v;
++}
++
++int mlt_core_neon_mix(uint8_t *d, const uint8_t *s, int n, int32_t mix)
++{
++    if (!mlt_core_neon())
++        return 0;
++    int m = to8(mix), i = 0;
++    if (m == 0)
++        return 1;
++    if (m == 256) {
++        memcpy(d, s, n);
++        return 1;
++    }
++    uint8x8_t vm = vdup_n_u8(m), vi = vdup_n_u8(256 - m);
++    for (; i + 16 <= n; i += 16) {
++        uint8x16_t vs = vld1q_u8(s + i), vd = vld1q_u8(d + i);
++        uint16x8_t lo = vmlal_u8(vmull_u8(vget_low_u8(vs), vm), vget_low_u8(vd), vi);
++        uint16x8_t hi = vmlal_u8(vmull_u8(vget_high_u8(vs), vm), vget_high_u8(vd), vi);
++        vst1q_u8(d + i, vcombine_u8(vshrn_n_u16(lo, 8), vshrn_n_u16(hi, 8)));
++    }
++    for (; i < n; i++)
++        d[i] = (s[i] * m + d[i] * (256 - m)) >> 8;
++    return 1;
++}
++
++int mlt_core_neon_scale(uint8_t *p, int n, int32_t m, int32_t add, int min, int max)
++{
++    /* (as brightness uses it: luma, add 0; chroma, add 128 * (65536 - m); m below 1) */
++    if (!mlt_core_neon() || m < 0 || m >= 65536 - 128 || (add && add != 128 * (65536 - m)))
++        return 0;
++    int m8 = to8(m), i = 0;
++    int a8 = add ? 128 * (256 - m8) : 0; /* (p * m8 + a8: below 65536) */
++    uint8x8_t vm = vdup_n_u8(m8);
++    uint16x8_t va = vdupq_n_u16(a8);
++    uint8x16_t vmin = vdupq_n_u8(min), vmax = vdupq_n_u8(max);
++    for (; i + 16 <= n; i += 16) {
++        uint8x16_t vp = vld1q_u8(p + i);
++        uint16x8_t lo = vaddq_u16(vmull_u8(vget_low_u8(vp), vm), va);
++        uint16x8_t hi = vaddq_u16(vmull_u8(vget_high_u8(vp), vm), va);
++        uint8x16_t r = vcombine_u8(vshrn_n_u16(lo, 8), vshrn_n_u16(hi, 8));
++        vst1q_u8(p + i, vminq_u8(vmaxq_u8(r, vmin), vmax));
++    }
++    for (; i < n; i++) {
++        int v = (p[i] * m8 + a8) >> 8;
++        p[i] = v < min ? min : v > max ? max : v;
++    }
++    return 1;
++}
++
++/* An 8.8 mix from an alpha and the weight (8.8): a + a/128 (0 .. 256: 0
++   stays 0, 255 is 256), times the weight */
++static inline uint16x8_t mix_of(uint16x8_t a, int w, uint16x8_t vw)
++{
++    uint16x8_t m = vaddq_u16(a, vshrq_n_u16(a, 7));
++    return w >= 256 ? m : vshrq_n_u16(vmulq_u16(m, vw), 8);
++}
++
++static inline int mix1(int a, int w)
++{
++    int m = a + (a >> 7);
++    return w >= 256 ? m : (m * w) >> 8;
++}
++
++/* s over d (8 pixels, u16) by an 8.8 mix */
++static inline uint8x8_t over(uint8x8_t s, uint8x8_t d, uint16x8_t m)
++{
++    uint16x8_t v = vmulq_u16(vmovl_u8(s), m);
++    v = vmlaq_u16(v, vmovl_u8(d), vsubq_u16(vdupq_n_u16(256), m));
++    return vshrn_n_u16(v, 8);
++}
++
++int mlt_core_neon_blend(uint8_t *d, const uint8_t *s, const uint8_t *a, int n, int32_t weight)
++{
++    if (!mlt_core_neon() || !a)
++        return 0;
++    int w = to8(weight), i = 0;
++    if (w == 0)
++        return 1;
++    uint16x8_t vw = vdupq_n_u16(w);
++    for (; i + 16 <= n; i += 16) {
++        uint8x16_t va = vld1q_u8(a + i);
++        uint8x16_t vs = vld1q_u8(s + i), vd = vld1q_u8(d + i);
++        uint16x8_t mlo = mix_of(vmovl_u8(vget_low_u8(va)), w, vw);
++        uint16x8_t mhi = mix_of(vmovl_u8(vget_high_u8(va)), w, vw);
++        vst1q_u8(d + i,
++                 vcombine_u8(over(vget_low_u8(vs), vget_low_u8(vd), mlo),
++                             over(vget_high_u8(vs), vget_high_u8(vd), mhi)));
++    }
++    for (; i < n; i++) {
++        int m = mix1(a[i], w);
++        d[i] = (s[i] * m + d[i] * (256 - m)) >> 8;
++    }
++    return 1;
++}
++
++int mlt_core_neon_blend_chroma(uint8_t *du,
++                               uint8_t *dv,
++                               const uint8_t *su,
++                               const uint8_t *sv,
++                               const uint8_t *a0,
++                               const uint8_t *a1,
++                               int n,
++                               int32_t weight)
++{
++    if (!mlt_core_neon() || !a0 || !a1)
++        return 0;
++    int w = to8(weight), i = 0;
++    if (w == 0)
++        return 1;
++    uint16x8_t vw = vdupq_n_u16(w), two = vdupq_n_u16(2);
++    for (; i + 8 <= n; i += 8) {
++        /* (2x2 sums: pairs across each row, then the two rows) */
++        uint16x8_t sum = vaddq_u16(vpaddlq_u8(vld1q_u8(a0 + 2 * i)), vpaddlq_u8(vld1q_u8(a1 + 2 * i)));
++        uint16x8_t al = vshrq_n_u16(vaddq_u16(sum, two), 2);
++        uint16x8_t m = mix_of(al, w, vw);
++        vst1_u8(du + i, over(vld1_u8(su + i), vld1_u8(du + i), m));
++        vst1_u8(dv + i, over(vld1_u8(sv + i), vld1_u8(dv + i), m));
++    }
++    for (; i < n; i++) {
++        int al = (a0[2 * i] + a0[2 * i + 1] + a1[2 * i] + a1[2 * i + 1] + 2) >> 2;
++        int m = mix1(al, w);
++        du[i] = (su[i] * m + du[i] * (256 - m)) >> 8;
++        dv[i] = (sv[i] * m + dv[i] * (256 - m)) >> 8;
++    }
++    return 1;
++}
++
++#else
++
++int mlt_core_neon(void)
++{
++    return 0;
++}
++
++int mlt_core_neon_mix(uint8_t *d, const uint8_t *s, int n, int32_t mix)
++{
++    (void) d, (void) s, (void) n, (void) mix;
++    return 0;
++}
++
++int mlt_core_neon_scale(uint8_t *p, int n, int32_t m, int32_t add, int min, int max)
++{
++    (void) p, (void) n, (void) m, (void) add, (void) min, (void) max;
++    return 0;
++}
++
++int mlt_core_neon_blend(uint8_t *d, const uint8_t *s, const uint8_t *a, int n, int32_t weight)
++{
++    (void) d, (void) s, (void) a, (void) n, (void) weight;
++    return 0;
++}
++
++int mlt_core_neon_blend_chroma(uint8_t *du,
++                               uint8_t *dv,
++                               const uint8_t *su,
++                               const uint8_t *sv,
++                               const uint8_t *a0,
++                               const uint8_t *a1,
++                               int n,
++                               int32_t weight)
++{
++    (void) du, (void) dv, (void) su, (void) sv, (void) a0, (void) a1, (void) n, (void) weight;
++    return 0;
++}
++
++#endif
+diff --git a/src/modules/core/core_neon.h b/src/modules/core/core_neon.h
+new file mode 100644
+index 0000000..9093d1e
+--- /dev/null
++++ b/src/modules/core/core_neon.h
+@@ -0,0 +1,53 @@
++/*
++ * core_neon.h -- NEON versions of the core module's hottest loops
++ * Copyright (C) 2026 Andrew Youll
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
++ */
++
++#ifndef CORE_NEON_H
++#define CORE_NEON_H
++
++#include <stdint.h>
++
++/* Each does the whole row with NEON and returns 1, or does nothing and
++   returns 0 (the caller then does it in C): 0 on a build without NEON, and
++   unless the application has said the CPU has it (MLT's environment
++   "MLT_NEON" set to 1, after mlt_factory_init: CPUs without NEON exist,
++   and MLT doesn't detect it). The arithmetic is 8.8 fixed point, so a
++   result can differ by one from the C's 16.16.
++
++   mix:    d = s * mix + d * (1 - mix), mix 16.16 (0 .. 65536)
++   scale:  p = clamp((p * m + add) >> 16, min, max), m 16.16 up to 65536
++           (luma: add 0; chroma towards grey: add 128 * (65536 - m))
++   blend:  d = s over d by each pixel's alpha a, times weight (16.16):
++           see-through pixels (a 0) left as they are, opaque ones (a 255,
++           weight 65536) copied
++   blend_chroma: a 4:2:0 chroma pixel each of u and v, s over d, by the
++           average alpha of its 2x2 luma pixels (rows a0 and a1, 2n wide) */
++int mlt_core_neon(void);
++int mlt_core_neon_mix(uint8_t *d, const uint8_t *s, int n, int32_t mix);
++int mlt_core_neon_scale(uint8_t *p, int n, int32_t m, int32_t add, int min, int max);
++int mlt_core_neon_blend(uint8_t *d, const uint8_t *s, const uint8_t *a, int n, int32_t weight);
++int mlt_core_neon_blend_chroma(uint8_t *du,
++                               uint8_t *dv,
++                               const uint8_t *su,
++                               const uint8_t *sv,
++                               const uint8_t *a0,
++                               const uint8_t *a1,
++                               int n,
++                               int32_t weight);
++
++#endif
+diff --git a/src/modules/core/filter_brightness.c b/src/modules/core/filter_brightness.c
+index d7bbd0d..81fa3c2 100644
+--- a/src/modules/core/filter_brightness.c
++++ b/src/modules/core/filter_brightness.c
+@@ -21,6 +21,7 @@
+ #include <framework/mlt_frame.h>
+ #include <framework/mlt_image.h>
+ #include <framework/mlt_slices.h>
++#include "core_neon.h"
+ 
+ #include <math.h>
+ #include <stdio.h>
+@@ -34,6 +35,33 @@ struct sliced_desc
+     int full_range;
+ };
+ 
++/* A row of luma scaled towards black, of chroma towards grey (16.16),
++   clamped (core_neon.c has NEON ones, used where the application says
++   there's NEON) */
++static void scale_luma_c(uint8_t *p, int n, int32_t m, int min, int max)
++{
++    for (int i = 0; i < n; i++)
++        p[i] = CLAMP((p[i] * m) >> 16, min, max);
++}
++
++static void scale_chroma_c(uint8_t *p, int n, int32_t m, int32_t add, int min, int max)
++{
++    for (int i = 0; i < n; i++)
++        p[i] = CLAMP((p[i] * m + add) >> 16, min, max);
++}
++
++static void mlt_brightness_scale_luma(uint8_t *p, int n, int32_t m, int min, int max)
++{
++    if (!mlt_core_neon_scale(p, n, m, 0, min, max))
++        scale_luma_c(p, n, m, min, max);
++}
++
++static void mlt_brightness_scale_chroma(uint8_t *p, int n, int32_t m, int32_t add, int min, int max)
++{
++    if (!mlt_core_neon_scale(p, n, m, add, min, max))
++        scale_chroma_c(p, n, m, add, min, max);
++}
++
+ static int sliced_proc(int id, int index, int jobs, void *cookie)
+ {
+     (void) id; // unused
+@@ -43,7 +71,27 @@ static int sliced_proc(int id, int index, int jobs, void *cookie)
+ 
+     // Only process if level is something other than 1
+     if (ctx->level != 1.0) {
+-        if (ctx->image->format == mlt_image_yuv422) {
++        if (ctx->image->format == mlt_image_yuv420p) {
++            /* (each plane as it is: luma towards black, chroma towards grey;
++               a chroma row with the even luma row above it) */
++            int32_t m = ctx->level * (1 << 16);
++            int32_t n = 128 * ((1 << 16) - m);
++            int min = ctx->full_range ? 0 : 16;
++            int max_luma = ctx->full_range ? 255 : 235;
++            int max_chroma = ctx->full_range ? 255 : 240;
++            int cw = (ctx->image->width + 1) / 2;
++            for (int line = 0; line < slice_height; line++) {
++                int y = slice_line_start + line;
++                uint8_t *p = ctx->image->planes[0] + y * ctx->image->strides[0];
++                mlt_brightness_scale_luma(p, ctx->image->width, m, min, max_luma);
++                if (!(y & 1)) {
++                    mlt_brightness_scale_chroma(ctx->image->planes[1] + (y / 2) * ctx->image->strides[1], cw, m, n,
++                                                min, max_chroma);
++                    mlt_brightness_scale_chroma(ctx->image->planes[2] + (y / 2) * ctx->image->strides[2], cw, m, n,
++                                                min, max_chroma);
++                }
++            }
++        } else if (ctx->image->format == mlt_image_yuv422) {
+             int32_t m = ctx->level * (1 << 16);
+             int32_t n = 128 * ((1 << 16) - m);
+             int min = ctx->full_range ? 0 : 16;
+@@ -183,11 +231,9 @@ static int filter_get_image(mlt_frame frame,
+             *format = mlt_image_rgba;
+             break;
+         case mlt_image_yuv420p:
+-            if (mlt_properties_get_int(properties, "rgb_only")) {
++            if (mlt_properties_get_int(properties, "rgb_only"))
+                 *format = mlt_image_rgba;
+-            } else {
+-                *format = mlt_image_yuv422;
+-            }
++            /* (else yuv420p as it is: no conversion to yuv422 and back) */
+             break;
+         case mlt_image_yuv422p16:
+         case mlt_image_yuv420p10:
+@@ -201,7 +247,7 @@ static int filter_get_image(mlt_frame frame,
+     int error = mlt_frame_get_image(frame, image, format, width, height, 1);
+ 
+     if (*format != mlt_image_rgb && *format != mlt_image_rgba && *format != mlt_image_rgba64
+-        && *format != mlt_image_yuv422)
++        && *format != mlt_image_yuv422 && *format != mlt_image_yuv420p)
+         level = 1.0;
+ 
+     alpha_level = mlt_properties_exists(properties, "alpha")
+diff --git a/src/modules/core/transition_composite.c b/src/modules/core/transition_composite.c
+index c12c107..6311f96 100644
+--- a/src/modules/core/transition_composite.c
++++ b/src/modules/core/transition_composite.c
+@@ -19,6 +19,7 @@
+ 
+ #include "transition_composite.h"
+ #include <framework/mlt.h>
++#include "core_neon.h"
+ #include <framework/mlt_luma_map.h>
+ 
+ #include <ctype.h>
+@@ -1011,6 +1012,8 @@ static void composite_yuv420p(uint8_t *dest,
+                 memset(aa, 255, w);
+             continue;
+         }
++        if (!aa && (a ? mlt_core_neon_blend(dp, sp, a, w, weight) : mlt_core_neon_mix(dp, sp, w, weight)))
++            continue;
+         for (int i = 0; i < w; i++) {
+             int al = a ? a[i] : 255;
+             if (!al)
+@@ -1034,7 +1037,13 @@ static void composite_yuv420p(uint8_t *dest,
+         const uint8_t *sv = s.planes[2] + (size_t) (sy / 2 + j) * s.strides[2] + sx / 2;
+         const uint8_t *a0 = alpha_b ? alpha_b + (size_t) r0 * width_src : NULL;
+         const uint8_t *a1 = alpha_b ? alpha_b + (size_t) r1 * width_src : NULL;
+-        for (int i = 0; i < cw; i++) {
++        int i = 0, whole = (width_src - sx) / 2; /* (chroma pixels with both luma columns in the picture) */
++        if (whole > cw)
++            whole = cw;
++        if (a0 ? mlt_core_neon_blend_chroma(du, dv, su, sv, a0 + sx, a1 + sx, whole, weight)
++               : mlt_core_neon_mix(du, su, whole, weight) && mlt_core_neon_mix(dv, sv, whole, weight))
++            i = whole;
++        for (; i < cw; i++) {
+             int al = 255;
+             if (a0) {
+                 int c0 = sx + 2 * i, c1 = c0 + 1 < width_src ? c0 + 1 : c0;
+@@ -1096,6 +1105,8 @@ static int composite_as_yuv420p(mlt_transition self,
+         return 1;
+     uint8_t *image_b = NULL;
+     mlt_properties b_props = MLT_FRAME_PROPERTIES(b_frame);
++    /* (a preview's quicker scaling, if the consumer asked for it) */
++    mlt_properties_set_int(b_props, "consumer.fast_scale", mlt_properties_get_int(a_props, "consumer.fast_scale"));
+     if (!get_b_frame_image_as(self, b_frame, &image_b, &width_b, &height_b, &result, mlt_image_yuv420p)
+         || !image_b || mlt_properties_get_int(b_props, "format") != mlt_image_yuv420p)
+         return 1;
+diff --git a/src/modules/core/transition_luma.c b/src/modules/core/transition_luma.c
+index a40cf21..7b46f06 100644
+--- a/src/modules/core/transition_luma.c
++++ b/src/modules/core/transition_luma.c
+@@ -21,6 +21,7 @@
+  */
+ 
+ #include <framework/mlt.h>
++#include "core_neon.h"
+ #include <framework/mlt_luma_map.h>
+ 
+ #include "transition_composite.h"
+@@ -220,8 +221,9 @@ static int dissolve_yuv420p(mlt_frame frame, mlt_frame that, float weight, int w
+ 
+     int mix = weight * (1 << 16);
+     int size = width * height + 2 * (width / 2) * (height / 2);
+-    for (int i = 0; i < size; i++)
+-        p_dest[i] = (p_src[i] * mix + p_dest[i] * ((1 << 16) - mix)) >> 16;
++    if (!mlt_core_neon_mix(p_dest, p_src, size, mix))
++        for (int i = 0; i < size; i++)
++            p_dest[i] = (p_src[i] * mix + p_dest[i] * ((1 << 16) - mix)) >> 16;
+     return 0;
+ }
+ 
+-- 
+2.43.0
+

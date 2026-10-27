@@ -31,6 +31,7 @@
 #include "display.h"
 #include "sound.h"
 
+#include <libavutil/cpu.h>
 #include <stdarg.h>
 #include <stdio.h>
 #ifdef __riscos__
@@ -163,6 +164,7 @@ static void log_open(void)
         return;
     V.log = fopen(path && *path ? path : "<Wimp$ScrapDir>.ReelEditLog", "w");
     app_log(APP " %s", RE_VERSION);
+    app_log("NEON: %s", av_get_cpu_flags() & AV_CPU_FLAG_NEON ? "yes (MLT's NEON loops used)" : "no");
 }
 
 /* An error box: buttons (NULL: OK). Returns Wimp_ReportError's R1: 1 OK,
