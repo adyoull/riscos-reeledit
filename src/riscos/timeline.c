@@ -391,14 +391,19 @@ static void draw_fades(const re_item *it, int ox, int x0, int x1, int y1, int cx
     }
 }
 
-/* A dissolve: the clip colour giving way to a lighter one along a diagonal,
-   in a dark band; its name if there's room */
+/* A dissolve: a box laid over the two clips where they overlap (the clips
+   are drawn on through it), the first clip's colour giving way to a
+   lighter one along a diagonal, a white (selected: amber) border; its name
+   if there's room */
+#define MIX_INSET 12 /* OS units: the clips show above and below the box */
 static void draw_dissolve(const re_item *it, int selected, int x0, int x1, int y0, int y1, int cx0, int cy0, int cx1,
                           int cy1)
 {
-    colour(selected ? 0x2080F000 : 0x20202000);
+    y0 += MIX_INSET;
+    y1 -= MIX_INSET;
+    colour(selected ? 0x2080F000 : 0xFFFFFF00);
     rect(x0, y0, x1, y1);
-    int inset = selected ? 6 : 2, a0 = x0 + inset, a1 = x1 - inset, b0 = y0 + inset, b1 = y1 - inset;
+    int inset = selected ? 6 : 3, a0 = x0 + inset, a1 = x1 - inset, b0 = y0 + inset, b1 = y1 - inset;
     if (a1 <= a0)
         return;
     colour(0xC0905000); /* (the clips' colour, below the diagonal) */
@@ -454,10 +459,15 @@ static void draw(int *b)
             int x0 = ox + x_of(it.start), x1 = ox + x_of(it.start + it.length) - 2;
             if (x1 < x0)
                 x1 = x0;
-            if (it.mix) {
-                draw_dissolve(&it, i == A.sel, x0, x1, track_y0, track_y1, cx0, cy0, cx1, cy1);
-                continue;
-            }
+            if (it.mix)
+                continue; /* (laid over the clips afterwards) */
+            /* a clip runs on under a dissolve beside it: the frames it gives */
+            int name_x = x0 + 10;
+            re_item n;
+            if (i > 0 && !re_project_item(A.proj, i - 1, &n) && n.mix)
+                x0 = ox + x_of(n.start);
+            if (!re_project_item(A.proj, i + 1, &n) && n.mix)
+                x1 = ox + x_of(n.start + n.length) - 2;
             /* selected: the clip's own colour inside a bright outline (a fill
                hid its name, Pi test) */
             unsigned fill = 0xC0905000;
@@ -479,12 +489,21 @@ static void draw(int *b)
                 clip(c0, r0, c1, r1);
                 /* the name at the start, and again along a long clip (so
                    it's in view however it's scrolled) */
-                for (int nx = x0 + 10; nx == x0 + 10 || nx < x1 - 200; nx += 1000)
+                for (int nx = name_x; nx == name_x || nx < x1 - 200; nx += 1000)
                     if (nx < c1 && nx + 1000 > c0)
                         text(it.name, nx, track_y1 - CORNER - 28, 0xFFFFFF00, fill); /* (below the fade handles) */
                 clip(cx0, cy0, cx1, cy1);
             }
         }
+    }
+    /* the dissolves, over the clips */
+    for (int i = 0; A.proj && i < re_project_items(A.proj); i++) {
+        re_item it;
+        re_project_item(A.proj, i, &it);
+        if (!it.mix || it.start + it.length < f0 || it.start > f1)
+            continue;
+        int x0 = ox + x_of(it.start), x1 = ox + x_of(it.start + it.length) - 2;
+        draw_dissolve(&it, i == A.sel, x0, x1 < x0 ? x0 : x1, track_y0, track_y1, cx0, cy0, cx1, cy1);
     }
     /* the cuts' marks at the track's bottom: a drag there makes a dissolve */
     if (A.proj && T.drag == DRAG_NONE) {

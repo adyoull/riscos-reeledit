@@ -53,8 +53,8 @@ for its own menu ("Clip"):
                       any (trimmed clips do), so nothing moves
   Delete, Video information...
 Each effect is shown as a box of its own over the part of the clip it
-covers: a fade along the top of the clip, a dissolve as a band with a
-diagonal between the two clips. Drag a fade's box by its white inner edge,
+covers: a fade along the top of the clip, a dissolve as a box laid over
+the two clips where they overlap (the clips run on under it). Drag a fade's box by its white inner edge,
 or a dissolve's ends, to make it longer or shorter; the Viewer shows its
 middle when you stop moving. Menu over a dissolve: Delete takes it out
 (the clips as they were); or click it and press Delete. Also: D (Edit >
