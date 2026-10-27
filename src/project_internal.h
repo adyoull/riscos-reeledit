@@ -47,4 +47,11 @@ void rp_relink(re_project *p);
    an edit of its own: within one). 0, or -1. */
 int rp_unmix(re_project *p, int mix);
 
+/* fade.c: a clip's fade at its start (end 0) or its end (end 1): its
+   length (0: none); set (0: taken away; not an edit of its own); and every
+   fade kept to its clip's ends and length (after every edit) */
+int rp_fade_of(re_project *p, int item, int end);
+void rp_set_fade(re_project *p, int item, int end, int length);
+void rp_fit_fades(re_project *p);
+
 #endif

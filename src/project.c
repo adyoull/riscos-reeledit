@@ -33,6 +33,7 @@ static void fit_tractor(re_project *p)
 void rp_changed(re_project *p)
 {
     rp_relink(p);
+    rp_fit_fades(p);
     fit_tractor(p);
     p->state = ++p->next_state;
     p->changes++;
@@ -376,7 +377,11 @@ int re_project_item(re_project *p, int i, re_item *item)
         item->in = 0;
         item->out = item->length - 1;
         snprintf(item->name, sizeof(item->name), "Dissolve");
-    } else if (!item->gap && info.resource) {
+    } else if (!item->gap) {
+        item->fade_in = rp_fade_of(p, i, 0);
+        item->fade_out = rp_fade_of(p, i, 1);
+    }
+    if (!item->gap && !item->mix && info.resource) {
         const char *leaf = info.resource;
         for (const char *c = info.resource; *c; c++)
             if (*c == '/' || *c == '\\')
@@ -450,9 +455,14 @@ int re_project_split(re_project *p, int frame)
         return 0;
     /* (the first part: its in to the frame before) */
     rp_checkpoint(p);
+    int fade_out = rp_fade_of(p, i, 1);
     if (mlt_playlist_split(p->v1, i, frame - it.start - 1)) {
         rp_no_edit(p);
         return 0;
+    }
+    if (fade_out) { /* (the fade out goes with the second part, where the end is) */
+        rp_set_fade(p, i, 1, 0);
+        rp_set_fade(p, i + 1, 1, fade_out);
     }
     rp_changed(p);
     return 1;

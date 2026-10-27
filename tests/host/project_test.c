@@ -178,10 +178,115 @@ static void dissolves(const char *a, const char *b, const char *four3, const cha
     re_project_close(p);
 }
 
+/* The loudest sample of the project's sound at a frame (MLT's, as the engine takes it) */
+static int peak_at(re_project *p, int frame)
+{
+    mlt_producer prod = re_project_producer(p);
+    mlt_frame f = NULL;
+    mlt_producer_seek(prod, frame);
+    if (mlt_service_get_frame(MLT_PRODUCER_SERVICE(prod), &f, 0) || !f)
+        return -1;
+    mlt_audio_format fmt = mlt_audio_s16;
+    int freq = 48000, ch = 2, n = mlt_audio_calculate_frame_samples(25, freq, frame), peak = 0;
+    int16_t *pcm = NULL;
+    if (!mlt_frame_get_audio(f, (void **) &pcm, &fmt, &freq, &ch, &n) && pcm)
+        for (int i = 0; i < n * ch; i++)
+            if (abs(pcm[i]) > peak)
+                peak = abs(pcm[i]);
+    mlt_frame_close(f);
+    return peak;
+}
+
+/* ---- fades: from black at a clip's start, to black at its end, the sound
+   with the picture; kept to the clip as it's trimmed and split; kept
+   through undo, saving and opening; taken away; not where a dissolve is */
+static void fades(const char *a, const char *b, const char *snd, const char *out)
+{
+    re_engine_io io = {show, NULL, clk, NULL, 48000, 2, NULL};
+    re_project *p = re_project_new();
+    re_project_add(p, a, -1);
+    re_project_add(p, b, -1);
+    re_engine *e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    int red = luma_at(e, 30), blue = luma_at(e, 100);
+    CHECK(re_project_fade(p, 0, 0, 25) == 1 && re_project_fade(p, 1, 1, 25) == 1, "fades: not made");
+    re_item it, it2;
+    re_project_item(p, 0, &it);
+    re_project_item(p, 1, &it2);
+    CHECK(it.fade_in == 25 && it.fade_out == 0 && it2.fade_in == 0 && it2.fade_out == 25, "fades: %d %d, %d %d",
+          it.fade_in, it.fade_out, it2.fade_in, it2.fade_out);
+    re_engine_refresh(e);
+    int y0 = luma_at(e, 0), y12 = luma_at(e, 12), y30 = luma_at(e, 30), y149 = luma_at(e, 149), y100 = luma_at(e, 100);
+    CHECK(y0 <= 20 && y12 > 25 && y12 < red - 10 && abs(y30 - red) <= 4, "fades: in: luma %d, %d, %d (red %d)", y0,
+          y12, y30, red);
+    CHECK(y149 <= 20 && abs(y100 - blue) <= 4, "fades: out: luma %d at the end, %d before (blue %d)", y149, y100,
+          blue);
+    CHECK(re_project_fade(p, 0, 0, 25) == 0, "fades: the same again changed it");
+
+    /* trimmed: the fade stays at the start; kept to the clip's length; undo */
+    CHECK(re_project_set_in_out(p, 0, 10, 74) == 1, "fades: trim");
+    re_engine_refresh(e);
+    re_project_item(p, 0, &it);
+    CHECK(it.fade_in == 25 && luma_at(e, 0) <= 20, "fades: trimmed: fade %d, luma %d at the start", it.fade_in,
+          luma_at(e, 0));
+    CHECK(re_project_set_in_out(p, 0, 10, 24) == 1, "fades: trimmed short");
+    re_project_item(p, 0, &it);
+    CHECK(it.fade_in == 15, "fades: a 15-frame clip's fade: %d", it.fade_in);
+    CHECK(re_project_undo(p) && re_project_undo(p), "fades: undo");
+    re_project_item(p, 0, &it);
+    CHECK(it.fade_in == 25 && it.in == 0, "fades: undone: fade %d, in %d", it.fade_in, it.in);
+
+    /* split: the fade out goes with the second part */
+    CHECK(re_project_split(p, 110) == 1, "fades: split");
+    re_project_item(p, 1, &it);
+    re_project_item(p, 2, &it2);
+    CHECK(it.fade_out == 0 && it2.fade_out == 25, "fades: split: fade outs %d, %d", it.fade_out, it2.fade_out);
+
+    /* saved and opened */
+    CHECK(re_project_save(p, out) == 0, "fades: not saved");
+    re_engine_close(e);
+    re_project_close(p);
+    p = re_project_open(out, 1);
+    CHECK(p != NULL, "fades: not opened");
+    if (!p)
+        return;
+    re_project_item(p, 0, &it);
+    re_project_item(p, 2, &it2);
+    CHECK(it.fade_in == 25 && it2.fade_out == 25, "fades: opened: %d, %d", it.fade_in, it2.fade_out);
+    e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    CHECK(luma_at(e, 0) <= 20, "fades: opened: luma %d at the start", luma_at(e, 0));
+
+    /* taken away; and none where a dissolve is */
+    CHECK(re_project_fade(p, 0, 0, 0) == 1, "fades: not taken away");
+    re_engine_refresh(e);
+    re_project_item(p, 0, &it);
+    CHECK(it.fade_in == 0 && abs(luma_at(e, 0) - red) <= 4, "fades: taken away: %d, luma %d", it.fade_in,
+          luma_at(e, 0));
+    CHECK(re_project_fade(p, 0, 1, 10) == 1 && re_project_fade(p, 1, 0, 10) == 1, "fades: either side of the cut");
+    CHECK(re_project_dissolve(p, 0, 10, 1) == 1, "fades: the dissolve: %s", layout(p));
+    re_project_item(p, 0, &it);
+    re_project_item(p, 2, &it2);
+    CHECK(it.fade_out == 0 && it2.fade_in == 0, "fades: a dissolve kept the fades beside it: %d, %d", it.fade_out,
+          it2.fade_in);
+    CHECK(re_project_fade(p, 0, 1, 10) == 0 && re_project_fade(p, 2, 0, 10) == 0, "fades: made in a dissolve");
+    re_engine_close(e);
+    re_project_close(p);
+
+    /* the sound fades too */
+    p = re_project_new();
+    re_project_add(p, snd, -1);
+    int loud = peak_at(p, 40);
+    re_project_fade(p, 0, 0, 25);
+    int quiet = peak_at(p, 0), half = peak_at(p, 20);
+    CHECK(loud > 1000 && quiet < loud / 50 && half > quiet && half < loud, "fades: the sound: %d, %d, %d (%d unfaded)",
+          quiet, half, peak_at(p, 40), loud);
+    re_project_close(p);
+}
+
 int main(int argc, char **argv)
 {
-    if (argc != 9) {
-        fprintf(stderr, "usage: project_test a.mp4 b.mp4 numbered.mp4 out.mlt numbered.m2v four3-709.mp4 big.mp4 wide-dvd.mp4\n");
+    if (argc != 10) {
+        fprintf(stderr, "usage: project_test a.mp4 b.mp4 numbered.mp4 out.mlt numbered.m2v four3-709.mp4 big.mp4 "
+                        "wide-dvd.mp4 numbered-snd.mp4\n");
         return 2;
     }
     const char *a = argv[1], *b = argv[2], *n = argv[3], *out = argv[4];
@@ -427,6 +532,7 @@ int main(int argc, char **argv)
     re_project_close(p);
 
     dissolves(a, b, argv[6], out);
+    fades(a, b, argv[9], out);
 
     printf("project_test: %s\n", fails ? "FAILED" : "passed");
     return fails != 0;

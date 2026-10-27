@@ -960,6 +960,20 @@ static void dissolve_at_cut(void)
     app_seek(it.start);
 }
 
+/* Edit > Fade in, Fade out: the selected clip's fade, a second long, or
+   taken away if it has one (the Timeline's fade handles change the length) */
+static void fade_toggle(int end)
+{
+    re_item it;
+    if (!A.proj || A.sel < 0 || re_project_item(A.proj, A.sel, &it))
+        return;
+    int has = end ? it.fade_out : it.fade_in;
+    if (re_project_fade(A.proj, A.sel, end, has ? 0 : re_project_frames(A.proj, 1.0))) {
+        app_log("fade %s: %s", end ? "out" : "in", has ? "taken away" : "made");
+        app_edited();
+    }
+}
+
 static void delete_selected(int ripple)
 {
     if (!A.proj || A.sel < 0)
@@ -1020,10 +1034,11 @@ typedef struct
 
 static MENU(3) m_file = {"File", 7, 2, 7, 0, 280, 44, 0,
                          {{0, -1, IT("New")}, {0, -1, IT("Save          F3")}, {0x80, -1, IT("Save as...")}}};
-static MENU(9) m_edit = {"Edit", 7, 2, 7, 0, 520, 44, 0,
+static MENU(11) m_edit = {"Edit", 7, 2, 7, 0, 520, 44, 0,
                          {{0, -1, IT("Undo                     F8")}, {2, -1, IT("Redo                     F9")},
                           {0, -1, IT("Split at the playhead     S")}, {0, -1, IT("Trim the start to it      Q")},
                           {0, -1, IT("Trim the end to it        W")}, {2, -1, IT("Dissolve at the cut       D")},
+                          {0, -1, IT("Fade in")}, {2, -1, IT("Fade out")},
                           {0, -1, IT("Delete               Delete")},
                           {0, -1, IT("Delete, leaving a gap   \x8b" "Del")}, {0x80, -1, IT("Clear the selection      ^Z")}}};
 static char play_item[24] = "Play           Space";
@@ -1062,7 +1077,13 @@ void app_menu(int x, int y)
     for (int i = 2; i <= 4; i++)
         shade(&m_edit.item[i].iflags, !has);
     shade(&m_edit.item[5].iflags, !A.proj || re_project_dissolve_cut(A.proj, app_position()) < 0);
-    for (int i = 6; i <= 8; i++)
+    re_item sel;
+    int clip = A.proj && A.sel >= 0 && !re_project_item(A.proj, A.sel, &sel) && !sel.gap && !sel.mix;
+    for (int i = 6; i <= 7; i++) { /* (ticked: it has one) */
+        shade(&m_edit.item[i].iflags, !clip);
+        m_edit.item[i].flags = (m_edit.item[i].flags & ~1) | (clip && (i == 6 ? sel.fade_in : sel.fade_out) ? 1 : 0);
+    }
+    for (int i = 8; i <= 10; i++)
         shade(&m_edit.item[i].iflags, A.sel < 0);
     m_view.item[4].flags = (m_view.item[4].flags & ~1) | (A.snap ? 1 : 0);
     for (int i = 0; i < 3; i++)
@@ -1117,9 +1138,11 @@ static void menu_select(int *b)
         case 3: trim(0); break;
         case 4: trim(1); break;
         case 5: dissolve_at_cut(); break;
-        case 6: delete_selected(1); break;
-        case 7: delete_selected(0); break;
-        case 8: tl_select(-1); break;
+        case 6: fade_toggle(0); break;
+        case 7: fade_toggle(1); break;
+        case 8: delete_selected(1); break;
+        case 9: delete_selected(0); break;
+        case 10: tl_select(-1); break;
         }
         break;
     case 2: /* Play */
@@ -1320,7 +1343,8 @@ static const char *help_for(int win, int icon)
                "click a clip to select it "
                "(Adjust: select or not).|MDrag a clip's edge to trim it, its middle to move it.|M"
                "Drag from the white mark at the top of a cut to make a dissolve there; drag a dissolve's ends to "
-               "change its length.|M"
+               "change its length.|MDrag the small white square at the top of a clip's end to fade it in or "
+               "out.|M"
                "Ctrl and the scroll wheel zoom; N turns snapping to cuts on or off.";
     if (win == -2)
         return "This is the Reel Edit icon.|MClick Select to open the editor; drop video files on it to add them "

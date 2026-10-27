@@ -40,6 +40,7 @@ typedef struct
     int in, out;         /* in the clip */
     int gap;             /* 1: a gap (blank), not a clip */
     int mix;             /* 1: a dissolve, the clips either side mixed (its in and out: 0, length - 1) */
+    int fade_in, fade_out; /* a clip's fades from and to black (frames; 0: none) */
     int source_length;   /* the clip's file's length (frames of the project): out is below it */
     char name[64];       /* the clip's file's leaf name */
 } re_item;
@@ -111,6 +112,13 @@ int re_project_dissolve_max(re_project *p, int mix);
 /* The cut between two clips (no dissolve there yet) nearest a frame: the
    clip before it, or -1 if there's none */
 int re_project_dissolve_cut(re_project *p, int frame);
+
+/* Fades from black at a clip's start (end 0) or to black at its end (end
+   1), the sound with the picture; length 0 takes it away. Kept to the clip
+   (trimmed, the fade stays at its end; split, the fade out goes with the
+   second part); not at an end in a dissolve (a dissolve made there takes
+   the fades away). 1 changed, 0 not. Between begin and end too. */
+int re_project_fade(re_project *p, int item, int end, int length);
 
 /* Undo and redo (up to 100 edits): the project as it was before the last
    edit, and back. 1 done, 0 nothing to do. The producer changes: an

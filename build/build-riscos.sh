@@ -65,7 +65,7 @@ if [ ! -f "$M/.patched" ]; then
   touch "$M/.patched"
 fi
 MODS_OFF=()
-for m in DECKLINK FREI0R GDK GLAXNIMATE_QT6 JACKRACK KDENLIVE MOVIT NDI NORMALIZE OLDFILM OPENCV OPENFX \
+for m in DECKLINK FREI0R GDK GLAXNIMATE_QT6 JACKRACK KDENLIVE MOVIT NDI OLDFILM OPENCV OPENFX \
          PLACEBO PLUS PLUSGPL QT6 RESAMPLE RTAUDIO RUBBERBAND RNNOISE SDL1 SDL2 SOX SPATIALAUDIO VIDSTAB \
          VORBIS XINE; do
   MODS_OFF+=(-DMOD_$m=OFF)
@@ -89,8 +89,9 @@ cmake --install "$M/build" > /dev/null
 # left was checked by hand (docs/PORTING.md); a new one fails the build.
 (cd "$M" && "$RCD_DIR/checks/check-unaligned.sh" -s "$TOP/build/unaligned-safe.txt" \
   -Isrc -Isrc/framework -Ibuild/src/framework -Ibuild/src/modules/core -Ibuild/src/modules/avformat \
-  -Ibuild/src/modules/xml -I"$DK/include" -include "$TOP/build/riscos-compat.h" \
-  src/framework/*.c src/modules/core/*.c src/modules/avformat/*.c src/modules/xml/*.c src/melt/*.c)
+  -Ibuild/src/modules/xml -Ibuild/src/modules/normalize -I"$DK/include" -include "$TOP/build/riscos-compat.h" \
+  src/framework/*.c src/modules/core/*.c src/modules/avformat/*.c src/modules/xml/*.c src/modules/normalize/*.c \
+  src/melt/*.c)
 
 # ---- melt: checked, then an Absolute file
 "$RCD_DIR/checks/check-all.sh" "$STAGE/bin/melt"
@@ -101,7 +102,7 @@ echo "built $O/melt,ff8"
 # ---- bench (tools/bench.c): pictures made as Reel Edit's player asks for them
 CC="$RISCOS_TOOLCHAIN/bin/arm-riscos-gnueabihf-gcc"
 "$CC" -O2 $CFLAGS_EXTRA -DMLT_STATIC_DEFINE -I"$STAGE/include/mlt-7" -I"$DK/include" "$TOP/tools/bench.c" -o "$O/bench" \
-  -static -L"$STAGE/lib" -L"$DK/lib" -lmlt-static-modules -lmltcore -lmltavformat -lmltxml -lmlt-7 -lxml2 \
+  -static -L"$STAGE/lib" -L"$DK/lib" -lmlt-static-modules -lmltcore -lmltavformat -lmltxml -lmltnormalize -lmlt-7 -lxml2 \
   $FF_LIBS -lm
 "$RCD_DIR/checks/check-all.sh" "$O/bench" > /dev/null || { "$RCD_DIR/checks/check-all.sh" "$O/bench"; exit 1; }
 "$RISCOS_TOOLCHAIN/bin/arm-riscos-gnueabihf-strip" -o "$O/bench.elf" "$O/bench"
@@ -112,10 +113,10 @@ echo "built $O/bench,ff8"
 RE_VERSION=${RE_VERSION:-0.1}
 "$RCD_DIR/checks/check-unaligned.sh" -I"$STAGE/include/mlt-7" -I"$DK/include" -I"$TOP/src" "$TOP"/src/*.c "$TOP"/src/riscos/*.c
 "$CC" -O2 -Wall $CFLAGS_EXTRA -DMLT_STATIC_DEFINE -DRE_VERSION="\"$RE_VERSION\"" -I"$STAGE/include/mlt-7" -I"$DK/include" \
-  "$TOP/src/engine.c" "$TOP/src/project.c" "$TOP/src/dissolve.c" "$TOP/src/measure.c" "$TOP/src/riscos/viewer.c" "$TOP/src/riscos/timeline.c" \
+  "$TOP/src/engine.c" "$TOP/src/project.c" "$TOP/src/dissolve.c" "$TOP/src/fade.c" "$TOP/src/measure.c" "$TOP/src/riscos/viewer.c" "$TOP/src/riscos/timeline.c" \
   "$TOP/src/riscos/savebox.c" "$TOP/src/riscos/info.c" "$TOP/src/riscos/display.c" "$TOP/src/riscos/sound.c" \
   "$TOP/src/riscos/main.c" -o "$O/reeledit" \
-  -static -L"$STAGE/lib" -L"$DK/lib" -lmlt-static-modules -lmltcore -lmltavformat -lmltxml -lmlt-7 -lxml2 \
+  -static -L"$STAGE/lib" -L"$DK/lib" -lmlt-static-modules -lmltcore -lmltavformat -lmltxml -lmltnormalize -lmlt-7 -lxml2 \
   $FF_LIBS -lm
 "$RCD_DIR/checks/check-all.sh" "$O/reeledit" > /dev/null || { "$RCD_DIR/checks/check-all.sh" "$O/reeledit"; exit 1; }
 "$RISCOS_TOOLCHAIN/bin/arm-riscos-gnueabihf-strip" -o "$O/reeledit.elf" "$O/reeledit"

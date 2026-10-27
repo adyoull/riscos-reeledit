@@ -52,6 +52,14 @@ playhead, made from the clips' frames beyond the cut if they have any
 its ends to make it longer or shorter, Delete takes it out (the clips as
 they were). The sound crossfades too.
 
+Fades (from black at a clip's start, to black at its end; the sound
+fades too): where a clip's end doesn't meet another clip (the start or
+the end of the project, or beside a gap) there's a small white square at
+the top of the clip. Drag it along the clip: the fade is as long as you
+drag, shown as a dark wedge. Or select a clip and use Edit > Fade in or
+Fade out (a second; again takes it away). A fade stays at the clip's end
+as you trim it; at an end in a dissolve there's none.
+
 The Timeline: the playhead moves only from the ruler (the strip with the
 times along the top). Click the ruler to move the playhead there (the
 Viewer shows that frame), or drag along it to scrub; its timecode is shown
@@ -71,7 +79,8 @@ Save. Interactive help (!Help) says what each does.
 
 The menu (Menu over the Viewer or the Timeline):
   File  New, Save (F3), Save as...
-  Edit  Undo, Redo, Split, Trim the start, Trim the end, Dissolve, Delete,
+  Edit  Undo, Redo, Split, Trim the start, Trim the end, Dissolve,
+        Fade in, Fade out, Delete,
         Leave gap, Clear selection
   Play  Play/Stop, Start, End
   View  Zoom the Timeline in, out, the whole project; Attach the

@@ -1237,6 +1237,64 @@ static int script(int *b, int mask)
     case 126:
         if (nulls)
             return 0;
+        next(127);
+        return click_tl(b, 60, 0, 0x400);
+    /* ---- fades: Edit > Fade out on the selected clip; a fade handle dragged; one undo ---- */
+    case 127:
+        CHECK(re_test_selected() == 1, "fades: a click on the second clip selected %d", re_test_selected());
+        next(128);
+        b[0] = W[1].box[0] + 300; b[1] = W[1].box[3] - 100; b[2] = 2; b[3] = TL; b[4] = -1;
+        return 6; /* Menu */
+    case 128:
+        next(129);
+        b[0] = 1; b[1] = 7; b[2] = -1; /* Edit > Fade out */
+        return 9;
+    case 129: {
+        if (nulls)
+            return 0;
+        re_item it;
+        re_project_item(re_test_project(), 1, &it);
+        CHECK(it.fade_out == 25 && it.fade_in == 0, "Edit > Fade out: fades %d, %d", it.fade_in, it.fade_out);
+        shot("13-fade-out");
+        mark = drags;
+        /* the first clip's fade handle: the top of its start (the project's start) */
+        b[0] = W[1].box[0] - W[1].scroll_x + 16 + 2; b[1] = W[1].box[3] - 48 - 8 - 6; b[2] = 0x40;
+        b[3] = TL; b[4] = -1;
+        ptr[0] = b[0] + 10 * 4; ptr[1] = b[1];
+        next(130);
+        return 6;
+    }
+    case 130: {
+        re_item it;
+        re_project_item(re_test_project(), 0, &it);
+        if (it.fade_in != 10) {
+            if (fake_cs - phase_cs > 100)
+                fail_quit("dragging a fade handle 10 frames: fade %d (drags %d)", it.fade_in, drags - mark);
+            return 0;
+        }
+        CHECK(!strcmp(layout(), "c30 c75"), "a fade dragged changed the clips: %s", layout());
+        shot("14-fade-in-by-dragging");
+        next(131);
+        return 7;
+    }
+    case 131:
+        if (nulls)
+            return 0;
+        next(132);
+        return key_to(b, TL, 0x188);
+    case 132: {
+        if (nulls)
+            return 0;
+        re_item it, it1;
+        re_project_item(re_test_project(), 0, &it);
+        re_project_item(re_test_project(), 1, &it1);
+        CHECK(it.fade_in == 0 && it1.fade_out == 25, "one F8 for a fade dragged: %d, %d", it.fade_in, it1.fade_out);
+        next(133);
+        return click_tl(b, 50, 1, 0x400);
+    }
+    case 133:
+        if (nulls)
+            return 0;
         next(24);
         b[0] = W[0].box[0] + 50; b[1] = W[0].box[3] - 50; b[2] = 2; b[3] = VIEWER; b[4] = -1;
         return 6; /* Menu */

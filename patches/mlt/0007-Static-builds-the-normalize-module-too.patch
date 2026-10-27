@@ -1,0 +1,41 @@
+From 7b12a096fc32182224a0d6d9948273877d7670f2 Mon Sep 17 00:00:00 2001
+From: Andrew Youll <andrewyoull86@gmail.com>
+Date: Tue, 27 Oct 2026 12:46:13 +0000
+Subject: [PATCH 7/7] Static builds: the normalize module too
+
+Its volume filter (the gain, animated: Shotcut's audio fades) built into
+a static MLT, as the core, avformat and xml modules are.
+---
+ src/modules/normalize/CMakeLists.txt | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/modules/normalize/CMakeLists.txt b/src/modules/normalize/CMakeLists.txt
+index bdc9b19..978d209 100644
+--- a/src/modules/normalize/CMakeLists.txt
++++ b/src/modules/normalize/CMakeLists.txt
+@@ -1,4 +1,4 @@
+-add_library(mltnormalize MODULE
++add_library(mltnormalize ${MLT_MODULE_TYPE}
+   factory.c
+   filter_audiolevel.c
+   filter_volume.c
+@@ -10,6 +10,7 @@ add_custom_target(Other_normalize_Files SOURCES
+ )
+ include(GenerateExportHeader)
+ generate_export_header(mltnormalize)
++mlt_module_static(mltnormalize)
+ target_compile_options(mltnormalize PRIVATE ${MLT_COMPILE_OPTIONS})
+ target_include_directories(mltnormalize PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+ target_link_libraries(mltnormalize PRIVATE mlt)
+@@ -21,7 +22,7 @@ endif()
+ 
+ set_target_properties(mltnormalize PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${MLT_MODULE_OUTPUT_DIRECTORY}")
+ 
+-install(TARGETS mltnormalize LIBRARY DESTINATION ${MLT_INSTALL_MODULE_DIR})
++install(TARGETS mltnormalize LIBRARY DESTINATION ${MLT_INSTALL_MODULE_DIR} ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+ 
+ install(FILES
+   filter_audiolevel.yml
+-- 
+2.43.0
+
