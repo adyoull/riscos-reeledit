@@ -97,11 +97,12 @@ typedef struct
 #define IF_CLICK  (3 << 12)
 #define IF_COL(fg, bg) (((fg) << 24) | ((bg) << 28))
 
-re_app A = {0, NULL, NULL, "", -1, 1, 1, -1, -1, -1};
+re_app A = {0, NULL, NULL, "", -1, 1, 1, -1, -1, -1, 0, -1};
 
 static struct
 {
     int bar_icon, win, quit;
+    int viewer_size;  /* View > Viewer size: 0 small, 1 medium, 2 large (its share of the screen's width) */
     re_sound *snd;
     char title[300], time_text[64], play_text[8], snap_text[16];
     int vis_w, vis_h;
@@ -461,8 +462,22 @@ static void update_controls(int force)
 
 static void open_window(int *b);
 
-/* The Timeline attached: kept under the Viewer, as wide, just behind it
-   in the window stack */
+/* The screen's width (OS units) */
+static int screen_w(void)
+{
+    return (mode_var(11) + 1) << mode_var(4);
+}
+
+/* The Timeline's width, attached: most of the screen (the workspace: room
+   for the project and its tracks), at least the Viewer's */
+static int workspace_w(int viewer_w)
+{
+    int w = screen_w() * 9 / 10;
+    return w > viewer_w ? w : viewer_w;
+}
+
+/* The Timeline attached: kept under the Viewer, the workspace's width,
+   centred under it, just behind it in the window stack */
 static void place_timeline(void)
 {
     int vs[9], vo[5], ts[9], to[5];
@@ -480,14 +495,15 @@ static void place_timeline(void)
     r.r[1] = (intptr_t) to;
     ro_swi(Wimp_GetWindowOutline, &r);
     int top = to[4] - ts[4], h = ts[4] - ts[2]; /* (its title bar, and its height) */
-    int b[9] = {tl_window(), vs[1], vo[2] - top - h, vs[3], vo[2] - top, ts[5], ts[6], V.win, 0};
+    int tw = workspace_w(vs[3] - vs[1]), x0 = (vs[1] + vs[3]) / 2 - tw / 2;
+    int b[9] = {tl_window(), x0, vo[2] - top - h, x0 + tw, vo[2] - top, ts[5], ts[6], V.win, 0};
     if (b[1] == ts[1] && b[2] == ts[2] && b[3] == ts[3] && b[4] == ts[4] && ts[7] == V.win)
         return;
     tl_open_request(b);
 }
 
 /* The Timeline moved or resized by the user while attached: the Viewer
-   comes with it (the same width, its own height, just above) */
+   comes with it (its own size, centred just above) */
 static void timeline_moved(int *b)
 {
     int vs[9], vo[5], to[5];
@@ -505,8 +521,8 @@ static void timeline_moved(int *b)
     int ts[9];
     window_state(tl_window(), ts);
     int bottom = vs[2] - vo[2];          /* the Viewer's border below its work area */
-    int y0 = to[4] + bottom, h = vs[4] - vs[2];
-    int nb[9] = {V.win, ts[1], y0, ts[3], y0 + h, vs[5], vs[6], b[7] == V.win ? -1 : b[7], 0};
+    int y0 = to[4] + bottom, h = vs[4] - vs[2], w = vs[3] - vs[1], x0 = (ts[1] + ts[3]) / 2 - w / 2;
+    int nb[9] = {V.win, x0, y0, x0 + w, y0 + h, vs[5], vs[6], b[7] == V.win ? -1 : b[7], 0};
     if (nb[1] != vs[1] || nb[2] != vs[2] || nb[3] != vs[3] || nb[4] != vs[4] || b[7] != ts[7])
         open_window(nb);
     place_timeline();
@@ -692,6 +708,8 @@ static void edited(int picture)
         A.sel = -1;
     if (A.ov_sel >= re_project_overlays(A.proj))
         A.ov_sel = -1;
+    if (A.au_sel >= re_project_audio_count(A.proj, A.au_track))
+        A.au_sel = -1;
     mk_edited();
     tl_edited();
     info_edited();
@@ -722,7 +740,7 @@ static void open_editor(void)
     if (!A.proj) {
         A.proj = re_project_new();
         A.path[0] = 0;
-        A.sel = A.ov_sel = -1;
+        A.sel = A.ov_sel = A.au_sel = -1;
         if (!A.proj) {
             app_report("MLT couldn't start.");
             return;
@@ -732,13 +750,15 @@ static void open_editor(void)
         app_report("Can't make the window.");
         return;
     }
-    /* the Viewer: half the screen's width, 16:9 (the project's shape once
-       it has one); the Timeline under it */
+    /* the Viewer: a share of the screen's width (View > Viewer size), 16:9
+       (the project's shape once it has one); under it the Timeline, most
+       of the screen's width: one workspace */
+    static const int SHARE[3] = {35, 50, 65};
     int xeig = mode_var(4), yeig = mode_var(5);
     int sw = (mode_var(11) + 1) << xeig, sh = (mode_var(12) + 1) << yeig;
     mlt_profile pr = re_project_profile(A.proj);
     double aspect = re_project_producer(A.proj) && pr->width > 0 ? (double) pr->height / pr->width : 9.0 / 16;
-    int pw = sw / 2, ph = (int) (pw * aspect);
+    int pw = sw * SHARE[V.viewer_size >= 0 && V.viewer_size < 3 ? V.viewer_size : 1] / 100, ph = (int) (pw * aspect);
     if (pw < MIN_W)
         pw = MIN_W;
     int th = 48 + 96 + 16 + 40 + 40; /* the Timeline, its title and scroll bar */
@@ -753,7 +773,8 @@ static void open_editor(void)
     V.vis_w = V.vis_h = 0;
     update_title();
     open_window(b);
-    tl_open(b[1], b[2] - 40, pw);
+    int tw = workspace_w(pw);
+    tl_open((sw - tw) / 2, b[2] - 40, tw);
     place_timeline();
     set_caret(V.win);
     if (A.e)
@@ -784,7 +805,7 @@ static int close_editor(void)
     re_project_close(A.proj);
     A.proj = NULL;
     A.path[0] = 0;
-    A.sel = A.ov_sel = -1;
+    A.sel = A.ov_sel = A.au_sel = -1;
     A.mark_in = A.mark_out = -1;
     app_log("editor closed");
     return 1;
@@ -883,7 +904,7 @@ void app_load(const char *path, int filetype, int frame)
             return;
         }
         snprintf(A.path, sizeof(A.path), "%s", path);
-        A.sel = A.ov_sel = -1;
+        A.sel = A.ov_sel = A.au_sel = -1;
         open_editor();
         app_edited();
         return;
@@ -937,7 +958,7 @@ static void undo(int redo)
     engine_close();
     int done = redo ? re_project_redo(A.proj) : re_project_undo(A.proj);
     app_log("%s: %s", redo ? "redo" : "undo", done ? "done" : "nothing");
-    A.sel = A.ov_sel = -1;
+    A.sel = A.ov_sel = A.au_sel = -1;
     app_edited();
     app_seek(pos);
 }
@@ -993,7 +1014,9 @@ void app_delete(int item, int ripple)
 
 void app_delete_selection(int ripple)
 {
-    if (A.ov_sel >= 0)
+    if (A.au_sel >= 0)
+        au_delete(A.au_track, A.au_sel);
+    else if (A.ov_sel >= 0)
         ov_delete(A.ov_sel);
     else
         app_delete(A.sel, ripple);
@@ -1042,18 +1065,44 @@ static MENU(7) m_play = {"Play", 7, 2, 7, 0, 420, 44, 0,
                           {0, -1, IT("To the start   Home")}, {2, -1, IT("To the end     Copy")},
                           {0, -1, IT("Mark in            I")}, {0, -1, IT("Mark out           O")},
                           {0, -1, IT("Play in to out Return")}, {0x80, -1, IT("Clear the marks")}}};
-static MENU(5) m_view = {"View", 7, 2, 7, 0, 520, 44, 0,
+static MENU(3) m_viewer_size = {"Viewer size", 7, 2, 7, 0, 200, 44, 0,
+                                {{0, -1, IT("Small")}, {0, -1, IT("Medium")}, {0x80, -1, IT("Large")}}};
+static MENU(6) m_view = {"View", 7, 2, 7, 0, 520, 44, 0,
                          {{0, -1, IT("Zoom the Timeline in       +")}, {0, -1, IT("Zoom the Timeline out      -")},
                           {2, -1, IT("The whole project     \x8bZ")}, {0, -1, IT("Attach the Timeline")},
-                          {0x80, -1, IT("Snapping                   N")}}};
+                          {0, -1, IT("Snapping                   N")}, {0x80, 0, IT("Viewer size")}}};
 static MENU(5) m_main = {"Reel Edit", 7, 2, 7, 0, 340, 44, 0,
                          {{0, 0, IT("File")}, {0, 0, IT("Edit")}, {0, 0, IT("Play")}, {0, 0, IT("View")},
                           {0x80, -1, IT("Video information...")}}};
 static MENU(2) m_bar = {"Reel Edit", 7, 2, 7, 0, 160, 44, 0,
                         {{0, -1, IT("Info")}, {0x80, -1, IT("Quit")}}};
 static int menu_is; /* 0 none, 1 the icon bar's, 2 the editor's, 3 the Timeline's context menu (effects.c), 4 overlays.c's,
-                       5 titles.c's, 6 exportbox.c's */
+                       5 titles.c's, 6 exportbox.c's, 7 audiotracks.c's */
 static int menu_x, menu_y;
+
+/* View > Viewer size: the Viewer made smaller or bigger (its top and
+   centre kept, its shape the project's); the Timeline under it */
+static void viewer_size(int size)
+{
+    static const int SHARE[3] = {35, 50, 65};
+    int st[9];
+    if (!V.win || size == V.viewer_size)
+        return;
+    V.viewer_size = size;
+    window_state(V.win, st);
+    mlt_profile pr = A.proj ? re_project_profile(A.proj) : NULL;
+    double aspect = A.proj && re_project_producer(A.proj) && pr->width > 0 ? (double) pr->height / pr->width
+                                                                          : 9.0 / 16;
+    int pw = screen_w() * SHARE[size] / 100, ph = (int) (pw * aspect);
+    if (pw < MIN_W)
+        pw = MIN_W;
+    int mid = (st[1] + st[3]) / 2;
+    int b[9] = {V.win, mid - pw / 2, st[4] - ph - 2 * CH, mid + pw / 2, st[4], st[5], st[6], st[7], 0};
+    if (b[2] < 140)
+        b[2] = 140;
+    app_log("Viewer size %d: %d wide", size, pw);
+    open_window(b);
+}
 
 void app_menu(int x, int y)
 {
@@ -1089,6 +1138,9 @@ void app_menu(int x, int y)
     menu_shade(&m_play.item[5].iflags, !marked);
     menu_shade(&m_play.item[6].iflags, !marked);
     m_view.item[4].flags = (m_view.item[4].flags & ~1) | (A.snap ? 1 : 0);
+    m_view.item[5].sub = (intptr_t) &m_viewer_size;
+    for (int i = 0; i < 3; i++)
+        menu_tick(&m_viewer_size.item[i].flags, i == V.viewer_size);
     for (int i = 0; i < 3; i++)
         menu_shade(&m_play.item[i].iflags, !has);
     snprintf(play_item, sizeof(play_item), "%s", A.e && re_engine_speed(A.e) != 0 ? "Stop           Space"
@@ -1137,6 +1189,17 @@ void app_export_menu_opened(void)
     re_display_check_covered();
 }
 
+void app_audio_menu(int x, int y, int track, int i)
+{
+    au_menu_open(x, y, track, i); /* (it says so: app_audio_menu_opened) */
+}
+
+void app_audio_menu_opened(void)
+{
+    menu_is = 7;
+    re_display_check_covered();
+}
+
 static void menu_select(int *b)
 {
     _kernel_swi_regs r;
@@ -1155,6 +1218,10 @@ static void menu_select(int *b)
     }
     if (menu_is == 6) {
         ex_menu_select(b);
+        return;
+    }
+    if (menu_is == 7) {
+        au_menu_select(b);
         return;
     }
     if (menu_is == 1) {
@@ -1216,6 +1283,8 @@ static void menu_select(int *b)
             place_timeline();
         } else if (b[1] == 4) {
             snap_toggle();
+        } else if (b[1] == 5 && b[2] >= 0 && b[2] < 3) {
+            viewer_size(b[2]);
         }
         break;
     case 4: /* Video information */
@@ -1511,7 +1580,9 @@ static void message(int *b, int event)
            the playhead): over the video */
         int over = tl ? tl_on_overlays(b[8]) && !is_project(file, type)
                       : w == V.win && A.proj && re_project_length(A.proj) > 0 && ov_is_picture(file, type);
-        if (over)
+        if (tl && tl_on_audio(b[8]) >= 0 && !is_project(file, type))
+            au_load(file, frame);
+        else if (over)
             ov_load(file, type, tl ? frame : app_position(), 1);
         else
             app_load(file, type, frame);

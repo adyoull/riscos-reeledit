@@ -46,32 +46,15 @@ static const char *const PLACES[RE_PLACES] = {"full",        "centre",       "to
 
 /* ---- V2 ----------------------------------------------------------------------------------- */
 
-/* V2's overlays (not its gaps): the playlist's index of each, their number */
-static int list(re_project *p, int *at, int max)
-{
-    int n = 0, k = p->v2 ? mlt_playlist_count(p->v2) : 0;
-    for (int i = 0; i < k; i++)
-        if (!mlt_playlist_is_blank(p->v2, i)) {
-            if (n < max && at)
-                at[n] = i;
-            n++;
-        }
-    return n;
-}
-
 int re_project_overlays(re_project *p)
 {
-    return list(p, NULL, 0);
+    return rp_track_items(p->v2);
 }
 
 /* The playlist index of overlay i, or -1 */
 static int entry(re_project *p, int i)
 {
-    int k = p->v2 && i >= 0 ? mlt_playlist_count(p->v2) : 0;
-    for (int e = 0; e < k; e++)
-        if (!mlt_playlist_is_blank(p->v2, e) && i-- == 0)
-            return e;
-    return -1;
+    return rp_track_entry(p->v2, i);
 }
 
 static int place_of(const char *s)
@@ -165,81 +148,15 @@ static int make_v2(re_project *p)
     return 0;
 }
 
-/* V2 as it's to be: each overlay's cut (a reference of ours, given up
-   here), at a start, so long; in order, not overlapping. */
-typedef struct
+/* V2 as it is (each cut with a reference of ours; a picture's in 0).
+   Their number, or -1. */
+static int read_v2(re_project *p, rp_slot **s)
 {
-    mlt_producer cut;
-    int start, length;
-    int in; /* (a video's first frame in its file; a picture's 0) */
-} slot;
-
-static void write_v2(re_project *p, slot *s, int n)
-{
-    mlt_playlist_clear(p->v2);
-    int at = 0;
-    for (int i = 0; i < n; i++) {
-        if (s[i].start > at)
-            mlt_playlist_blank(p->v2, s[i].start - at - 1);
-        int in = s[i].in, out = s[i].in + s[i].length - 1;
-        mlt_playlist_append_io(p->v2, s[i].cut, in, out);
-        mlt_playlist_resize_clip(p->v2, mlt_playlist_count(p->v2) - 1, in, out);
-        mlt_producer_close(s[i].cut);
-        at = s[i].start + s[i].length;
-    }
-}
-
-/* V2 as it is (each cut with a reference of ours). Their number, or -1. */
-static int read_v2(re_project *p, slot **s)
-{
-    int n = re_project_overlays(p);
-    *s = calloc(n + 1, sizeof(slot));
-    if (!*s)
-        return -1;
-    for (int i = 0; i < n; i++) {
-        mlt_playlist_clip_info info;
-        mlt_playlist_get_clip_info(p->v2, &info, entry(p, i));
-        (*s)[i].cut = info.cut;
-        mlt_properties_inc_ref(MLT_PRODUCER_PROPERTIES(info.cut));
-        (*s)[i].start = info.start;
-        (*s)[i].length = info.frame_count;
-        (*s)[i].in = re_still_is(info.cut) ? 0 : info.frame_in;
-    }
+    int n = rp_track_read(p->v2, s);
+    for (int i = 0; i < n; i++)
+        if (re_still_is((*s)[i].cut))
+            (*s)[i].in = 0;
     return n;
-}
-
-/* Where there's room for an overlay from start, so long, by slot k's
-   neighbours (k: its place among them; skip: a slot not counted, being
-   moved) and the project's end: start and length kept within it. 0, or -1
-   (no room at all). */
-static int room(re_project *p, slot *s, int n, int skip, int *start, int *length)
-{
-    int lo = 0, hi = re_project_length(p);
-    for (int i = 0; i < n; i++) {
-        if (i == skip)
-            continue;
-        int a = s[i].start, b = a + s[i].length;
-        if (b <= *start && b > lo)
-            lo = b;
-        else if (a >= *start && a < hi)
-            hi = a;
-        else if (a < *start && b > *start) /* (it's in one: after it) */
-            lo = b;
-    }
-    if (*start < lo)
-        *start = lo;
-    if (hi - *start < 1)
-        return -1;
-    if (*length > hi - *start)
-        *length = hi - *start;
-    if (*length < 1)
-        *length = 1;
-    return 0;
-}
-
-static int by_start(const void *a, const void *b)
-{
-    return ((const slot *) a)->start - ((const slot *) b)->start;
 }
 
 /* ---- the composites ------------------------------------------------------------------------ */
@@ -429,9 +346,9 @@ static int put(re_project *p, mlt_producer pic, int frame, int length, int place
 {
     if (frame < 0)
         frame = 0;
-    slot *s;
+    rp_slot *s;
     int n = read_v2(p, &s);
-    if (n < 0 || room(p, s, n, -1, &frame, &length)) {
+    if (n < 0 || rp_track_room(re_project_length(p), s, n, -1, &frame, &length)) {
         for (int i = 0; i < n; i++)
             mlt_producer_close(s[i].cut);
         free(s);
@@ -457,9 +374,8 @@ static int put(re_project *p, mlt_producer pic, int frame, int length, int place
     s[n].start = frame;
     s[n].length = length;
     s[n].in = 0;
-    qsort(s, n + 1, sizeof(slot), by_start);
-    write_v2(p, s, n + 1);
-    free(s);
+    rp_track_sort(s, n + 1);
+    rp_track_write(p->v2, s, n + 1);
     rp_changed(p);
     return re_project_overlay_at(p, frame);
 }
@@ -501,58 +417,7 @@ int re_project_overlay_span(re_project *p, int i, int start, int length)
     re_overlay o;
     if (re_project_overlay(p, i, &o))
         return -1;
-    slot *s;
-    int n = read_v2(p, &s);
-    if (n < 0)
-        return -1;
-    if (length < 1)
-        length = 1;
-    int end = o.start + o.length;
-    if (start != o.start && start + length == end) {
-        /* its start trimmed (its end where it was): kept clear of the one
-           before, and a video to its file's start (its in moves with it) */
-        int lo = i > 0 ? s[i - 1].start + s[i - 1].length : 0;
-        if (o.video && o.start - o.in > lo)
-            lo = o.start - o.in;
-        if (start < lo)
-            start = lo;
-        if (start > end - 1)
-            start = end - 1;
-        length = end - start;
-        s[i].in = o.video ? o.in + (start - o.start) : 0;
-    } else if (start != o.start) {
-        if (start < 0)
-            start = 0;
-        /* a move: kept to the room either side, its length kept */
-        int lo = i > 0 ? s[i - 1].start + s[i - 1].length : 0;
-        int hi = i + 1 < n ? s[i + 1].start : re_project_length(p);
-        if (start + length > hi)
-            start = hi - length;
-        if (start < lo)
-            start = lo;
-        if (start + length > hi)
-            length = hi - start;
-    } else {
-        /* its end trimmed: to the room after it, a video to its file's end */
-        if (o.video && o.source_length > 0 && length > o.source_length - o.in)
-            length = o.source_length - o.in;
-        if (room(p, s, n, i, &start, &length))
-            length = o.length;
-    }
-    if (length < 1 || (start == o.start && length == o.length)) {
-        for (int k = 0; k < n; k++)
-            mlt_producer_close(s[k].cut);
-        free(s);
-        return o.start == start && o.length == length ? 0 : -1;
-    }
-    if (!p->in_edit)
-        rp_checkpoint(p);
-    s[i].start = start;
-    s[i].length = length;
-    write_v2(p, s, n);
-    free(s);
-    rp_changed(p);
-    return 1;
+    return rp_track_span(p, p->v2, i, start, length, o.video, o.source_length);
 }
 
 /* One of an overlay's settings changed (not an edit of its own if

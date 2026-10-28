@@ -111,6 +111,13 @@ static MENU(7) m_clip = {"Clip", 7, 2, 7, 0, 440, 44, 0,
                           {0, -1, IT("Dissolve from the clip before")}, {2, -1, IT("Dissolve into the clip after")},
                           {0, -1, IT("Delete")}, {0x80, -1, IT("Video information...")}}};
 
+intptr_t fx_volume_menu(int volume)
+{
+    for (int k = 0; k < FX_N_LEVELS; k++)
+        menu_tick(&m_volume.item[k].flags, FX_LEVELS[k] == volume);
+    return (intptr_t) &m_volume;
+}
+
 intptr_t fx_sound_menu(int muted, int fade_in, int fade_out, int in_off, int out_off, int volume)
 {
     menu_tick(&m_sound.item[S_MUTE].flags, muted);
@@ -118,9 +125,7 @@ intptr_t fx_sound_menu(int muted, int fade_in, int fade_out, int in_off, int out
     menu_tick(&m_sound.item[S_FADE_OUT].flags, fade_out > 0);
     menu_shade(&m_sound.item[S_FADE_IN].iflags, in_off);
     menu_shade(&m_sound.item[S_FADE_OUT].iflags, out_off);
-    m_sound.item[S_VOLUME].sub = (intptr_t) &m_volume;
-    for (int k = 0; k < FX_N_LEVELS; k++)
-        menu_tick(&m_volume.item[k].flags, FX_LEVELS[k] == volume);
+    m_sound.item[S_VOLUME].sub = fx_volume_menu(volume);
     return (intptr_t) &m_sound;
 }
 static MENU(1) m_mix = {"Dissolve", 7, 2, 7, 0, 200, 44, 0, {{0x80, -1, IT("Delete")}}};

@@ -75,6 +75,34 @@ int rp_cut_volume(mlt_producer cut);                          /* dB (0: as it is
 void rp_cut_set_volume(re_project *p, mlt_producer cut, int db);
 void rp_fit_sound(re_project *p);
 
+/* track.c: tracks of separate items (V2, the audio tracks): their number
+   (not the gaps) and each one's playlist index (-1: none); each item's
+   cut (a reference of ours), start, length and in, in order (read: their
+   number, or -1; rp_track_free gives them up); the track made of them
+   again (write: the slots given up); where there's room for one from
+   start, so long (skip: one not counted; end: the project's length): 0,
+   or -1; sorted by start; an item moved or trimmed (media: its in moves
+   with a trimmed start, kept within source_length): 1 changed, 0 already
+   so, -1 not */
+typedef struct
+{
+    mlt_producer cut;
+    int start, length;
+    int in;
+} rp_slot;
+int rp_track_items(mlt_playlist pl);
+int rp_track_entry(mlt_playlist pl, int i);
+int rp_track_read(mlt_playlist pl, rp_slot **s);
+void rp_track_free(rp_slot *s, int n);
+void rp_track_write(mlt_playlist pl, rp_slot *s, int n);
+int rp_track_room(int end, rp_slot *s, int n, int skip, int *start, int *length);
+void rp_track_sort(rp_slot *s, int n);
+int rp_track_span(re_project *p, mlt_playlist pl, int i, int start, int length, int media, int source_length);
+
+/* audio.c: the audio tracks' mix transitions made again (after every
+   edit, and a project read) */
+void rp_fit_audio(re_project *p);
+
 /* overlay.c: the composite transitions putting V2's pictures over V1 made
    again from their settings (after every edit, and a project read) */
 void rp_fit_overlays(re_project *p);

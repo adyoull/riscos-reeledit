@@ -37,6 +37,7 @@ void rp_changed(re_project *p)
     rp_fit_fades(p);
     rp_fit_sound(p);
     rp_fit_overlays(p);
+    rp_fit_audio(p);
     fit_tractor(p);
     p->state = ++p->next_state;
     p->changes++;
@@ -279,6 +280,7 @@ static int adopt(re_project *p, mlt_producer prod)
     rp_relink(p);
     rp_fit_sound(p);
     rp_fit_overlays(p);
+    rp_fit_audio(p);
     return 0;
 }
 

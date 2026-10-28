@@ -1098,6 +1098,74 @@ static void export(const char *a, const char *snd, const char *proj, const char 
           re_export_bitrate(640, 360, 25, RE_EXPORT_SMALL), re_export_bitrate(160, 90, 25, RE_EXPORT_HIGH));
 }
 
+/* ---- audio tracks: tones put on them stack (a sound where one plays goes
+   on the next track; where there's room, on the first); mixed with V1's;
+   muted, a level, faded; moved; removed (the empty last track with it);
+   a video's sound alone (its pictures hidden); a picture refused; undo;
+   saved and opened */
+static void audio_tracks(const char *a, const char *snd, const char *pic, const char *out)
+{
+    re_engine_io io = {show, NULL, clk, NULL, 48000, 2, NULL};
+    re_project *p = re_project_new();
+    re_project_add(p, a, -1);
+    re_project_add(p, a, -1); /* (150 frames, silent) */
+    int k = -1, i = -1;
+    CHECK(re_project_audio_add(p, "tone880.wav", 10, 0, &k, &i) == 0 && k == 0 && i == 0
+              && re_project_audio_tracks(p) == 1,
+          "audio: the first: track %d, %d; %d tracks", k, i, re_project_audio_tracks(p));
+    re_audio s;
+    re_project_audio(p, 0, 0, &s);
+    CHECK(s.start == 10 && s.length == 50 && s.source_length == 50 && !strcmp(s.name, "tone880.wav"),
+          "audio: %d for %d of %d, \"%s\"", s.start, s.length, s.source_length, s.name);
+    int one = peak_at(p, 20);
+    CHECK(one > 1000 && peak_at(p, 5) < 30, "audio: heard: %d at 20, %d before it", one, peak_at(p, 5));
+    /* stacked: where it plays, the next track; after it, the first again */
+    CHECK(re_project_audio_add(p, "tone1320.wav", 20, 0, &k, &i) == 0 && k == 1 && re_project_audio_tracks(p) == 2,
+          "audio: stacked: track %d, %d tracks", k, re_project_audio_tracks(p));
+    CHECK(re_project_audio_add(p, "tone880.wav", 70, 0, &k, &i) == 0 && k == 0 && i == 1,
+          "audio: after it, on the first: track %d, %d", k, i);
+    int both = peak_at(p, 30);
+    CHECK(both > one * 3 / 2, "audio: two at once: %d (one %d)", both, one);
+    /* muted, a level, a fade */
+    CHECK(re_project_audio_mute(p, 1, 0, 1) == 1 && abs(peak_at(p, 30) - one) < one / 10,
+          "audio: the second muted: %d (one %d)", peak_at(p, 30), one);
+    CHECK(re_project_audio_volume(p, 0, 0, -12) == 1 && peak_at(p, 20) < one / 3 && peak_at(p, 20) > one / 5,
+          "audio: -12 dB: %d (%d)", peak_at(p, 20), one);
+    CHECK(re_project_audio_fade(p, 0, 0, 0, 10) == 1 && peak_at(p, 10) < 30, "audio: faded in: %d", peak_at(p, 10));
+    re_project_audio(p, 0, 0, &s);
+    CHECK(s.volume == -12 && s.fade_in == 10, "audio: read back: %d dB, fade %d", s.volume, s.fade_in);
+    /* moved, its start trimmed (its in with it) */
+    CHECK(re_project_audio_span(p, 1, 0, 100, 50) == 1, "audio: moved");
+    re_project_audio(p, 1, 0, &s);
+    CHECK(s.start == 100 && s.length == 50, "audio: moved: %d for %d", s.start, s.length);
+    CHECK(re_project_audio_span(p, 1, 0, 110, 40) == 1, "audio: start trimmed");
+    re_project_audio(p, 1, 0, &s);
+    CHECK(s.start == 110 && s.in == 10 && s.length == 40, "audio: trimmed: %d, in %d, %d", s.start, s.in, s.length);
+    /* removed: the empty last track goes; undone */
+    CHECK(re_project_audio_remove(p, 1, 0) == 1 && re_project_audio_tracks(p) == 1, "audio: removed: %d tracks",
+          re_project_audio_tracks(p));
+    CHECK(re_project_undo(p) && re_project_audio_tracks(p) == 2 && re_project_audio_count(p, 1) == 1,
+          "audio: undone: %d tracks", re_project_audio_tracks(p));
+    /* a video's sound: its pictures hidden; a picture refused */
+    re_engine *e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    int red = luma_at(e, 130);
+    CHECK(re_project_audio_add(p, snd, 120, 0, &k, &i) == 0 && peak_at(p, 125) > 1000, "audio: a video's sound: %d",
+          peak_at(p, 125));
+    re_engine_refresh(e);
+    CHECK(abs(luma_at(e, 130) - red) <= 4, "audio: its pictures hidden: luma %d (red %d)", luma_at(e, 130), red);
+    re_engine_close(e);
+    CHECK(re_project_audio_add(p, pic, 0, 0, &k, &i) == RE_SOUND_NO_SOUND, "audio: a picture not refused");
+    /* saved and opened: the tracks, their sounds and mixes */
+    int before = peak_at(p, 30);
+    CHECK(re_project_save(p, out) == 0, "audio: not saved");
+    re_project_close(p);
+    p = re_project_open(out, 1);
+    CHECK(p && re_project_audio_tracks(p) == 2 && re_project_audio_count(p, 0) == 3 && abs(peak_at(p, 30) - before) < 50,
+          "audio: opened: %d tracks, %d on A1, %d at 30 (%d)", p ? re_project_audio_tracks(p) : -1,
+          p ? re_project_audio_count(p, 0) : -1, p ? peak_at(p, 30) : -1, before);
+    re_project_close(p);
+}
+
 int main(int argc, char **argv)
 {
     if (argc != 13) {
@@ -1354,6 +1422,7 @@ int main(int argc, char **argv)
     stills(argv[10]);
     titles(a, out);
     export(a, argv[9], out, "export-test.mp4");
+    audio_tracks(a, argv[9], argv[11], out);
     overlays(a, b, argv[9], out, argv[10], argv[11], argv[12]);
     video_overlays(a, b, argv[9], n, argv[5], out);
     char dir[512];

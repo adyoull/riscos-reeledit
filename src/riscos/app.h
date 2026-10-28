@@ -10,6 +10,7 @@
  *   marks.c     the in and out marks: play them, take them out
  *   overlays.c  pictures and videos over the video (V2): dropped, their menu; sprites
  *               made PNGs
+ *   audiotracks.c  sounds on the audio tracks (below V1): dropped, their menu
  *   exportbox.c the Export window: the project made into a video, in a TaskWindow
  *   titles.c    the Title window: text over the video
  *   fonts.c     titles' text drawn by the Font Manager
@@ -38,6 +39,7 @@ typedef struct
     int snap;           /* the playhead snaps to cuts (N) */
     int mark_in, mark_out; /* the I/O marks: frames (-1: none; marks.c) */
     int ov_sel;         /* the selected overlay on V2 (-1: none; not with sel) */
+    int au_track, au_sel; /* the selected sound: its audio track, its index there (au_sel -1: none) */
 } re_app;
 extern re_app A;
 
@@ -93,6 +95,8 @@ int tl_frame_at(int screen_x); /* for a drop */
 void tl_zoom(int in);          /* 1 in, 0 out, -1 the whole project */
 void tl_select(int item);      /* -1: none (and no overlay) */
 void tl_select_overlay(int ov); /* (and no item) */
+void tl_select_audio(int track, int i); /* a sound (and nothing else) */
+int tl_on_audio(int screen_y);  /* a drop at this height goes on the audio tracks: the row (or -1) */
 int tl_on_overlays(int screen_y); /* a drop at this height goes on V2 */
 const char *tl_help(int screen_y); /* interactive help: the ruler, V2 or V1 */
 /* The playhead dragged along the ruler: null events while it lasts, each
@@ -114,6 +118,7 @@ enum { S_MUTE, S_FADE_IN, S_FADE_OUT, S_VOLUME };
 #define FX_N_LEVELS 10
 extern const int FX_LEVELS[FX_N_LEVELS];
 intptr_t fx_sound_menu(int muted, int fade_in, int fade_out, int in_off, int out_off, int volume);
+intptr_t fx_volume_menu(int volume);     /* the Volume submenu alone, its level ticked */
 int fx_volume(int item, int db);         /* a clip's sound's level. 1 changed */
 int fx_dissolve(int before);             /* a second's dissolve at the cut after item `before`: its index, or -1 */
 int fx_dissolve_at_cut(void);            /* D: at the cut nearest the playhead */
@@ -141,6 +146,14 @@ void ov_menu_open(int x, int y, int ov);
 void ov_menu_select(int *block);
 int ov_fade_toggle(int ov, int end); /* a second's fade, or taken away. 1 changed */
 void ov_delete(int ov);
+
+/* ---- audiotracks.c: the audio tracks' sounds ---- */
+void au_load(const char *path, int frame); /* a sound dropped at a frame: on the tracks (stacked) */
+void au_delete(int track, int i);
+void au_menu_open(int x, int y, int track, int i);
+void au_menu_select(int *block);
+void app_audio_menu(int x, int y, int track, int i); /* (viewer.c: its menu, at the pointer) */
+void app_audio_menu_opened(void);  /* a menu of audiotracks.c's open */
 
 /* ---- exportbox.c: the Export window ---- */
 int ex_window(void);

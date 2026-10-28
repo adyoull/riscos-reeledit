@@ -63,7 +63,17 @@
 #define V2_BOTTOM (V2_TOP - V2_H)
 #define TRACK_TOP (V2_BOTTOM - 8)
 #define TRACK_BOTTOM (TRACK_TOP - TRACK_H)
-#define WIN_H (RULER_H + 8 + V2_H + 8 + TRACK_H + 8)
+#define A_H 56        /* an audio track's row (A1, A2...: below V1), and the empty one after them */
+#define AUDIO_TOP(k) (TRACK_BOTTOM - 8 - (k) * (A_H + 8))
+#define AUDIO_BOTTOM(k) (AUDIO_TOP(k) - A_H)
+#define AUDIO_COLOUR 0x40986000u /* (96, 152, 64): a sound on an audio track */
+/* The rows of audio tracks shown: the tracks, and one more (empty: to drop
+   on) */
+static int audio_rows(void)
+{
+    return (A.proj ? re_project_audio_tracks(A.proj) : 0) + 1;
+}
+#define WIN_H (-AUDIO_BOTTOM(audio_rows() - 1) + 8)
 
 /* What a drag does: the playhead (on the ruler); on the track, a clip's
    start or end trimmed, a clip moved, a dissolve made at a cut (from the
@@ -71,7 +81,7 @@
    a clip's fade in or out made longer or shorter (from its handle at the
    top of the clip) */
 enum { DRAG_NONE, DRAG_SCRUB, DRAG_IN, DRAG_OUT, DRAG_MOVE, DRAG_DISSOLVE, DRAG_MIX_IN, DRAG_MIX_OUT, DRAG_FADE_IN,
-       DRAG_FADE_OUT, DRAG_OV_MOVE, DRAG_OV_IN, DRAG_OV_OUT };
+       DRAG_FADE_OUT, DRAG_OV_MOVE, DRAG_OV_IN, DRAG_OV_OUT, DRAG_AU_MOVE, DRAG_AU_IN, DRAG_AU_OUT };
 
 static struct
 {
@@ -84,13 +94,14 @@ static struct
     int drag;         /* DRAG_: what a drag going on does */
     /* the item dragged: as it was when the drag began */
     int d_item, d_in, d_out, d_start, d_f0;
+    int d_track;      /* (a sound's audio track) */
     int d_before, d_line; /* moving: where it would go (before item d_before), the line's frame (-1: none) */
     int d_mix, d_len;     /* a dissolve: the item made or dragged (-1: none yet), its length when the drag began */
     /* the Viewer while dragging: the frame to show once the pointer rests
        (-1: none), the pointer's last frame and when it got there */
     int d_show, d_raw;
     unsigned d_moved_cs;
-} T = {0, 4.0, 0, 0, 0, 0, 0, "Timeline", DRAG_NONE, 0, 0, 0, 0, 0, -1, -1, -1, 0, -1, -1, 0};
+} T = {0, 4.0, 0, 0, 0, 0, 0, "Timeline", DRAG_NONE, 0, 0, 0, 0, 0, 0, -1, -1, -1, 0, -1, -1, 0};
 
 static int x_of(int frame)
 {
@@ -221,6 +232,16 @@ void tl_edited(void)
     if (!T.win)
         return;
     set_extent();
+    /* an audio track more or fewer: the window as tall as its rows (its top kept) */
+    int st[9];
+    _kernel_swi_regs r;
+    st[0] = T.win;
+    r.r[1] = (intptr_t) st;
+    if (!ro_swi(Wimp_GetWindowState, &r) && (st[8] & (1 << 16)) && st[4] - st[2] != WIN_H && T.vis_h != WIN_H) {
+        T.vis_h = WIN_H;
+        st[2] = st[4] - WIN_H;
+        tl_open_request(st);
+    }
     redraw_all();
 }
 
@@ -228,6 +249,7 @@ void tl_select(int item)
 {
     A.sel = item;
     A.ov_sel = -1;
+    A.au_sel = -1;
     redraw_all();
 }
 
@@ -235,7 +257,37 @@ void tl_select_overlay(int ov)
 {
     A.ov_sel = ov;
     A.sel = -1;
+    A.au_sel = -1;
     redraw_all();
+}
+
+void tl_select_audio(int track, int i)
+{
+    A.au_track = track;
+    A.au_sel = i;
+    A.sel = A.ov_sel = -1;
+    redraw_all();
+}
+
+/* The audio row at a height (work area), or -1 */
+static int audio_row(int wy)
+{
+    int rows = audio_rows();
+    for (int k = 0; k < rows; k++)
+        if (wy <= AUDIO_TOP(k) + 4 && wy > AUDIO_BOTTOM(k) - 4)
+            return k;
+    return -1;
+}
+
+int tl_on_audio(int screen_y)
+{
+    int st[9];
+    _kernel_swi_regs r;
+    st[0] = T.win;
+    r.r[1] = (intptr_t) st;
+    if (!T.win || ro_swi(Wimp_GetWindowState, &r))
+        return -1;
+    return audio_row(screen_y - (st[4] - st[6]));
 }
 
 int tl_on_overlays(int screen_y)
@@ -589,6 +641,55 @@ static void draw_overlays(int ox, int y0, int y1, int f0, int f1, int cx0, int c
     }
 }
 
+/* The audio tracks' sounds: a green box each over its frames, its name
+   (muted or its level after it), its fades green wedges; selected, an
+   amber outline and handles at its ends. Below them, an empty row to drop
+   on, with a word on what it's for. */
+static void draw_audio(int ox, int oy, int f0, int f1, int cx0, int cy0, int cx1, int cy1)
+{
+    int rows = audio_rows();
+    for (int k = 0; k < rows; k++) {
+        int y1 = oy + AUDIO_TOP(k), y0 = oy + AUDIO_BOTTOM(k);
+        int n = A.proj && k < rows - 1 ? re_project_audio_count(A.proj, k) : 0;
+        if (k == rows - 1) {
+            if (A.proj && re_project_length(A.proj) > 0)
+                text(rows > 1 ? "Drop more sound here (or where a sound plays: it goes below)"
+                              : "Audio: drop music or sound effects here (sounds dropped where one plays stack)",
+                     ox + LEFT + 8, y0 + 12, 0xCCCCCC00, 0x77777700);
+            continue;
+        }
+        for (int i = 0; i < n; i++) {
+            re_audio a;
+            if (re_project_audio(A.proj, k, i, &a) || a.start + a.length < f0 || a.start > f1)
+                continue;
+            int x0 = ox + x_of(a.start), x1 = ox + x_of(a.start + a.length) - 2;
+            int sel = k == A.au_track && i == A.au_sel;
+            if (x1 < x0)
+                x1 = x0;
+            colour(sel ? 0x2080F000 : 0x20202000);
+            rect(x0, y0, x1, y1);
+            int inset = sel ? 6 : 2;
+            colour(AUDIO_COLOUR);
+            rect(x0 + inset, y0 + inset, x1 - inset, y1 - inset);
+            draw_sound(a.start, a.length, a.fade_in, a.fade_out, a.muted, ox, x0 + inset, x1 - inset, y0 + inset, 12);
+            if (sel && x1 - x0 > 4 * inset) {
+                colour(0x2080F000);
+                rect(x0, y0 + 12, x0 + inset + 4, y1 - 12);
+                rect(x1 - inset - 4, y0 + 12, x1, y1 - 12);
+            }
+            int c0 = x0 + 2 > cx0 ? x0 + 2 : cx0, c1 = x1 - 2 < cx1 ? x1 - 2 : cx1;
+            int r0 = y0 > cy0 ? y0 : cy0, r1 = y1 < cy1 ? y1 : cy1;
+            if (c1 > c0 && r1 > r0) {
+                char shown[64], name[80];
+                clip(c0, r0, c1, r1);
+                fit_text(shown, sizeof(shown), label(name, sizeof(name), a.name, a.muted, a.volume), x1 - x0 - 24);
+                text(shown, x0 + 10, y0 + 14, 0xFFFFFF00, AUDIO_COLOUR);
+                clip(cx0, cy0, cx1, cy1);
+            }
+        }
+    }
+}
+
 /* The first item a redraw from frame f0 needs (the one there, and the one
    before it: a dissolve's clips run on under it), so a redraw of a strip
    (the playhead's, as it plays) looks at the items in it, not all of them */
@@ -638,7 +739,8 @@ static void draw(int *b)
     }
     /* the tracks */
     colour(0x77777700);
-    rect(cx0, track_y0 - 8, cx1, v2_y1 + 8 - 1);
+    rect(cx0, oy + AUDIO_BOTTOM(audio_rows() - 1) - 8, cx1, v2_y1 + 8 - 1);
+    draw_audio(ox, oy, f0, f1, cx0, cy0, cx1, cy1);
     draw_overlays(ox, v2_y0, v2_y1, f0, f1, cx0, cy0, cx1, cy1);
     if (A.proj) {
         for (int i = first_item(f0); i < re_project_items(A.proj); i++) {
@@ -871,7 +973,8 @@ static int drag_mode_at(int wx, int wy, int *item)
 static const char *const drag_names[] = {"", "scrubbing", "trimming the start of", "trimming the end of", "moving",
                                          "making a dissolve after", "dragging the start of", "dragging the end of",
                                          "fading in", "fading out", "moving overlay", "trimming the start of overlay",
-                                         "trimming the end of overlay"};
+                                         "trimming the end of overlay", "moving sound", "trimming the start of sound",
+                                         "trimming the end of sound"};
 
 /* While dragging, the Viewer shows a frame (the edge trimmed, a fade's or
    a dissolve's middle) once the pointer rests: a picture decoded at each
@@ -930,6 +1033,37 @@ static void overlay_drag_start(int f, int wx, int *b, int *st)
         return;
     T.drag = mode;
     app_log("timeline: %s %d (frames %d-%d), from %d", drag_names[mode], i, o.start, o.start + o.length - 1, wx);
+    re_project_begin(A.proj); /* (one undo for the whole drag) */
+}
+
+/* A drag begun on an audio track: a sound's middle moves it, its ends trim it */
+static void audio_drag_start(int k, int f, int wx, int *b, int *st)
+{
+    int i = re_project_audio_at(A.proj, k, (int) ((wx - LEFT) / T.scale));
+    re_audio a;
+    if (i < 0 || re_project_audio(A.proj, k, i, &a)) {
+        app_log("timeline: a drag at %d on A%d, on no sound", wx, k + 1);
+        return;
+    }
+    int x0 = x_of(a.start), x1 = x_of(a.start + a.length), edge = (x1 - x0) / 3;
+    if (edge > EDGE)
+        edge = EDGE;
+    int mode = wx - x0 < edge ? DRAG_AU_IN : x1 - wx <= edge ? DRAG_AU_OUT : DRAG_AU_MOVE;
+    app_set_speed(0);
+    T.d_track = k;
+    T.d_item = i;
+    T.d_start = a.start;
+    T.d_len = a.length;
+    T.d_f0 = f;
+    T.d_show = -1;
+    T.d_raw = f;
+    T.d_moved_cs = ro_now_cs();
+    tl_select_audio(k, i);
+    if (drag_box(b, st))
+        return;
+    T.drag = mode;
+    app_log("timeline: %s %d on A%d (frames %d-%d), from %d", drag_names[mode], i, k + 1, a.start,
+            a.start + a.length - 1, wx);
     re_project_begin(A.proj); /* (one undo for the whole drag) */
 }
 
@@ -1068,6 +1202,31 @@ static void drag_tick(int f)
         }
         break;
     }
+    case DRAG_AU_MOVE: /* (kept clear of the others on its track: track.c) */
+    case DRAG_AU_IN:
+    case DRAG_AU_OUT: {
+        int start = T.d_start, length = T.d_len, end = T.d_start + T.d_len;
+        re_audio a;
+        if (T.drag == DRAG_AU_MOVE) {
+            start += delta;
+        } else if (T.drag == DRAG_AU_OUT) {
+            length += delta;
+        } else {
+            int lo = T.d_item > 0 && !re_project_audio(A.proj, T.d_track, T.d_item - 1, &a) ? a.start + a.length : 0;
+            start += delta;
+            if (start < lo)
+                start = lo;
+            if (start > end - 1)
+                start = end - 1;
+            length = end - start;
+        }
+        if (re_project_audio_span(A.proj, T.d_track, T.d_item, start < 0 ? 0 : start, length < 1 ? 1 : length) == 1
+            && !re_project_audio(A.proj, T.d_track, T.d_item, &a)) {
+            app_edited_dragging();
+            show_later(T.drag == DRAG_AU_OUT ? a.start + a.length - 1 : a.start);
+        }
+        break;
+    }
     case DRAG_MOVE: {
         int before = 0, at = -1;
         move_target(f, &before, &at);
@@ -1094,7 +1253,7 @@ void tl_click(int *b)
     int st[9];
     _kernel_swi_regs r;
     if (buttons == 2) { /* Menu: over a clip or a dissolve on the track, its context menu (its effects) */
-        int item = -1, ov = -1;
+        int item = -1, ov = -1, ak = -1, ai = -1;
         st[0] = T.win;
         r.r[1] = (intptr_t) st;
         if (A.proj && !ro_swi(Wimp_GetWindowState, &r)) {
@@ -1104,6 +1263,12 @@ void tl_click(int *b)
                 item = re_project_item_at(A.proj, f);
             else if (wy <= V2_TOP && wy >= V2_BOTTOM && f >= 0)
                 ov = re_project_overlay_at(A.proj, f);
+            else if ((ak = audio_row(wy)) >= 0 && f >= 0)
+                ai = re_project_audio_at(A.proj, ak, f);
+        }
+        if (ai >= 0) {
+            app_audio_menu(b[0], b[1], ak, ai);
+            return;
         }
         if (ov >= 0) {
             app_overlay_menu(b[0], b[1], ov);
@@ -1150,6 +1315,20 @@ void tl_click(int *b)
             if (!ro_swi(Wimp_DragBox, &r))
                 T.drag = DRAG_SCRUB;
         }
+        return;
+    }
+    /* the audio tracks: sounds are selected, moved and trimmed */
+    int ak = audio_row(wy);
+    if (ak >= 0 && wy < TRACK_BOTTOM - 4) {
+        if (drag) {
+            audio_drag_start(ak, f, wx, b, st);
+            return;
+        }
+        int ai = re_project_audio_at(A.proj, ak, (int) ((wx - LEFT) / T.scale));
+        if (ai >= 0)
+            tl_select_audio(ak, adjust && A.au_track == ak && A.au_sel == ai ? -1 : ai);
+        else if (!adjust)
+            tl_select(-1);
         return;
     }
     /* V2: overlays are selected, moved and trimmed */
@@ -1253,6 +1432,9 @@ const char *tl_help(int screen_y)
     if (wy > V2_BOTTOM - 4)
         return "This is V2: pictures and videos over the video.|MDrop a PNG, JPEG, sprite or video here; "
                "drag one to move it, its ends to trim it; Menu over it to place it, size it, fade it, mute it.";
+    if (wy < TRACK_BOTTOM - 4 && audio_row(wy) >= 0)
+        return "These are the audio tracks: music and sound effects.|MDrop sound here (one dropped where another "
+               "plays goes on the track below); drag one to move it, its ends to trim it; Menu over it for its sound.";
     return "This is V1: the clips.|MClick a clip to select it; drag its edge to trim it, its middle to move it.|M"
            "Menu over a clip gives its effects (fades, sound, dissolves).|MCtrl and the wheel zoom.";
 }

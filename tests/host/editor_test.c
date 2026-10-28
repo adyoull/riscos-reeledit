@@ -63,6 +63,9 @@ const char *re_test_title(void);
 char *re_test_savebox_name(void);
 char *re_test_title_line(int n);
 char *re_test_export_name(void);
+int re_test_audio_selected(int *track);
+static int au_track_sel(void) { int t; re_test_audio_selected(&t); return t; }
+static int au_sel(void) { int t; return re_test_audio_selected(&t); }
 const char *re_test_export_status(void);
 
 static int fails;
@@ -615,6 +618,20 @@ static double tl_scale = 4; /* the Timeline's OS units a frame, as it should be 
 /* a click (Select: 0x400 for this window's button type) on the Timeline at a frame: the ruler (1), V1 (0),
    or V2 (2) */
 #define TL_V1_TOP (48 + 8 + 64 + 8) /* (the ruler, V2's row, the gaps: down to V1) */
+#define TL_A_TOP(k) (TL_V1_TOP + 128 + 8 + (k) * (56 + 8)) /* (an audio track's row: below V1) */
+static int click_audio(int *b, int frame, int k, int buttons)
+{
+    b[0] = W[1].box[0] - W[1].scroll_x + 16 + (int) (frame * tl_scale);
+    b[1] = W[1].box[3] - TL_A_TOP(k) - 28;
+    b[2] = buttons; b[3] = TL; b[4] = -1;
+    return 6;
+}
+static int drop_audio(int *b, int frame, int k, const char *file)
+{
+    data_load(b, TL, W[1].box[0] - W[1].scroll_x + 16 + (int) (frame * tl_scale), 0xFB1, file);
+    b[8] = W[1].box[3] - TL_A_TOP(k) - 28;
+    return 17;
+}
 static int click_tl(int *b, int frame, int on_ruler, int buttons)
 {
     b[0] = W[1].box[0] - W[1].scroll_x + 16 + (int) (frame * tl_scale);
@@ -653,7 +670,8 @@ static int script(int *b, int mask)
         CHECK(!re_test_open(), "an engine with nothing to play");
         CHECK(!strcmp(re_test_title(), "<Untitled>"), "title \"%s\"", re_test_title());
         CHECK(!nulls, "null events with nothing to play");
-        CHECK(W[1].box[3] + 40 == W[0].box[1] && W[1].box[0] == W[0].box[0] && W[1].box[2] == W[0].box[2],
+        CHECK(W[1].box[3] + 40 == W[0].box[1] && abs((W[1].box[0] + W[1].box[2]) - (W[0].box[0] + W[0].box[2])) <= 2
+                  && W[1].box[2] - W[1].box[0] > W[0].box[2] - W[0].box[0],
               "the Timeline isn't attached under the Viewer (%d,%d,%d,%d under %d,%d,%d,%d)", W[1].box[0], W[1].box[1],
               W[1].box[2], W[1].box[3], W[0].box[0], W[0].box[1], W[0].box[2], W[0].box[3]);
         next(60);
@@ -663,7 +681,8 @@ static int script(int *b, int mask)
         mark = W[0].box[0];
         return 2;
     case 60:
-        CHECK(W[0].box[0] == mark + 100 && W[1].box[3] + 40 == W[0].box[1] && W[1].box[0] == W[0].box[0],
+        CHECK(W[0].box[0] == mark + 100 && W[1].box[3] + 40 == W[0].box[1]
+                  && abs((W[1].box[0] + W[1].box[2]) - (W[0].box[0] + W[0].box[2])) <= 2,
               "dragging the Timeline didn't bring the Viewer (Viewer x %d, was %d)", W[0].box[0], mark);
         next(3);
         data_load(b, TL, W[1].box[0] + 100, 0xFFD, clip);
@@ -1001,6 +1020,9 @@ static int script(int *b, int mask)
         next(87);
         goto wheel_up;
     case 87:
+        next(287);
+        goto wheel_up;
+    case 287: /* (three notches: the Timeline is the workspace's width, wider than a short project) */
         next(88);
         goto wheel_up;
     case 88:
@@ -1018,6 +1040,9 @@ static int script(int *b, int mask)
         next(90);
         goto wheel_down;
     case 90:
+        next(290);
+        goto wheel_down;
+    case 290:
         next(91);
         goto wheel_down;
     case 91:
@@ -2186,6 +2211,97 @@ static int script(int *b, int mask)
     case 262:
         CHECK(!strcmp(re_test_export_status(), "Stopped.") && exports_typed == 1 && reports == mark2_reports,
               "stopped: \"%s\", typed %d, reports %d", re_test_export_status(), exports_typed, reports - mark2_reports);
+        next(270);
+        return key_to(b, TL, 0x18D);
+    /* ---- audio tracks: a sound dropped below V1; another where it plays (stacked, a new track);
+       Menu over it > Volume > -6 dB; Delete (the empty track goes) ---- */
+    case 270:
+        if (nulls)
+            return 0;
+        mark = W[1].box[3] - W[1].box[1];
+        next(271);
+        return drop_audio(b, 10, 0, "tone880.wav");
+    case 271: {
+        if (nulls)
+            return 0;
+        re_audio a;
+        CHECK(re_project_audio_tracks(re_test_project()) == 1 && !re_project_audio(re_test_project(), 0, 0, &a)
+                  && abs(a.start - 10) <= 1 && a.length == 50 && au_sel() == 0 && W[1].box[3] - W[1].box[1] > mark,
+              "a sound dropped: %d tracks, at %d for %d, selected %d; the Timeline %d high (%d)",
+              re_project_audio_tracks(re_test_project()), a.start, a.length, au_sel(), W[1].box[3] - W[1].box[1], mark);
+        shot("26-audio");
+        next(272);
+        return drop_audio(b, 20, 0, "tone1320.wav");
+    }
+    case 272:
+        if (nulls)
+            return 0;
+        CHECK(re_project_audio_tracks(re_test_project()) == 2 && re_project_audio_count(re_test_project(), 1) == 1
+                  && au_track_sel() == 1,
+              "a sound where one plays: %d tracks, %d on A2, selected on A%d", re_project_audio_tracks(re_test_project()),
+              re_project_audio_count(re_test_project(), 1), au_track_sel() + 1);
+        shot("27-audio-stacked");
+        {
+            re_audio a;
+            re_project_audio(re_test_project(), 1, 0, &a);
+            mark = a.start;
+            click_audio(b, a.start + 25, 1, 0x40); /* its middle dragged 10 frames on */
+            ptr[0] = b[0] + (int) (10 * tl_scale); ptr[1] = b[1];
+        }
+        next(280);
+        return 6;
+    case 280: {
+        re_audio a;
+        re_project_audio(re_test_project(), 1, 0, &a);
+        if (a.start != mark + 10) {
+            if (fake_cs - phase_cs > 100)
+                fail_quit("a sound dragged 10 frames on: at %d (was %d)", a.start, mark);
+            return 0;
+        }
+        next(281);
+        return 7; /* dropped */
+    }
+    case 281:
+        if (nulls)
+            return 0;
+        mark = menus;
+        next(273);
+        return click_audio(b, 40, 1, 2); /* Menu over it */
+    case 273:
+        CHECK(menus == mark + 1, "Menu over a sound: no menu");
+        next(274);
+        b[0] = 3; b[1] = 5; b[2] = -1; /* Volume > -6 dB */
+        return 9;
+    case 274: {
+        if (nulls)
+            return 0;
+        re_audio a;
+        CHECK(!re_project_audio(re_test_project(), 1, 0, &a) && a.volume == -6, "the sound's Volume > -6 dB: %d",
+              a.volume);
+        next(275);
+        return key_to(b, TL, 0x7F); /* Delete: the selected sound */
+    }
+    case 275:
+        if (nulls)
+            return 0;
+        CHECK(re_project_audio_tracks(re_test_project()) == 1 && au_sel() == -1,
+              "Delete: %d tracks (the empty one gone), selected %d", re_project_audio_tracks(re_test_project()), au_sel());
+        mark = W[0].box[2] - W[0].box[0];
+        next(276);
+        b[0] = W[0].box[0] + 200; b[1] = W[0].box[3] - 100; b[2] = 2; b[3] = VIEWER; b[4] = -1; /* Menu */
+        return 6;
+    /* ---- View > Viewer size > Large: the Viewer wider, the Timeline still under it, centred ---- */
+    case 276:
+        next(277);
+        b[0] = 3; b[1] = 5; b[2] = 2; b[3] = -1;
+        return 9;
+    case 277:
+        if (nulls)
+            return 0;
+        /* (the Timeline was detached at phase 67: it stays where it is) */
+        CHECK(W[0].box[2] - W[0].box[0] > mark * 3 / 2 && W[0].open,
+              "View > Viewer size > Large: %d wide (%d)", W[0].box[2] - W[0].box[0], mark);
+        shot("28-viewer-large");
         next(45);
         return key_to(b, TL, 0x18D);
     case 45: /* the desktop shutting down: asked, Discard; the shutdown started again; quit */

@@ -214,6 +214,43 @@ int re_project_title(re_project *p, int i, re_title *t);
    alignment): made again, its box with it. 1 changed, 0 not. */
 int re_project_title_set(re_project *p, int i, const re_title *t);
 
+/* Audio tracks (audio.c): music and sound effects under the video, A1, A2
+   and on (below V1), each a track of sounds with gaps between, mixed with
+   V1's sound. A sound put where one is playing goes on the next track
+   with room for all of it there (a new track if none has), so sounds
+   stack. Each is moved and trimmed as an overlay is; muted, given a level
+   and faded as a clip's sound is. Saved as Shotcut's audio tracks
+   ("shotcut:audio"). */
+typedef struct
+{
+    int track;            /* 0: A1 */
+    int start, length;    /* in the project, frames */
+    int in;               /* its first frame in its file */
+    int source_length;    /* its file's length (frames) */
+    int muted, volume;    /* (dB) */
+    int fade_in, fade_out; /* frames */
+    char name[64];        /* the file's leaf name */
+} re_audio;
+int re_project_audio_tracks(re_project *p);
+int re_project_audio_count(re_project *p, int track);
+int re_project_audio(re_project *p, int track, int i, re_audio *s);
+int re_project_audio_at(re_project *p, int track, int frame); /* -1: none */
+/* A sound (a file with sound: an audio file, or a video's sound) put from
+   a frame, so long (0: all of it), kept to the project's end. 0 and where
+   it went (*track, *i); -1 (an empty project, past its end), or: */
+#define RE_SOUND_CANT_OPEN (-2)
+#define RE_SOUND_NO_SOUND  (-3)
+int re_project_audio_add(re_project *p, const char *file, int frame, int length, int *track, int *i);
+/* Moved or trimmed (as re_project_overlay_span). 1 changed, 0 already so, -1 not. */
+int re_project_audio_span(re_project *p, int track, int i, int start, int length);
+/* Taken away (an empty last track with it). 1 done, 0 not. */
+int re_project_audio_remove(re_project *p, int track, int i);
+/* Muted; its level (dB); faded in (end 0) or out (end 1) (0: none). 1
+   changed, 0 not. Between begin and end too. */
+int re_project_audio_mute(re_project *p, int track, int i, int on);
+int re_project_audio_volume(re_project *p, int track, int i, int db);
+int re_project_audio_fade(re_project *p, int track, int i, int end, int length);
+
 /* Undo and redo (up to 100 edits): the project as it was before the last
    edit, and back. 1 done, 0 nothing to do. The producer changes: an
    engine playing it must be opened again. */
