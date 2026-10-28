@@ -1,4 +1,4 @@
-/* mltt.h - shared by the host tests: MLT driven as Reel Edit drives it on
+/* mltt.h - shared by the host tests: MLT driven as ReelEdit drives it on
  * RISC OS. A consumer is made and connected but never started; each frame is
  * fetched from the program's own loop (a Wimp null event, there) with
  * mlt_consumer_get_frame, after a seek, and its picture asked for as yuv420p

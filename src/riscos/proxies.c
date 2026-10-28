@@ -9,7 +9,7 @@
  *
  * The Timeline's title says while they're being made. They're kept in
  * <Wimp$ScrapDir>.ReelEdPxy, with an index (Index: each proxy's name and
- * its file's) so that a project recovered after Reel Edit stopped finds
+ * its file's) so that a project recovered after ReelEdit stopped finds
  * them again. Closing the editor and quitting delete them; so does the
  * editor opening without recovering a project (what was left of a
  * session that stopped).
@@ -142,7 +142,7 @@ static int next(void)
         snprintf(X.out, sizeof(X.out), DIR ".P%X%u", ro_now_cs(), ++X.serial); /* (none a recovered one's) */
         const char *uout = full_name(X.out, unix_out, sizeof(unix_out));
         snprintf(cmd, sizeof(cmd),
-                 "TaskWindow \"<ReelEdit$Dir>.!RunImage -proxy %s %s %d\" -wimpslot 40960K -name \"Reel Edit proxy\" "
+                 "TaskWindow \"<ReelEdit$Dir>.!RunImage -proxy %s %s %d\" -wimpslot 40960K -name \"ReelEdit proxy\" "
                  "-task &%08X -txt &%08X -quit",
                  X.f[i].file, uout, can_hw(), A.task, TXT_ID);
         r.r[0] = (intptr_t) cmd;

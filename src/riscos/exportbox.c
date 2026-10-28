@@ -245,7 +245,7 @@ static int start(const char *path, int safe)
     snprintf(X.out, sizeof(X.out), "%s", path);
     const char *uout = app_mlt_name(path, unix_out, sizeof(unix_out));
     snprintf(cmd, sizeof(cmd),
-             "TaskWindow \"<ReelEdit$Dir>.!RunImage -export %s %s %d %d %d\" -wimpslot 40960K -name \"Reel Edit "
+             "TaskWindow \"<ReelEdit$Dir>.!RunImage -export %s %s %d %d %d\" -wimpslot 40960K -name \"ReelEdit "
              "export\" -task &%08X -txt &%08X -quit",
              uproj, uout, HEIGHTS[X.size], X.quality, X.hw && X.can_hw, A.task, TXT_ID);
     r.r[0] = (intptr_t) cmd;

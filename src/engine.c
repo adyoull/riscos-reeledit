@@ -1,8 +1,8 @@
-/* engine.c - Reel Edit's player (engine.h).
+/* engine.c - ReelEdit's player (engine.h).
  *
  * MLT is built without threads (MLT_NO_THREADS), and the consumer here is
  * never started: each picture is made inside re_engine_poll, when it's due,
- * by mlt_consumer_get_frame. So the work happens in Reel Edit's own time
+ * by mlt_consumer_get_frame. So the work happens in ReelEdit's own time
  * slice, a picture at a time, and between pictures the Wimp runs the other
  * tasks.
  *
@@ -187,10 +187,14 @@ static void msg_from_ffmpeg(void *avcl, int level, const char *fmt, va_list ap)
 
 void re_engine_messages(void (*line)(const char *line))
 {
+    if (!line) /* (none wanted: the half-made line and repeats go too) */
+        msg_len = msg_repeats = 0;
     msg_line = line;
-    mlt_log_set_level(MLT_LOG_VERBOSE); /* (MLT's avformat module sets FFmpeg's level from it when it starts) */
+    /* (MLT's avformat module sets FFmpeg's level from MLT's when it starts;
+       with nothing to take them, both are told to say little) */
+    mlt_log_set_level(line ? MLT_LOG_VERBOSE : MLT_LOG_ERROR);
     mlt_log_set_callback(msg_from_mlt);
-    av_log_set_level(AV_LOG_VERBOSE);
+    av_log_set_level(line ? AV_LOG_VERBOSE : AV_LOG_ERROR);
     av_log_set_callback(msg_from_ffmpeg);
 }
 
@@ -473,7 +477,7 @@ static mlt_frame frame_at(re_engine *e, int position)
     return mlt_consumer_get_frame(e->consumer);
 }
 
-/* The frame's picture as Reel Edit shows it: yuv420p at the preview size.
+/* The frame's picture as ReelEdit shows it: yuv420p at the preview size.
    0, or -1 when there's none. */
 
 /* The frame's picture. native: a clip's picture at its own size, when it's

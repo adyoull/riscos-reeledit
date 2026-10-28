@@ -1,7 +1,7 @@
 /* export.h - a project made into a video file (export.c): MP4, H.264 and
  * AAC, at the project's size or smaller, by MLT's avformat consumer.
  *
- * Reel Edit runs it in a program of its own (its !RunImage with -export,
+ * ReelEdit runs it in a program of its own (its !RunImage with -export,
  * in a TaskWindow: pre-emptively multitasked, so editing carries on), from
  * the project saved to a file; the progress comes back as lines of text
  * (re_export_main).

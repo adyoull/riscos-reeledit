@@ -1,6 +1,6 @@
-# Reel Edit: design
+# ReelEdit: design
 
-Reel Edit is a video editor for RISC OS: a Wimp program in C, with the MLT
+ReelEdit is a video editor for RISC OS: a Wimp program in C, with the MLT
 framework as its engine (patched for RISC OS, see `patches/mlt`) and the
 Raspberry Pi's video hardware through riscos-reelhwaccel. This page says
 what it borrows from the editors people already know, what it changes to
@@ -9,9 +9,9 @@ it works.
 
 ## What it borrows, and from where
 
-| Idea | From | In Reel Edit |
+| Idea | From | In ReelEdit |
 |---|---|---|
-| The project is MLT XML | Shotcut, Kdenlive | Projects open in Shotcut and Kdenlive on other machines, and theirs open here when they use only what Reel Edit supports (core, avformat, xml and normalize services). Unknown services are kept and shown as "not supported here", never dropped. |
+| The project is MLT XML | Shotcut, Kdenlive | Projects open in Shotcut and Kdenlive on other machines, and theirs open here when they use only what ReelEdit supports (core, avformat, xml and normalize services). Unknown services are kept and shown as "not supported here", never dropped. |
 | A main storyline that closes up after a delete | Final Cut Pro (the magnetic timeline), Shotcut (ripple) | Track V1 ripples by default: delete or trim a clip and everything after it moves. A Ripple toggle on the toolbar turns it off. Tracks above V1 never ripple. |
 | Overlap two clips to cross-fade them | Shotcut | On the same track: drag from the white mark at the bottom of a cut, and the clips overlap by as far as you drag; the overlap becomes a dissolve, which is exactly MLT's playlist mix. (Done from the cut's corner rather than by dragging a clip's start, which trims.) D makes a one-second dissolve at the cut nearest the playhead from the clips' spare frames, as Premiere's and Resolve's at-the-cut dissolves do, so nothing moves. |
 | Effects from the clip's context menu, each a box over what it covers | Premiere, Resolve (a transition is a box over the cut), Shotcut (fades) | Menu over a clip on the Timeline: Fade in, Fade out, Dissolve from the clip before, into the clip after. A fade is a box along the top of the clip over the frames it covers, a dissolve a band between the clips; an effect's inner edge or ends drag to change its length. While dragging, the Viewer's picture is made only when the pointer rests, so the Timeline keeps up on the Pi. |
@@ -80,10 +80,10 @@ they disagree.
 
 ## Working fast: the editing UX
 
-Reel Edit should feel like the editors people already know (Final Cut Pro,
+ReelEdit should feel like the editors people already know (Final Cut Pro,
 Premiere Pro, DaVinci Resolve, Shotcut), be quick to drive from the
-keyboard, and still be a RISC OS program. Where those editors agree, Reel
-Edit does the same; where RISC OS's Style Guide says otherwise (^Z, F8/F9,
+keyboard, and still be a RISC OS program. Where those editors agree, ReelEdit
+does the same; where RISC OS's Style Guide says otherwise (^Z, F8/F9,
 the save box, Menu for menus), the Style Guide wins.
 
 **Principles**
@@ -139,17 +139,17 @@ export.
 
 ## Keeping the desktop running
 
-RISC OS multitasks co-operatively: while Reel Edit holds the CPU, nothing
+RISC OS multitasks co-operatively: while ReelEdit holds the CPU, nothing
 else on the desktop moves. These rules keep that time short.
 
 1. **No threads.** MLT is built with `MLT_NO_THREADS`: it renders a frame
-   when Reel Edit asks for one, on Reel Edit's own time. (Tested on Linux: no
+   when ReelEdit asks for one, on ReelEdit's own time. (Tested on Linux: no
    `pthread_create` at all while playing a project.)
 2. **At most one picture per poll.** Each null event renders at most one
-   frame. While playing, Reel Edit asks for its next null event at the next
+   frame. While playing, ReelEdit asks for its next null event at the next
    frame's time (`Wimp_PollIdle`), not sooner.
-3. **Nothing when nothing happens.** Stopped, with every thumbnail made, Reel
-   Edit masks out null events: no CPU at all.
+3. **Nothing when nothing happens.** Stopped, with every thumbnail made, ReelEdit
+    masks out null events: no CPU at all.
 4. **Behind? Drop pictures, not sound.** When rendering falls behind the clock,
    the pictures in between are skipped (their sound is still taken, so it
    doesn't stutter); a hardware decoder is told with `drop_before` so it
@@ -171,7 +171,7 @@ else on the desktop moves. These rules keep that time short.
    measured on the Pi, for projects whose effects cost more than the scaling.
 7. **Long jobs in a TaskWindow.** Export, proxies and audio waveforms for long
    clips run as melt in a TaskWindow, which RISC OS switches pre-emptively.
-   Reel Edit reads their progress from `TaskWindow_Output`, as !FFmpeg's
+   ReelEdit reads their progress from `TaskWindow_Output`, as !FFmpeg's
    Convert window does.
 8. **Background work in slices.** Thumbnails and short waveforms are made one
    item per null event, only while stopped.
@@ -183,7 +183,7 @@ else on the desktop moves. These rules keep that time short.
    0.1 s out (as reelcore). Pictures left out cost nothing for the sound.
 10. **Nothing copied or converted that needn't be.** MLT copies each picture
     once, into its own buffer; its image cache (two more copies) is off, so
-    Reel Edit's player keeps the few pictures it has just shown, for stepping
+    ReelEdit's player keeps the few pictures it has just shown, for stepping
     back a frame without decoding again. That one copy matters: reading a 1080p
     picture out of the VideoCore's (cacheable) buffers takes 1.4 ms alone but
     about 9-10 ms while the VideoCore is decoding the next one
@@ -208,7 +208,7 @@ else on the desktop moves. These rules keep that time short.
     clip once the holder has gone 5 pictures unused, closing the old one
     first. In a crossfade the incoming clip is decoded on the ARM until the
     outgoing one finishes. Decoders still open at exit are closed: nothing
-    else would free them before a restart. Reel Edit can do better than this
+    else would free them before a restart. ReelEdit can do better than this
     rule, since it knows the timeline: give the decoder to the clip that will
     play longest, and hand it over at a cut rather than after one.
 
@@ -242,13 +242,14 @@ need the Wimp front end.
 | Clip sound | `src/clipsound.c` (shares `src/project_internal.h`) | A clip's (or a V2 video's) sound on its own: its level (Shotcut's audioGain volume filter, level in dB, +12 to -36 from the menu), muted (a volume filter, gain 0, reeleditMute), or faded without the picture (the fade's volume filter alone); a dissolve's clip ends muted as their clips are, after every edit and load; a split keeps the mute on both parts. Menu: Sound (Mute, Fade in, Fade out) on the clip's and the overlay's context menus; drawn as a red line (muted) or green wedges along the clip's bottom |
 | Audio tracks | `src/audio.c`, `src/track.c`, `src/riscos/audiotracks.c` | A1, A2... below V1: playlists marked "shotcut:audio" (Shotcut's audio tracks), their pictures hidden ("hide" 1), each mixed with V1 by a core mix transition (made again after every edit; not if the project mixes it already). A sound dropped where one plays goes on the next track with room for all of it (a new one if none), so effects stack. Sounds move, trim, mute, fade and take a level as overlays and clips' sound do; an empty last track goes. track.c is the shared code of V2's and the audio tracks' separate items (slots, room, move/trim). The Timeline grows a row per track, and one more to drop on; Menu over a sound: Mute, Fade in, Fade out, Volume, Delete |
 | Layout | `src/riscos/viewer.c` | The editor is one workspace: the Timeline most of the screen's width (90%), the Viewer centred above it at a share of the screen's width (View > Viewer size: Small 35%, Medium 50%, Large 65%), so the picture costs what it must while the tracks have room |
-| Autosave | `src/riscos/autosave.c` | After an edit, a project with changes not saved is copied (MLT XML) to <Choices$Write>.ReelEdit.Autosave, at most every half minute, with its file's name in AutosaveFor. Saving, closing (kept or discarded) and quitting take the copy away; one left means Reel Edit stopped. Opening the editor then asks: Recover (the project as it was, still to be saved, its name kept) or Discard |
+| Autosave | `src/riscos/autosave.c` | After an edit, a project with changes not saved is copied (MLT XML) to <Choices$Write>.ReelEdit.Autosave, at most every half minute, with its file's name in AutosaveFor. Saving, closing (kept or discarded) and quitting take the copy away; one left means ReelEdit stopped. Opening the editor then asks: Recover (the project as it was, still to be saved, its name kept) or Discard |
 | Clips and three-point editing | `src/source.c`, `src/riscos/clips.c` | The Clips window (View > Clips..., Ctrl-B): the project's clips list (every clip put on the Timeline, and files dropped on it), saved as the tractor's `shotcut:reeledit_bin`. Double-click (or Return) shows a clip in the Viewer as a source: I and O mark it, `,` inserts and `.` overwrites its marked frames on V1 at the project's playhead, which then moves after them; Escape goes back to the project. A row dragged to the Timeline is put there as a dropped file (on an audio row, its sound). Delete takes a clip off the list. Neither edit goes into a dissolve |
 | Thumbnails and waveforms | `src/media.c`, `src/riscos/previews.c` | V1 clips show their first frame, and their last when there's room (Premiere's head and tail); their sound's waveform runs along their bottom, a sound's along it on an audio track, drawn in dB (48 dB to full scale) at the clip's level and through its fades (none when muted). Made with FFmpeg's software decoders (not the VideoCore's, kept for playing), on null events while nothing plays or is dragged, at most 4 cs at a time, what was last asked for (in view) first; thumbnails before peaks. Until a thumbnail is made, the nearest made of its file stands in. Thumbnails are kept (96, least recently asked for go), peaks (a byte a frame) for every file; a file that can't be read isn't tried again; the decoders are closed when there's nothing to make. Plotted from one grid sprite of a megabyte or more (the Pi's small-sprite replot problem). V1 is 160 OS units tall for them |
 | Copy and paste; rolls | `src/clipboard.c`, `src/riscos/copypaste.c`, `re_project_roll` (project.c) | Ctrl-C, Ctrl-X, Ctrl-V (Edit menu): the selection (a V1 clip, an overlay, a sound) copied with its fades, mute, level and place; a copy holds its producer (a reference of its own: the original can go) and is pasted at the playhead as one edit: a clip inserted, an overlay where there's room, a sound stacked; a title is made afresh (two titles mustn't share a producer). Pasted, it's selected and the playhead goes to its end. A roll moves a cut, the clips (or a gap) either side trimmed together, the length kept: E rolls the cut nearest the playhead to it (Premiere's extend edit), Ctrl-drag on a clip's edge rolls the cut there. Within re_project_begin/end, rp_checkpoint and rp_no_edit do nothing (the edit's undo point is begin's) |
 | Speed | `src/speed.c`, effects.c's Speed submenu | A clip at another speed is a cut of MLT's timewarp producer ("2:file", "-1:file", as Shotcut makes), made through the loader ("timewarp:2:file") so it has the normalisers (its sound resampled to 48 kHz; made directly, it played silent). Its sound changes pitch with it (pitch keeping needs Rubber Band, not built). Changing a speed keeps the part of the file shown and the clip's start; what follows ripples; fades, mute and level are kept (begin/end: one undo). Not pictures, nor clips in a dissolve. `re_item.speed` (%), `re_item_file_frame` maps its frames to the file's (thumbnails, waveforms) |
 | Render previews | `src/render.c`, `src/riscos/renders.c`, `re_engine_set_producer` | Costly stretches (V2 overlays, dissolves, picture fades, clips at another speed; joined within 2 s) are made into MP4 files by the export program (`-export proj file height 2 hw in out`: a cut of the project) one at a time in TaskWindows (txt &52455056), at the engine's preview height. Each stretch has a signature (FNV-1a of everything in it, placed from its start, its sounds too): a preview is found by signature and length, so a V1 stretch moved along by a ripple keeps it, a changed one loses it. While playing, the engine plays a playlist of the project with the rendered stretches from their files (switched back when stopped or edited). The bar under the ruler: red to render, green rendered, amber rendering. Files in <Wimp$ScrapDir>.ReelEdPrv, deleted when the editor closes (at most 64, least recently used go) |
 | Proxies | `src/proxy.c`, `src/riscos/proxies.c`, `re_export_proxy` | Videos taller than 540 lines or not H.264 (with a known length) get a proxy: 360 lines, a keyframe every 5 frames, H.264 (VideoCore encoder when there is one), the same frames and sound, made one at a time in TaskWindows (`-proxy file out hw`, txt &52455058). The project is made again from its XML with each file's name swapped for its proxy's (a whole property value, or after a timewarp's "2:"; full and current-directory-relative forms), when nothing plays or is dragged; undo and redo restore with the same swap; saves (and so exports, renders, autosaves) swap back, and clips, overlays, sounds and render signatures use the file's name (`re_project_original`). View > Use proxies. Files in <Wimp$ScrapDir>.ReelEdPxy with an Index (proxy, file): deleted on closing the editor and quitting; on opening the editor, a recovered project gets them back (Index), otherwise they are deleted (and render previews' ReelEdPrv too) |
+| Logging | `src/riscos/logging.c` | `app_log` writes to <Wimp$ScrapDir>.ReelEditLog only while logging is on: off as standard, turned on and off by the icon bar menu's Logging (kept in <Choices$Write>.ReelEdit.Logging), or set at start-up by ReelEdit$Log (a file, or "off"). On: MLT's and FFmpeg's messages go to it (`re_engine_messages`); off: dropped, and both set to errors only. Again in the same run: added to |
 | Export | `src/export.c`, `src/riscos/exportbox.c` | The project made into an MP4 (H.264 and AAC): File > Export... (Ctrl-E). The project is saved to a scrap copy and !RunImage run again with -export in a TaskWindow (pre-emptive, so editing goes on); its "progress"/"done"/"failed" lines come back as TaskWindow_Output, its end as Morio; Stop sends Morite and deletes the part made. MLT's avformat consumer (no threads: on the calling thread) at the project's size or fewer lines; the VideoCore's h264_encvchiq when VCHIQ is there (bit rate from size and quality), else libx264 (veryfast, CRF), else mpeg4; a file without video tries the next codec. The file icon drags as the Save as box's (savebox.c's sb_drag_file) |
 | Titles | `src/title.c`, `src/riscos/titles.c`, `src/riscos/fonts.c` | Text over the video: a picture made from the text (each line by the Font Manager into a 32bpp sprite, its brightness the coverage; blocks on Linux), coloured over a shadow, an outline or a box; an MLT producer registered as "qtext" (Shotcut's text producer's name and properties), a still made again when its properties change (still.c's re_still_made). Put on V2 as an overlay at its own size (overlay.c's title_box), lower third by default. The Title window: two lines, Font, Size, Colour, Style, Lines, Place; Edit > New title... (T), the overlay menu's Edit title... |
 | Overlays | `src/overlay.c` (shares `src/project_internal.h`) | V2, the playlist above V1: pictures and videos over the video (a video's sound mixed in by one core mix transition, unless the project has its own). Each picture's place, size, opacity and fades are kept on its playlist entry (shotcut:reeledit_*); a core composite transition per picture is made again from them after every edit and every load. V2's edits rebuild its playlist from its pictures' cuts, keeping them apart and within the project |

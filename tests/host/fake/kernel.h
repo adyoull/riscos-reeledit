@@ -1,7 +1,7 @@
 /* kernel.h for the Linux tests: as UnixLib's, but the registers are as wide
    as a pointer (on RISC OS they're the same thing), so the code that passes
    pointers in registers runs unchanged on a 64-bit machine. The test
-   supplies _kernel_swi: a fake Wimp and the modules Reel Edit calls. */
+   supplies _kernel_swi: a fake Wimp and the modules ReelEdit calls. */
 #ifndef FAKE_KERNEL_H
 #define FAKE_KERNEL_H
 #include <stdint.h>

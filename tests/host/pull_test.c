@@ -1,4 +1,4 @@
-/* pull_test - a project played the way Reel Edit plays it, with no threads.
+/* pull_test - a project played the way ReelEdit plays it, with no threads.
  *
  * Usage: pull_test project.mlt a.mp4 b.mp4
  * project.mlt: a.mp4 (75 frames) then b.mp4 (75 frames), with a 25-frame

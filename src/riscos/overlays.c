@@ -92,7 +92,7 @@ static void use(const char *path, int frame, int overlay, int picture)
     int i = re_project_overlay_add(A.proj, name, frame < 0 ? 0 : frame, 0);
     app_log("overlay %s at %d: %d", path, frame, i);
     if (i == RE_OVERLAY_CANT_OPEN) {
-        snprintf(t, sizeof(t), "Reel Edit can't open %.200s: is it a picture (PNG, JPEG, sprite) or a video?",
+        snprintf(t, sizeof(t), "ReelEdit can't open %.200s: is it a picture (PNG, JPEG, sprite) or a video?",
                  leaf(path));
         app_report(t);
         return;
@@ -124,7 +124,7 @@ static void use_sprite(const char *path, int index, int frame, int overlay)
     uint8_t *rgba = NULL;
     int w, h;
     if (index < 0 || index >= n || re_sprite_rgba(name, index, &rgba, &w, &h)) {
-        snprintf(t, sizeof(t), "Reel Edit can't read %.200s's sprite: its kind of sprite isn't known.", leaf(path));
+        snprintf(t, sizeof(t), "ReelEdit can't read %.200s's sprite: its kind of sprite isn't known.", leaf(path));
         app_report(t);
         return;
     }
@@ -142,7 +142,7 @@ static void use_sprite(const char *path, int index, int frame, int overlay)
     free(rgba);
     app_log("sprite %s (%s, %dx%d) as %s: %s", names[index], path, w, h, out, bad ? "not written" : "written");
     if (bad) {
-        snprintf(t, sizeof(t), "Reel Edit couldn't save the sprite as a PNG beside %.200s: is the disc locked or full?",
+        snprintf(t, sizeof(t), "ReelEdit couldn't save the sprite as a PNG beside %.200s: is the disc locked or full?",
                  leaf(path));
         app_report(t);
         return;
@@ -169,7 +169,7 @@ void ov_load(const char *path, int filetype, int frame, int overlay)
     }
     int n = re_sprites_names(app_mlt_name(path, unix_name, sizeof(unix_name)), O.names, RE_SPRITES_MAX);
     if (n < 1) {
-        snprintf(t, sizeof(t), "%.200s isn't a sprite file Reel Edit can read.", leaf(path));
+        snprintf(t, sizeof(t), "%.200s isn't a sprite file ReelEdit can read.", leaf(path));
         app_report(t);
         return;
     }

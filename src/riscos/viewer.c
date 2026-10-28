@@ -1,4 +1,4 @@
-/* viewer.c - Reel Edit's desktop front end (app.h): the task, the Viewer
+/* viewer.c - ReelEdit's desktop front end (app.h): the task, the Viewer
  * window and the editor's menus, keys and messages.
  *
  * Select on the icon bar icon opens the editor: the Viewer (the picture,
@@ -20,8 +20,7 @@
  * nothing is over them; stopped, they're drawn in the window (display.c).
  * The sound goes to SharedSoundBuffer (sound.c) and is the clock.
  *
- * Log: <Wimp$ScrapDir>.ReelEditLog (ReelEdit$Log names another file, or
- * "off"), started afresh each time.
+ * Log: logging.c (off unless turned on from the icon bar menu).
  *
  * Part of riscos-reeledit. GPL version 2 or later.
  */
@@ -33,7 +32,6 @@
 #include "display.h"
 #include "sound.h"
 
-#include <libavutil/cpu.h>
 #include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -128,7 +126,6 @@ static struct
     int log_nulls;
     char log_decoder[32];
     unsigned changes;     /* the project's, last seen */
-    FILE *log;
     /* A clip that doesn't say how long it is, being measured (null events),
        and the files dropped meanwhile, to be loaded after it */
     re_measure *ms;
@@ -147,37 +144,6 @@ static char empty_text[] = "", start_text[] = "|\x88", back_text[] = "\x88", fwd
             fit_text[] = "Fit", save_text[] = "Save";
 
 /* ---- the log, reports ---------------------------------------------------------- */
-
-void app_log(const char *fmt, ...)
-{
-    va_list ap;
-    if (!V.log)
-        return;
-    fprintf(V.log, "%7.2f ", ro_now_cs() / 100.0);
-    va_start(ap, fmt);
-    vfprintf(V.log, fmt, ap);
-    va_end(ap);
-    fputc('\n', V.log);
-    fflush(V.log);
-    /* (on the disc now, length and all: a log left open was lost, or
-       empty, when the machine had to be reset with Ctrl-Break) */
-    fsync(fileno(V.log));
-}
-
-static void lg_line(const char *line)
-{
-    app_log("%s", line);
-}
-
-static void log_open(void)
-{
-    const char *path = getenv("ReelEdit$Log");
-    if (path && !strcmp(path, "off"))
-        return;
-    V.log = fopen(path && *path ? path : "<Wimp$ScrapDir>.ReelEditLog", "w");
-    app_log(APP " %s", RE_VERSION);
-    app_log("NEON: %s", av_get_cpu_flags() & AV_CPU_FLAG_NEON ? "yes (MLT's NEON loops used)" : "no");
-}
 
 /* An error box: buttons (NULL: OK). Returns Wimp_ReportError's R1: 1 OK,
    3 the first of the buttons, 4 the second ... */
@@ -809,7 +775,7 @@ void app_source(const char *name)
     if (!prod || mlt_producer_get_length(prod) >= INT_MAX / 2) {
         if (prod)
             mlt_producer_close(prod);
-        app_report("Reel Edit can't show that clip.");
+        app_report("ReelEdit can't show that clip.");
         return;
     }
     if (!V.source)
@@ -908,7 +874,7 @@ void app_saved(const char *path)
 
 static void open_editor(void)
 {
-    int recovered = !A.proj && as_offer(); /* (a copy left by Reel Edit stopping: recovered, if wanted) */
+    int recovered = !A.proj && as_offer(); /* (a copy left by ReelEdit stopping: recovered, if wanted) */
     if (recovered) {
         px_recover(); /* (its proxies: used again) */
     } else if (!A.proj) {
@@ -1053,7 +1019,7 @@ static void measure_tick(void)
     int at = r > 0 && frames > 0 ? re_project_add_length(A.proj, V.ms_name, V.ms_frame, frames) : -1;
     if (at < 0) {
         char t[300];
-        snprintf(t, sizeof(t), "Reel Edit couldn't find how long %s is.", leaf(V.ms_path));
+        snprintf(t, sizeof(t), "ReelEdit couldn't find how long %s is.", leaf(V.ms_path));
         app_report(t);
         update_controls(1);
     } else {
@@ -1089,7 +1055,7 @@ void app_load(const char *path, int filetype, int frame)
         A.proj = re_project_open(name, 1);
         if (!A.proj) {
             char t[300];
-            snprintf(t, sizeof(t), "%s isn't an MLT project Reel Edit can open.", leaf(path));
+            snprintf(t, sizeof(t), "%s isn't an MLT project ReelEdit can open.", leaf(path));
             app_report(t);
             return;
         }
@@ -1130,7 +1096,7 @@ int app_add(const char *path, const char *name, int frame)
     }
     if (at < 0) {
         char t[300];
-        snprintf(t, sizeof(t), "Reel Edit can't open %s: is it a video?", leaf(path));
+        snprintf(t, sizeof(t), "ReelEdit can't open %s: is it a video?", leaf(path));
         app_report(t);
         return 0;
     }
@@ -1307,11 +1273,11 @@ static MENU(8) m_view = {"View", 7, 2, 7, 0, 520, 44, 0,
                           {2, -1, IT("The whole project     \x8bZ")}, {0, -1, IT("Attach the Timeline")},
                           {0, -1, IT("Snapping                   N")}, {0, 0, IT("Viewer size")},
                           {2, -1, IT("Clips...                  ^B")}, {0x80, -1, IT("Use proxies")}}};
-static MENU(5) m_main = {"Reel Edit", 7, 2, 7, 0, 340, 44, 0,
+static MENU(5) m_main = {"ReelEdit", 7, 2, 7, 0, 340, 44, 0,
                          {{0, 0, IT("File")}, {0, 0, IT("Edit")}, {0, 0, IT("Play")}, {0, 0, IT("View")},
                           {0x80, -1, IT("Video information...")}}};
-static MENU(2) m_bar = {"Reel Edit", 7, 2, 7, 0, 160, 44, 0,
-                        {{0, -1, IT("Info")}, {0x80, -1, IT("Quit")}}};
+static MENU(3) m_bar = {"ReelEdit", 7, 2, 7, 0, 200, 44, 0,
+                        {{0, -1, IT("Info")}, {0, -1, IT("Logging")}, {0x80, -1, IT("Quit")}}};
 static int menu_is; /* 0 none, 1 the icon bar's, 2 the editor's, 3 the Timeline's context menu (effects.c), 4 overlays.c's,
                        5 titles.c's, 6 exportbox.c's, 7 audiotracks.c's */
 static int menu_x, menu_y;
@@ -1474,6 +1440,8 @@ static void menu_select(int *b)
             snprintf(text, sizeof(text), APP " %s: a video editor for RISC OS, on the MLT framework.", RE_VERSION);
             app_report(text);
         } else if (b[0] == 1) {
+            lg_set(!lg_on());
+        } else if (b[0] == 2) {
             if (close_editor())
                 V.quit = 1;
         }
@@ -1685,9 +1653,10 @@ static void click(int *b)
         if (buttons & 2) {
             _kernel_swi_regs r;
             menu_is = 1;
+            menu_tick(&m_bar.item[1].flags, lg_on());
             r.r[1] = (intptr_t) &m_bar;
             r.r[2] = b[0] - 64;
-            r.r[3] = 96 + 44 * 2;
+            r.r[3] = 96 + 44 * 3;
             ro_swi(Wimp_CreateMenu, &r);
             re_display_check_covered();
         } else {
@@ -1773,7 +1742,7 @@ static const char *help_for(int win, int icon, int y)
     if (win == tl_window())
         return tl_help(y);
     if (win == -2)
-        return "This is the Reel Edit icon.|MClick Select to open the editor; drop video files on it to add them "
+        return "This is the ReelEdit icon.|MClick Select to open the editor; drop video files on it to add them "
                "to the project, or an MLT project to open it.";
     if (win == info_window())
         return "This window shows the clip's and the project's video information.";
@@ -1820,7 +1789,7 @@ static void message(int *b, int event)
             r.r[1] = (intptr_t) b;
             r.r[2] = to;
             ro_swi(Wimp_SendMessage, &r);
-            if (ask("Reel Edit's project has changes that haven't been saved. Discard them and quit?",
+            if (ask("ReelEdit's project has changes that haven't been saved. Discard them and quit?",
                     "Discard,Cancel")
                 == 3) {
                 engine_close(); /* (the engine first: it plays the project) */
@@ -1990,7 +1959,7 @@ int re_test_measuring(void) { return V.ms != NULL; }
 int re_test_busy(void) { return A.e && re_engine_busy(A.e); }
 const char *re_test_title(void) { return V.title; }
 int re_test_previews_playing(void) { return V.pl != NULL; }
-/* Reel Edit stopping without closing anything (as a reset would): the
+/* ReelEdit stopping without closing anything (as a reset would): the
    editor gone, its autosaved copy left */
 void re_test_crash(void)
 {
@@ -2004,7 +1973,7 @@ void re_test_crash(void)
     pv_close();
     cp_close();
     rr_close();
-    px_forget(); /* (a stop leaves them, as Reel Edit stopping would) */
+    px_forget(); /* (a stop leaves them, as ReelEdit stopping would) */
     re_project_close(A.proj);
     A.proj = NULL;
     A.path[0] = 0;
@@ -2028,10 +1997,7 @@ int reeledit_main(int argc, char **argv)
 
     memset(&V, 0, sizeof(V));
     snprintf(V.play_text, sizeof(V.play_text), "Play");
-    log_open();
-    re_display_set_log(lg_line);
-    if (V.log)
-        re_engine_messages(lg_line);
+    lg_start();
     r.r[0] = 380;
     r.r[1] = 0x4B534154; /* "TASK" */
     r.r[2] = (intptr_t) APP;
@@ -2129,7 +2095,6 @@ int reeledit_main(int argc, char **argv)
     r.r[0] = A.task;
     r.r[1] = 0x4B534154;
     ro_swi(Wimp_CloseDown, &r);
-    if (V.log)
-        fclose(V.log);
+    lg_end();
     return 0;
 }

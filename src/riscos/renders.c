@@ -122,7 +122,7 @@ static int next(void)
     snprintf(R.file, sizeof(R.file), DIR ".R%u", ++R.serial);
     const char *uout = app_mlt_name(R.file, unix_out, sizeof(unix_out));
     snprintf(cmd, sizeof(cmd),
-             "TaskWindow \"<ReelEdit$Dir>.!RunImage -export %s %s %d 2 %d %d %d\" -wimpslot 40960K -name \"Reel Edit "
+             "TaskWindow \"<ReelEdit$Dir>.!RunImage -export %s %s %d 2 %d %d %d\" -wimpslot 40960K -name \"ReelEdit "
              "render\" -task &%08X -txt &%08X -quit",
              uproj, uout, re_engine_height(A.e), can_hw(), R.job.start, R.job.start + R.job.length - 1, A.task,
              TXT_ID);

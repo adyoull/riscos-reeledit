@@ -1,7 +1,7 @@
-Reel Edit 0.3 (test 29)
-=======================
+ReelEdit 0.3 beta (test 30)
+===========================
 
-Reel Edit is a video editor for RISC OS, on the MLT multimedia framework
+ReelEdit is a video editor for RISC OS, on the MLT multimedia framework
 (the engine of Shotcut and Kdenlive), with the Raspberry Pi's video
 hardware through riscos-reelhwaccel: a Viewer and a Timeline with a video
 track (V1), an overlay track (V2: logos, titles, picture in picture) and
@@ -27,11 +27,13 @@ The editor
 Click the icon on the icon bar: the editor opens on a new project, the
 Viewer (the picture, the transport and a toolbar) with the Timeline under
 it.
+Menu over the icon: Info (the version), Logging (see Log, below) and
+Quit.
 
 Adding clips: drag video files from a directory display to the Timeline
 (they go in where they're dropped: before the clip there, or after it if
 dropped nearer its end), or to the Viewer or the icon bar icon (at the
-end). An MLT project (from Reel Edit, Shotcut, Kdenlive or melt) dropped
+end). An MLT project (from ReelEdit, Shotcut, Kdenlive or melt) dropped
 is opened.
 
 Files that don't say how long they are (raw MPEG-2 video, .m2v, and raw
@@ -40,7 +42,7 @@ far it's got show beside the transport, the desktop going on meanwhile,
 and the clip goes in when it's done (files dropped meanwhile follow it).
 Escape stops it. An .m2v file holds only the pictures: its sound, if it
 has any, is in a file of its own (.mp2, .ac3, .wav), which will go on an
-audio track when Reel Edit has them.
+audio track when ReelEdit has them.
 
 Dragging on the Timeline: drag a clip's end (near its right edge, or
 just past the last clip's end) to trim it, or its start (near its left
@@ -186,9 +188,15 @@ the window instead. *Set ReelEdit$NoOverlay 1 never uses the overlay.
 
 Log
 ---
-Reel Edit writes what it did to <Wimp$ScrapDir>.ReelEditLog (each time it
-starts). Please send it with any report. *Set ReelEdit$Log to another
-file, or "off".
+Logging is off as standard. To turn it on, press Menu over the icon on
+the icon bar and choose Logging (ticked when it's on); choose it again to
+turn it off. ReelEdit remembers the setting (in <Choices$Write>.ReelEdit).
+While it's on, ReelEdit writes what it does to <Wimp$ScrapDir>.ReelEditLog,
+starting afresh each time it runs. If something goes wrong, turn logging
+on, do it again, and send the log with your report.
+
+*Set ReelEdit$Log to a file name to log there from the start (or to "off"
+to keep it off), whatever the menu says.
 
 Licence
 -------

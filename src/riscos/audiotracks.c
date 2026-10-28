@@ -47,7 +47,7 @@ void au_load(const char *path, int frame)
                                  &k, &i);
     app_log("sound %s at %d: %d (A%d, %d)", path, frame, r, k + 1, i);
     if (r == RE_SOUND_CANT_OPEN || r == RE_SOUND_NO_SOUND) {
-        snprintf(t, sizeof(t), "%.200s has no sound Reel Edit can play.", leaf(path));
+        snprintf(t, sizeof(t), "%.200s has no sound ReelEdit can play.", leaf(path));
         app_report(t);
         return;
     }

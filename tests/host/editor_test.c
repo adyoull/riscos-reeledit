@@ -219,6 +219,22 @@ static unsigned ssb_heard(void)
 }
 
 static int script(int *b, int mask);
+void lg_start(void);
+int lg_on(void);
+void lg_end(void);
+void app_log(const char *fmt, ...);
+#define LOG_CHOICE "<Choices$Write>.ReelEdit.Logging" /* (the RISC OS name, as a file here) */
+static int choice_is(const char *want)
+{
+    char t[16] = "";
+    FILE *f = fopen(LOG_CHOICE, "r");
+    if (f) {
+        if (!fgets(t, sizeof(t), f))
+            t[0] = 0;
+        fclose(f);
+    }
+    return !strncmp(t, want, strlen(want)) && t[strlen(want)] == '\n';
+}
 
 _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out)
 {
@@ -698,9 +714,48 @@ static int script(int *b, int mask)
         return 17;
     case 1: /* Select on the icon: the editor, empty */
         CHECK(reports == 1, "a directory dropped wasn't refused");
+        /* ---- logging (on here: ReelEdit$Log): the icon bar menu's Logging turns it off, then on ---- */
+        CHECK(lg_on(), "logging isn't on with ReelEdit$Log set");
+        remove(LOG_CHOICE);
+        menus_mark = menus;
+        next(3000);
+        b[0] = 100; b[1] = 20; b[2] = 2; b[3] = -2; b[4] = BAR_ICON; /* Menu on the icon */
+        return 6;
+    case 3000:
+        CHECK(menus == menus_mark + 1, "Menu on the icon: %d menus", menus - menus_mark);
+        next(3001);
+        b[0] = 1; b[1] = -1; /* Logging */
+        return 9;
+    case 3001:
+        CHECK(!lg_on() && choice_is("off"), "Logging: still on (%d), or the choice not kept", lg_on());
+        app_log("not to be logged");
+        next(3002);
+        b[0] = 100; b[1] = 20; b[2] = 2; b[3] = -2; b[4] = BAR_ICON;
+        return 6;
+    case 3002:
+        next(3003);
+        b[0] = 1; b[1] = -1; /* Logging again */
+        return 9;
+    case 3003: {
+        CHECK(lg_on() && choice_is("on"), "Logging again: not on (%d), or the choice not kept", lg_on());
+        FILE *f = fopen("editor_test.log", "r");
+        char t[300];
+        int off = 0, on = 0, quiet = 1, header = 0;
+        while (f && fgets(t, sizeof(t), f)) {
+            off += strstr(t, "logging off") != NULL;
+            on += strstr(t, "logging on") != NULL;
+            header += strstr(t, "ReelEdit ") != NULL;
+            if (strstr(t, "not to be logged"))
+                quiet = 0;
+        }
+        if (f)
+            fclose(f);
+        CHECK(off == 1 && on == 1 && quiet && header == 2, "the log: off %d, on %d, quiet %d, headers %d (kept, added to)",
+              off, on, quiet, header);
         next(2);
         b[0] = 100; b[1] = 20; b[2] = 4; b[3] = -2; b[4] = BAR_ICON;
         return 6;
+    }
     case 2:
         shot("01-empty");
         CHECK(W[0].open && W[1].open, "the editor's windows aren't open (%d, %d)", W[0].open, W[1].open);
@@ -2108,7 +2163,7 @@ static int script(int *b, int mask)
         CHECK(windows_made == 5 && W[4].open, "T didn't open the Title window (%d windows, open %d)", windows_made,
               W[4].open);
         strcpy(re_test_title_line(0), "Hello");
-        strcpy(re_test_title_line(1), "Reel Edit");
+        strcpy(re_test_title_line(1), "ReelEdit");
         mark = menus;
         next(242);
         b[0] = W[4].box[0] + 600; b[1] = W[4].box[3] - 170; b[2] = 4; b[3] = TITLEW; b[4] = 6; /* Size: its menu */
@@ -2131,7 +2186,7 @@ static int script(int *b, int mask)
         re_title t;
         int i = re_project_overlays(re_test_project()) - 1;
         CHECK(i == mark && !re_project_overlay(re_test_project(), i, &o) && o.title && !strcmp(o.name, "Hello")
-                  && !re_project_title(re_test_project(), i, &t) && !strcmp(t.text, "Hello\nReel Edit") && t.size == 11
+                  && !re_project_title(re_test_project(), i, &t) && !strcmp(t.text, "Hello\nReelEdit") && t.size == 11
                   && o.place == RE_PLACE_LOWER_THIRD && !W[4].open,
               "Create: %d overlays (%d before), \"%s\", size %d, place %d, window open %d", i + 1, mark, o.name, t.size,
               o.place, W[4].open);
@@ -2146,7 +2201,7 @@ static int script(int *b, int mask)
     case 246:
         if (nulls)
             return 0;
-        CHECK(W[4].open && !strcmp(re_test_title_line(0), "Hello") && !strcmp(re_test_title_line(1), "Reel Edit"),
+        CHECK(W[4].open && !strcmp(re_test_title_line(0), "Hello") && !strcmp(re_test_title_line(1), "ReelEdit"),
               "Edit title...: open %d, \"%s\" / \"%s\"", W[4].open, re_test_title_line(0), re_test_title_line(1));
         strcpy(re_test_title_line(0), "Bye");
         next(247);
@@ -2342,7 +2397,7 @@ static int script(int *b, int mask)
         shot("28-viewer-large");
         next(300);
         return key_to(b, TL, 0x18D);
-    /* ---- autosave: an edit half a minute on makes a copy; Reel Edit "reset"; opened again: Recover,
+    /* ---- autosave: an edit half a minute on makes a copy; ReelEdit "reset"; opened again: Recover,
        the project as it was, still to be saved ---- */
     case 300: {
         if (nulls)
@@ -2898,6 +2953,22 @@ int main(int argc, char **argv)
     CHECK(!as, "quit: the autosaved copy left");
     if (as)
         fclose(as);
+    /* ---- logging off as standard: no ReelEdit$Log, no choice; then chosen ---- */
+    lg_end();
+    unsetenv("ReelEdit$Log");
+    remove(LOG_CHOICE);
+    lg_start();
+    CHECK(!lg_on(), "logging on with nothing asking for it");
+    FILE *ch = fopen(LOG_CHOICE, "w");
+    if (ch) {
+        fputs("on\n", ch);
+        fclose(ch);
+    }
+    lg_start();
+    CHECK(lg_on(), "logging off though chosen");
+    lg_end();
+    remove(LOG_CHOICE);
+    remove("<Wimp$ScrapDir>.ReelEditLog");
     printf("editor_test: %d polls, %d null events, %d Wimp_PollIdle, %u cs asleep; overlay %d pictures; "
            "%u bytes of sound\n", polls, null_events, idle_polls, slept, ov_displays, ssb_bytes);
     if (S.on)

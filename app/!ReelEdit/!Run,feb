@@ -1,4 +1,4 @@
-| !Run for !ReelEdit (Reel Edit, a video editor for RISC OS, on MLT)
+| !Run for !ReelEdit (ReelEdit, a video editor for RISC OS, on MLT)
 Set ReelEdit$Dir <Obey$Dir>
 IconSprites <ReelEdit$Dir>.!Sprites
 | "|<" keeps <ReelEdit$Dir> unexpanded; UnixLib expands it when MLT opens a file
@@ -6,9 +6,9 @@ Set MLT_DATA /|<ReelEdit$Dir>/share/mlt-7
 Set MLT_PROFILES_PATH /|<ReelEdit$Dir>/share/mlt-7/profiles/
 Set MLT_PRESETS_PATH /|<ReelEdit$Dir>/share/mlt-7/presets
 RMEnsure SharedUnixLibrary 1.16 IfThere System:Modules.SharedULib Then RMLoad System:Modules.SharedULib
-RMEnsure SharedUnixLibrary 1.16 Error Reel Edit needs SharedUnixLibrary 1.16 or later. Install it with PackMan.
+RMEnsure SharedUnixLibrary 1.16 Error ReelEdit needs SharedUnixLibrary 1.16 or later. Install it with PackMan.
 RMEnsure ARMEABISupport 0 IfThere System:Modules.ARMEABISupport Then RMLoad System:Modules.ARMEABISupport
-RMEnsure ARMEABISupport 0 Error Reel Edit needs the ARMEABISupport module. Install it with PackMan.
+RMEnsure ARMEABISupport 0 Error ReelEdit needs the ARMEABISupport module. Install it with PackMan.
 | Hardware acceleration: the VideoOverlay module (in !System on RISC OS 5);
 | quiet if it's missing (then the picture is drawn in the window)
 RMEnsure VideoOverlay 0.00 IfThere System:Modules.VideoOverlay Then RMLoad System:Modules.VideoOverlay

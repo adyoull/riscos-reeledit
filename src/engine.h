@@ -1,4 +1,4 @@
-/* engine.h - Reel Edit's player: a project (MLT XML) or a clip, played from
+/* engine.h - ReelEdit's player: a project (MLT XML) or a clip, played from
  * the Wimp's null events.
  *
  * It makes at most one picture each time it's called, and says how long the
@@ -30,7 +30,7 @@ typedef struct re_engine re_engine;
 int re_mlt_start(void);
 /* MLT's and FFmpeg's messages (information and worse) as lines to this,
    instead of stderr: the hardware decoders say there when they wait or
-   give up. */
+   give up. NULL: dropped (and MLT and FFmpeg told to say little). */
 void re_engine_messages(void (*line)(const char *line));
 
 /* A picture to show: yuv420p, three planes. Valid only during show(). */

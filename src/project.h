@@ -1,4 +1,4 @@
-/* project.h - a Reel Edit project: MLT's model (a tractor whose video track
+/* project.h - a ReelEdit project: MLT's model (a tractor whose video track
  * V1 is a playlist of clips and gaps), edited by the Timeline and played by
  * the engine. Saved and loaded as MLT XML, as Shotcut and Kdenlive keep
  * theirs. No RISC OS calls, so it's tested on Linux.

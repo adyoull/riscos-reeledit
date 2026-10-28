@@ -1,6 +1,6 @@
 # riscos-reeledit
 
-Reel Edit: a video editor for RISC OS, being written. Its engine is the
+ReelEdit: a video editor for RISC OS, being written. Its engine is the
 [MLT multimedia framework](https://www.mltframework.org) (the engine of
 Shotcut and Kdenlive), patched to run on RISC OS without threads, with the
 Raspberry Pi's video hardware through
@@ -20,7 +20,7 @@ yet run on RISC OS). The editing windows come next: see
 |---|---|
 | `patches/mlt/` | Five patches to MLT 7.42.0: static modules (no dlopen), no threads, the avformat module without threads, preferred (hardware) decoders with a fallback, opened only when used, and no needless picture conversions |
 | `build/` | Fetching the sources, the RISC OS build, the Linux build for the tests, the `!MLT` zip |
-| `src/engine.c` | Reel Edit's player: a project played from Wimp null events, a picture at a time |
+| `src/engine.c` | ReelEdit's player: a project played from Wimp null events, a picture at a time |
 | `src/project.c` | The editing model (MLT's tractor and playlists): add, split, remove, save, open |
 | `src/riscos/` | The desktop program, `!ReelEdit`: the editor (the Viewer and the Timeline, 0.2), the save box, overlay and sprite drawing, sound |
 | `app/!ReelEdit/` | The application's files (`build/package-reeledit.sh` makes the zip) |
@@ -53,7 +53,7 @@ threads, the same preferred decoders) and checks:
 - **melt** saves a two-clip crossfade as MLT XML and renders it, with no
   thread started (counted with an `LD_PRELOAD` wrapper), reporting progress;
   with `MLT_NO_THREADS=0` it uses threads again.
-- **pull_test** plays the project as Reel Edit does, a frame at a time from
+- **pull_test** plays the project as ReelEdit does, a frame at a time from
   the program's own loop: the right pictures in any order, the dissolve the
   same in yuv420p as in yuv422, and no threads.
 - **render_test**: a started consumer renders every frame's picture and
@@ -87,7 +87,7 @@ Each test was mutation-checked: breaking the code it covers makes it fail.
 ## Licence
 
 The patches to MLT are under MLT's licences (LGPL 2.1 or later for the
-framework and the modules used). Reel Edit's own code is GPL version 2 or
+framework and the modules used). ReelEdit's own code is GPL version 2 or
 later. Built with riscos-ffmpeg's FFmpeg (GPL with the hardware decoders),
 the programs as a whole are GPL version 2.
 

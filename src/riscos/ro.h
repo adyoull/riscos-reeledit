@@ -1,4 +1,4 @@
-/* ro.h - the RISC OS calls Reel Edit's front end makes: SWI numbers and a
+/* ro.h - the RISC OS calls ReelEdit's front end makes: SWI numbers and a
  * small helper. Everything goes through _kernel_swi (UnixLib's kernel.h),
  * so the Linux tests can stand in for the Wimp with a fake _kernel_swi.
  *

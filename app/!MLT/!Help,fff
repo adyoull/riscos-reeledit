@@ -1,7 +1,7 @@
 MLT 7.42.0 for RISC OS: engine test 5
 =====================================
 
-This is the engine of Reel Edit, a video editor for RISC OS that is being
+This is the engine of ReelEdit, a video editor for RISC OS that is being
 written: the MLT multimedia framework (https://www.mltframework.org), with
 its command-line player and renderer, melt. It is here so that MLT can be
 tried on real machines before the editor's windows are built on it.
@@ -32,7 +32,7 @@ mltbench
 --------
   mltbench FILE [FRAMES] [SCALE]
 times how long each picture of a clip or project takes to make, exactly as
-Reel Edit's preview will ask for them (on average, usually (the median),
+ReelEdit's preview will ask for them (on average, usually (the median),
 and the slowest); SCALE 0.5 makes them at half size.
   mltbench -raw FILE [FRAMES]
 decodes the file with FFmpeg alone, with the decoder MLT would choose: the

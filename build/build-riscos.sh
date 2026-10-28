@@ -99,7 +99,7 @@ cmake --install "$M/build" > /dev/null
 "$RISCOS_TOOLCHAIN/bin/elf2aif" -e "$O/melt.elf" "$O/melt,ff8" > /dev/null
 echo "built $O/melt,ff8"
 
-# ---- bench (tools/bench.c): pictures made as Reel Edit's player asks for them
+# ---- bench (tools/bench.c): pictures made as ReelEdit's player asks for them
 CC="$RISCOS_TOOLCHAIN/bin/arm-riscos-gnueabihf-gcc"
 "$CC" -O2 $CFLAGS_EXTRA -DMLT_STATIC_DEFINE -I"$STAGE/include/mlt-7" -I"$DK/include" "$TOP/tools/bench.c" "$TOP/src/still.c" "$TOP/src/title.c" -o "$O/bench" \
   -static -L"$STAGE/lib" -L"$DK/lib" -lmlt-static-modules -lmltcore -lmltavformat -lmltxml -lmltnormalize -lmlt-7 -lxml2 \
@@ -122,7 +122,7 @@ RE_VERSION=${RE_VERSION:-0.1}
 "$CC" -O2 -Wall $CFLAGS_EXTRA -DMLT_STATIC_DEFINE -DRE_VERSION="\"$RE_VERSION\"" -I"$STAGE/include/mlt-7" -I"$DK/include" \
   "$TOP/src/engine.c" "$TOP/src/project.c" "$TOP/src/dissolve.c" "$TOP/src/fade.c" "$TOP/src/clipsound.c" "$TOP/src/overlay.c" "$TOP/src/track.c" "$TOP/src/audio.c" "$TOP/src/source.c" "$TOP/src/clipboard.c" "$TOP/src/speed.c" "$TOP/src/render.c" "$TOP/src/proxy.c" "$TOP/src/still.c" "$TOP/src/title.c" "$TOP/src/export.c" "$TOP/src/sprites.c" "$TOP/src/measure.c" "$TOP/src/media.c" \
   "$TOP/src/riscos/viewer.c" "$TOP/src/riscos/timeline.c" \
-  "$TOP/src/riscos/savebox.c" "$TOP/src/riscos/info.c" "$TOP/src/riscos/effects.c" "$TOP/src/riscos/marks.c" "$TOP/src/riscos/overlays.c" "$TOP/src/riscos/titles.c" "$TOP/src/riscos/exportbox.c" "$TOP/src/riscos/audiotracks.c" "$TOP/src/riscos/autosave.c" "$TOP/src/riscos/clips.c" "$TOP/src/riscos/previews.c" "$TOP/src/riscos/copypaste.c" "$TOP/src/riscos/renders.c" "$TOP/src/riscos/proxies.c" "$TOP/src/riscos/fonts.c" "$TOP/src/riscos/display.c" "$TOP/src/riscos/sound.c" \
+  "$TOP/src/riscos/savebox.c" "$TOP/src/riscos/info.c" "$TOP/src/riscos/effects.c" "$TOP/src/riscos/marks.c" "$TOP/src/riscos/overlays.c" "$TOP/src/riscos/titles.c" "$TOP/src/riscos/exportbox.c" "$TOP/src/riscos/audiotracks.c" "$TOP/src/riscos/autosave.c" "$TOP/src/riscos/clips.c" "$TOP/src/riscos/previews.c" "$TOP/src/riscos/copypaste.c" "$TOP/src/riscos/renders.c" "$TOP/src/riscos/proxies.c" "$TOP/src/riscos/logging.c" "$TOP/src/riscos/fonts.c" "$TOP/src/riscos/display.c" "$TOP/src/riscos/sound.c" \
   "$TOP/src/riscos/main.c" -o "$O/reeledit" \
   -static -L"$STAGE/lib" -L"$DK/lib" -lmlt-static-modules -lmltcore -lmltavformat -lmltxml -lmltnormalize -lmlt-7 -lxml2 \
   $FF_LIBS -lm

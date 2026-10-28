@@ -1,4 +1,4 @@
-/* project.c - a Reel Edit project (project.h).
+/* project.c - a ReelEdit project (project.h).
  *
  * The model is MLT's own, as Shotcut builds it: a tractor whose tracks are
  * playlists. V1 is the first playlist (Shotcut's "background" track, black,

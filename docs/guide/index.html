@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Reel Edit User Guide</title>
+<title>ReelEdit User Guide</title>
 <style>
 :root { --ink:#1d1d1f; --paper:#fffdf7; --accent:#b4471f; --soft:#f3efe4; --line:#d9d2bf;
         --tip:#2f7d4f; --rem:#2a5d9f; --warn:#b3261e; --tech:#6b4fa0; --try:#9a6a00; }
@@ -49,10 +49,10 @@ a { color:#1f5fa8; }
 <body>
 <header class="cover">
 <div>
-<h1>Reel Edit User Guide</h1>
+<h1>ReelEdit User Guide</h1>
 <p>Editing video on RISC OS</p>
 <p>Start here if you've never edited video before. If you have, the Technical Stuff boxes and Part V are for you.</p>
-<span class="badge">Reel Edit 0.3 (test 29)</span>
+<span class="badge">ReelEdit 0.3 Beta</span>
 </div>
 </header>
 <main>
@@ -62,7 +62,7 @@ a { color:#1f5fa8; }
 <ul>
 <li><a href="#intro">Introduction</a></li>
 <li><a href="#part1">Part I: Getting Started</a>
-<ul><li><a href="#ch1">1. What Reel Edit does</a></li><li><a href="#ch2">2. Installing and starting</a></li><li><a href="#ch3">3. Finding your way round the screen</a></li></ul></li>
+<ul><li><a href="#ch1">1. What ReelEdit does</a></li><li><a href="#ch2">2. Installing and starting</a></li><li><a href="#ch3">3. Finding your way round the screen</a></li></ul></li>
 <li><a href="#part2">Part II: Editing Basics</a>
 <ul><li><a href="#ch4">4. Adding clips</a></li><li><a href="#ch5">5. Playing and moving about</a></li><li><a href="#ch6">6. Cutting, trimming and moving</a></li><li><a href="#ch7">7. Marks, extract and lift</a></li><li><a href="#ch8">8. Cut, copy and paste</a></li></ul></li>
 <li><a href="#part3">Part III: Pictures and Sound</a>
@@ -78,12 +78,15 @@ a { color:#1f5fa8; }
 <!-- ======================================================================= -->
 <h2 class="part" id="intro">Introduction</h2>
 
-<p>If you have some video you'd like to tidy up (clips from a phone, the school play, something for the club's website), Reel Edit lets you do it on RISC OS. You can cut out the dull bits, put clips in order, add music and titles, and save the result as an MP4 that plays anywhere.</p>
+<p>If you have some video you'd like to tidy up (clips from a phone, the school play, something for the club's website), ReelEdit lets you do it on RISC OS. You can cut out the dull bits, put clips in order, add music and titles, and save the result as an MP4 that plays anywhere.</p>
 
 <h4>About this guide</h4>
-<p>The guide is supplied with Reel Edit as <code>!ReelEdit.Guide.index/html</code>. To read it, Shift-double-click <b>!ReelEdit</b> to open the application directory, open <b>Guide</b> and double-click <b>index/html</b>. It opens in NetSurf.</p>
+<p>The guide is supplied with ReelEdit as <code>!ReelEdit.Guide.index/html</code>. To read it, Shift-double-click <b>!ReelEdit</b> to open the application directory, open <b>Guide</b> and double-click <b>index/html</b>. It opens in NetSurf.</p>
 <p>You don't need to read it in order. If all you want is a title, go to <a href="#ch12">Chapter 12</a>. If you're new to video editing, start at <a href="#part1">Part I</a> and do the <b>Try it</b> examples as you go. By the end of <a href="#part2">Part II</a> you'll have made your first edit.</p>
-<p>The pictures are screenshots of Reel Edit running on RISC OS. The test clips are colour bars with a moving line across them, which makes it easy to see which frame you're on.</p>
+<p>The pictures are screenshots of ReelEdit running on RISC OS. The test clips are colour bars with a moving line across them, which makes it easy to see which frame you're on.</p>
+
+<h4>This is a beta version</h4>
+<p>ReelEdit 0.3 is a <b>beta</b>: everything in this guide works, but it's still being tested, and you may come across bugs. Save your work often (ReelEdit also keeps a backup, see <a href="#ch16">Chapter 16</a>). If something goes wrong, the most useful thing you can send with your report is a log of what happened. Logging is off as standard, so turn it on first; <a href="#ch2">Chapter 2</a> shows you how.</p>
 
 <h4>What we assume you know</h4>
 <p>Not much. You should know the three mouse buttons (Select on the left, Menu in the middle, Adjust on the right), and how to drag a file from a Filer window into a program. You don't need to know anything about video.</p>
@@ -96,15 +99,15 @@ a { color:#1f5fa8; }
 <div class="box try"><b class="label">TRY IT</b>A short exercise to do with your own clips.</div>
 
 <h4>Where to start</h4>
-<p>If Reel Edit isn't installed yet, start at <a href="#ch2">Chapter 2</a>. If it is, go to <a href="#ch3">Chapter 3</a>. The <a href="#appA">Appendix</a> lists every key and menu on one page; it's worth printing.</p>
+<p>If ReelEdit isn't installed yet, start at <a href="#ch2">Chapter 2</a>. If it is, go to <a href="#ch3">Chapter 3</a>. The <a href="#appA">Appendix</a> lists every key and menu on one page; it's worth printing.</p>
 
 <!-- ======================================================================= -->
-<h2 class="part" id="part1">Part I: Getting Started<small>Installing Reel Edit and finding your way round</small></h2>
+<h2 class="part" id="part1">Part I: Getting Started<small>Installing ReelEdit and finding your way round</small></h2>
 
-<h3 class="chapter" id="ch1"><span>1</span> What Reel Edit does</h3>
+<h3 class="chapter" id="ch1"><span>1</span> What ReelEdit does</h3>
 
-<p>Reel Edit is a <b>non-linear</b> video editor, which means you can work on any part of your film in any order. You can shorten one clip, slip another into the middle, put music under the whole thing and change your mind as often as you like.</p>
-<p>Your video files are never changed. A Reel Edit <i>project</i> is just a list of which parts of which files go where. A new video file is only written when you <b>export</b>.</p>
+<p>ReelEdit is a <b>non-linear</b> video editor, which means you can work on any part of your film in any order. You can shorten one clip, slip another into the middle, put music under the whole thing and change your mind as often as you like.</p>
+<p>Your video files are never changed. A ReelEdit <i>project</i> is just a list of which parts of which files go where. A new video file is only written when you <b>export</b>.</p>
 
 <h4>What you can do with it</h4>
 <ul>
@@ -122,28 +125,44 @@ a { color:#1f5fa8; }
 <h4>What you need</h4>
 <table>
 <tr><th>You need</th><th>Because</th></tr>
-<tr><td>RISC OS 5 on a Raspberry Pi 2, 3 or 4 (ARMv7 with VFP)</td><td>Reel Edit is built for these processors.</td></tr>
-<tr><td>SharedUnixLibrary 1.16 or later, and ARMEABISupport</td><td>Reel Edit uses them. You can get both through PackMan. Reel Edit checks for them when it starts.</td></tr>
+<tr><td>RISC OS 5 on a Raspberry Pi 2, 3 or 4 (ARMv7 with VFP)</td><td>ReelEdit is built for these processors.</td></tr>
+<tr><td>SharedUnixLibrary 1.16 or later, and ARMEABISupport</td><td>ReelEdit uses them. You can get both through PackMan. ReelEdit checks for them when it starts.</td></tr>
 <tr><td>SharedSoundBuffer and StreamManager (ssb.zip), with SharedSound</td><td>For sound. Without them you get the picture but no sound.</td></tr>
 <tr><td>The VideoOverlay module (supplied with RISC OS 5 in <code>!System</code>)</td><td>To show the picture through the Pi's video hardware while playing. Without it the picture is drawn in the window, which is slower.</td></tr>
 <tr><td><code>gpu_mem=128</code> in the Pi's <code>config.txt</code></td><td>Gives the Pi's graphics processor (the VideoCore) enough memory to decode 1080p and to encode when you export.</td></tr>
 </table>
 
-<div class="box tech"><b class="label">TECHNICAL STUFF</b>Reel Edit is built on MLT, the framework behind Shotcut and Kdenlive on other systems, and uses FFmpeg to read and write video. Projects are saved as MLT XML. The VideoCore decodes H.264 (through riscos-reelhwaccel), and a Pi 4 also decodes HEVC in hardware. The ARM decodes everything else.</div>
+<div class="box tech"><b class="label">TECHNICAL STUFF</b>ReelEdit is built on MLT, the framework behind Shotcut and Kdenlive on other systems, and uses FFmpeg to read and write video. Projects are saved as MLT XML. The VideoCore decodes H.264 (through riscos-reelhwaccel), and a Pi 4 also decodes HEVC in hardware. The ARM decodes everything else.</div>
 
 <h3 class="chapter" id="ch2"><span>2</span> Installing and starting</h3>
 
 <ol class="steps">
-<li>Unzip <code>ReelEdit-0.3-test29.zip</code> with SparkFS or !Unzip, and copy <b>!ReelEdit</b> to where you keep your applications.</li>
+<li>Unzip the ReelEdit archive with SparkFS or !Unzip, and copy <b>!ReelEdit</b> to where you keep your applications.</li>
 <li>Double-click <b>!ReelEdit</b>. Its icon, a film reel, appears on the right of the icon bar.</li>
 <li>Click the icon. The editor opens with a new, empty project.</li>
 </ol>
-<figure><img src="images/iconbar.png" alt="The Reel Edit icon on the icon bar"><figcaption>The film reel on the icon bar is Reel Edit.</figcaption></figure>
+<figure><img src="images/iconbar.png" alt="The ReelEdit icon on the icon bar"><figcaption>The film reel on the icon bar is ReelEdit.</figcaption></figure>
 <figure><img src="images/editor-empty.png" alt="The editor, empty"><figcaption>The editor as it first opens: the Viewer at the top, the Timeline below.</figcaption></figure>
 
-<div class="box rem"><b class="label">REMEMBER</b>Press Menu over the icon for <b>Info</b> (the version number) and <b>Quit</b>. If you have unsaved changes, Reel Edit asks before quitting.</div>
+<h4>The icon bar menu</h4>
+<p>Press Menu over the icon for these:</p>
+<figure><img src="images/iconbar-menu.png" alt="The icon bar menu, with Logging ticked"><figcaption>The icon bar menu, with logging turned on.</figcaption></figure>
+<ul>
+<li><b>Info</b> tells you which version you have.</li>
+<li><b>Logging</b> turns the log on or off. A tick means it's on. ReelEdit remembers your choice the next time it starts.</li>
+<li><b>Quit</b> quits ReelEdit. If you have unsaved changes, it asks first.</li>
+</ul>
+<h4>Turning on logging</h4>
+<p>Logging is off as standard. When it's on, ReelEdit writes a note of everything it does (each edit, how each clip is being decoded, how smoothly it's playing) to a file called <code>ReelEditLog</code> in the scrap directory, <code>&lt;Wimp$ScrapDir&gt;</code>. You don't need it for everyday use, but if you have a problem, it shows the author what happened.</p>
+<ol class="steps">
+<li>Press Menu over the ReelEdit icon and choose <b>Logging</b>.</li>
+<li>Do whatever caused the problem again.</li>
+<li>Send the file <code>&lt;Wimp$ScrapDir&gt;.ReelEditLog</code> with your report. (To find it, type <code>Filer_OpenDir &lt;Wimp$ScrapDir&gt;</code> at the command line, which you get by pressing F12, or press Ctrl-F12 for a task window.)</li>
+<li>Choose <b>Logging</b> again to turn it off.</li>
+</ol>
+<div class="box rem"><b class="label">REMEMBER</b>The log starts afresh each time ReelEdit starts, so copy it somewhere safe before you run ReelEdit again.</div>
 
-<div class="box warn"><b class="label">WARNING</b>If you see "Reel Edit needs SharedUnixLibrary 1.16 or later" or "needs the ARMEABISupport module", install them with PackMan and try again.</div>
+<div class="box warn"><b class="label">WARNING</b>If you see "ReelEdit needs SharedUnixLibrary 1.16 or later" or "needs the ARMEABISupport module", install them with PackMan and try again.</div>
 
 <h3 class="chapter" id="ch3"><span>3</span> Finding your way round the screen</h3>
 <p class="intro">It's worth spending a few minutes on this chapter before you start editing.</p>
@@ -197,7 +216,7 @@ a { color:#1f5fa8; }
 
 <div class="box try"><b class="label">TRY IT</b><b>A two-clip project.</b>
 <ol class="steps">
-<li>Click the Reel Edit icon to open an empty project.</li>
+<li>Click the ReelEdit icon to open an empty project.</li>
 <li>Drag a video from a Filer window on to the Viewer. It appears on V1, and its first frame appears in the Viewer.</li>
 <li>Drag a second video on to the Viewer. It goes after the first.</li>
 <li>Press <kbd>Space</kbd> to play, and <kbd>Space</kbd> again to stop.</li>
@@ -206,13 +225,13 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 
 <h4>What you can drop</h4>
 <ul>
-<li><b>Video files</b> that FFmpeg can read, including MP4 and MOV (H.264 or HEVC), MKV, WebM, AVI and MPEG. The Pi's VideoCore decodes H.264 up to 1080p. For other kinds of video Reel Edit makes a proxy so that it plays smoothly (<a href="#ch15">Chapter 15</a>).</li>
+<li><b>Video files</b> that FFmpeg can read, including MP4 and MOV (H.264 or HEVC), MKV, WebM, AVI and MPEG. The Pi's VideoCore decodes H.264 up to 1080p. For other kinds of video ReelEdit makes a proxy so that it plays smoothly (<a href="#ch15">Chapter 15</a>).</li>
 <li><b>Pictures</b> (PNG, JPEG and sprite files). On V1 a picture becomes a 5-second clip; on V2 it becomes an overlay (<a href="#ch11">Chapter 11</a>).</li>
 <li><b>Sound files</b> (WAV, MP3, AAC, Ogg, FLAC). Drop these on the audio rows (<a href="#ch10">Chapter 10</a>).</li>
-<li><b>A project</b> (MLT XML, from Reel Edit, Shotcut, Kdenlive or melt), which is opened.</li>
+<li><b>A project</b> (MLT XML, from ReelEdit, Shotcut, Kdenlive or melt), which is opened.</li>
 </ul>
 
-<div class="box tech"><b class="label">TECHNICAL STUFF</b>Some files don't record how long they are, such as raw MPEG-2 (<code>.m2v</code>) and raw H.264. Reel Edit reads these right through first to find out. While it does, "Measuring" and its progress appear next to the transport controls, and you can carry on using the desktop. <kbd>Escape</kbd> cancels it. Anything else you drop in the meantime is added afterwards.</div>
+<div class="box tech"><b class="label">TECHNICAL STUFF</b>Some files don't record how long they are, such as raw MPEG-2 (<code>.m2v</code>) and raw H.264. ReelEdit reads these right through first to find out. While it does, "Measuring" and its progress appear next to the transport controls, and you can carry on using the desktop. <kbd>Escape</kbd> cancels it. Anything else you drop in the meantime is added afterwards.</div>
 
 <h3 class="chapter" id="ch5"><span>5</span> Playing and moving about</h3>
 
@@ -303,7 +322,7 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <tr><td><kbd>;</kbd> (Lift)</td><td>Remove the marked stretch and leave a gap.</td></tr>
 <tr><td>Play &gt; Clear the marks</td><td>Remove both marks.</td></tr>
 </table>
-<div class="box tip"><b class="label">TIP</b>Extract is the easy way to cut something out of the middle of a clip, like the moment someone walks in front of the camera. Mark in just before it, mark out just after, and press <kbd>'</kbd>. Reel Edit does the splitting for you.</div>
+<div class="box tip"><b class="label">TIP</b>Extract is the easy way to cut something out of the middle of a clip, like the moment someone walks in front of the camera. Mark in just before it, mark out just after, and press <kbd>'</kbd>. ReelEdit does the splitting for you.</div>
 
 <h3 class="chapter" id="ch8"><span>8</span> Cut, copy and paste</h3>
 <p>Select a clip, an overlay or a sound, then:</p>
@@ -348,7 +367,7 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <div class="box tip"><b class="label">TIP</b>If a picture-in-picture video's sound gets in the way, mute it. To keep music in the background while someone is talking, set the music to −12 dB.</div>
 
 <h4>Music and sound effects</h4>
-<p>Drop a sound file, or a video whose sound you want, on the audio row under V1. It goes on track A1, starting where you dropped it. If you drop another sound where one is already playing, it goes on the track below, so you can layer sound effects. Reel Edit adds tracks as you need them.</p>
+<p>Drop a sound file, or a video whose sound you want, on the audio row under V1. It goes on track A1, starting where you dropped it. If you drop another sound where one is already playing, it goes on the track below, so you can layer sound effects. ReelEdit adds tracks as you need them.</p>
 <figure><img src="images/audio-stacked.png" alt="Two stacked sounds"><figcaption>Two tones dropped so that they overlap. The second went on to its own track, A2.</figcaption></figure>
 <p>Drag a sound by its middle to move it, or by its ends to trim it. Press Menu over it for its menu:</p>
 <figure><img src="images/sound-menu.png" alt="The Sound menu for a sound on an audio track"><figcaption>The menu for a sound on an audio track.</figcaption></figure>
@@ -392,7 +411,7 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <tr><td>Place</td><td>Centre, the four corners, Lower third</td></tr>
 </table>
 <p>Type one or two lines of text and click <b>Create</b>. (Return takes you to the second line; Return on the second line does the same as Create.) The title goes on V2, in the lower third of the picture, for 5 seconds.</p>
-<div class="box rem"><b class="label">REMEMBER</b>A title needs an empty part of V2 at the playhead. If another overlay is there, or the playhead is at the end of the project, Reel Edit tells you there's no room.</div>
+<div class="box rem"><b class="label">REMEMBER</b>A title needs an empty part of V2 at the playhead. If another overlay is there, or the playhead is at the end of the project, ReelEdit tells you there's no room.</div>
 <figure><img src="images/title-on-video.png" alt="A title over the video"><figcaption>"My Holiday" in Homerton Bold with a shadow, in the lower third.</figcaption></figure>
 <p>To change a title, press Menu over it and choose <b>Edit title…</b>. Make your changes and click <b>Change</b>. One press of <kbd>F8</kbd> undoes all of them.</p>
 <div class="box rem"><b class="label">REMEMBER</b>A title is an overlay, so you can move it, trim it, fade it and change its opacity like any other. The only difference is that its size is set in the Title window, not on the overlay menu.</div>
@@ -433,10 +452,10 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 
 <h3 class="chapter" id="ch15"><span>15</span> Smooth playback: render previews and proxies</h3>
 <h4>Why playback sometimes stutters</h4>
-<p>A plain 1080p clip needs one picture decoded for each frame, which the Pi's VideoCore does in about 10 milliseconds. Picture in picture needs two, and Reel Edit can only use one VideoCore decoder, so the second picture is decoded by the ARM, which takes about 43 milliseconds. At 25 frames a second there are only 40 milliseconds per frame. Fades, dissolves, titles and speed changes add work too. To keep the picture in step with the sound, Reel Edit drops frames it can't get ready in time, so busy parts of the project look jerky.</p>
+<p>A plain 1080p clip needs one picture decoded for each frame, which the Pi's VideoCore does in about 10 milliseconds. Picture in picture needs two, and ReelEdit can only use one VideoCore decoder, so the second picture is decoded by the ARM, which takes about 43 milliseconds. At 25 frames a second there are only 40 milliseconds per frame. Fades, dissolves, titles and speed changes add work too. To keep the picture in step with the sound, ReelEdit drops frames it can't get ready in time, so busy parts of the project look jerky.</p>
 
 <h4>Render previews</h4>
-<p>Press <kbd>Ctrl-R</kbd> (or choose <b>Play &gt; Render previews</b>) and Reel Edit renders each busy stretch to a video file in the background. When you play, those stretches play from the rendered files, which is much less work. A thin bar under the ruler shows how each stretch is doing:</p>
+<p>Press <kbd>Ctrl-R</kbd> (or choose <b>Play &gt; Render previews</b>) and ReelEdit renders each busy stretch to a video file in the background. When you play, those stretches play from the rendered files, which is much less work. A thin bar under the ruler shows how each stretch is doing:</p>
 <figure><img src="images/render-bars.png" alt="Render bars: red, amber, green"><figcaption>The same picture-in-picture stretch three times: red (not rendered), amber while rendering (the amber part shows how far it has got), and green (rendered).</figcaption></figure>
 <ul>
 <li>A stretch counts as busy if it has an overlay or title, a dissolve, a fade, or a clip at a different speed. Busy stretches less than 2 seconds apart are rendered together.</li>
@@ -445,13 +464,13 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 </ul>
 
 <h4>Proxies</h4>
-<p>Some video is always hard work to decode: HEVC (H.265, which most phones now record), VP9, 4K, or anything else the VideoCore can't handle. For these files, Reel Edit makes a <b>proxy</b> automatically. A proxy is a small copy, 360 lines high with a keyframe every 5 frames, so it decodes quickly and you can jump about in it easily. While proxies are being made, the Timeline's title bar says so:</p>
+<p>Some video is always hard work to decode: HEVC (H.265, which most phones now record), VP9, 4K, or anything else the VideoCore can't handle. For these files, ReelEdit makes a <b>proxy</b> automatically. A proxy is a small copy, 360 lines high with a keyframe every 5 frames, so it decodes quickly and you can jump about in it easily. While proxies are being made, the Timeline's title bar says so:</p>
 <figure><img src="images/making-proxies.png" alt="Making proxies"><figcaption>"Timeline (making proxies: 0 of 1 made)" after dropping in a 1080p clip.</figcaption></figure>
 <ul>
 <li>Each proxy is used in the Viewer and on the Timeline as soon as it's ready. Clips keep their own names.</li>
 <li>Saving, exporting, render previews and autosave always use your original files, at full quality.</li>
 <li><b>View &gt; Use proxies</b> turns proxies off and on.</li>
-<li>Proxies are deleted when you close the editor or quit. If Reel Edit crashes they're kept, so they can be used again when you recover the project (<a href="#ch16">Chapter 16</a>).</li>
+<li>Proxies are deleted when you close the editor or quit. If ReelEdit crashes they're kept, so they can be used again when you recover the project (<a href="#ch16">Chapter 16</a>).</li>
 <li>Making a proxy can take several minutes on a slow machine. Until it's ready, the clip plays from the original file.</li>
 </ul>
 <h4>How much difference do proxies make?</h4>
@@ -469,9 +488,9 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <figure><img src="images/save-as.png" alt="The Save as box"><figcaption>The Save as box.</figcaption></figure>
 <p>Projects are saved as MLT XML files (filetype XML). The Viewer's title bar shows the project's full path, with a star (*) after it if there are unsaved changes.</p>
 <h4>Autosave</h4>
-<p>When you have unsaved changes, Reel Edit keeps a backup copy of the project in <code>&lt;Choices$Write&gt;.ReelEdit.Autosave</code> (usually inside <code>!Boot.Choices</code>), updated at most every 30 seconds. It's deleted when you save, close the editor or quit. So if it's still there next time, Reel Edit didn't close properly, perhaps because of a crash or a power cut.</p>
+<p>When you have unsaved changes, ReelEdit keeps a backup copy of the project in <code>&lt;Choices$Write&gt;.ReelEdit.Autosave</code> (usually inside <code>!Boot.Choices</code>), updated at most every 30 seconds. It's deleted when you save, close the editor or quit. So if it's still there next time, ReelEdit didn't close properly, perhaps because of a crash or a power cut.</p>
 <h4>Recovering a project</h4>
-<p>If a backup copy is found when you open the editor, Reel Edit offers to recover it:</p>
+<p>If a backup copy is found when you open the editor, ReelEdit offers to recover it:</p>
 <figure><img src="images/recover.png" alt="The recovery question"><figcaption>After a crash: Recover or Discard.</figcaption></figure>
 <ul>
 <li><b>Recover</b> opens the project as it was when the backup was made. It's marked as unsaved, so remember to save it. Any proxies made for it are used again.</li>
@@ -491,7 +510,7 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <p>Drag the file icon to a Filer window, or type a full file name and click <b>Export</b>. (The name you start with has no directory in it, so it needs one of these.) The export runs in the background, so you can carry on editing, and the window shows how far it has got. <b>Stop</b> cancels it and deletes the unfinished file.</p>
 <figure><img src="images/exporting.png" alt="Exporting"><figcaption>An export in progress: "Exporting: 14% (42 of 285 frames)".</figcaption></figure>
 <figure><img src="images/exported.png" alt="Exported"><figcaption>Finished: "Exported: holiday/mp4".</figcaption></figure>
-<div class="box tech"><b class="label">TECHNICAL STUFF</b>The file is an MP4 with H.264 video and AAC sound (48 kHz, stereo), with its index at the start so it can be streamed. It's encoded by the VideoCore (h264_encvchiq) if you tick the option, otherwise by libx264, or failing that MPEG-4 part 2. The three qualities use 0.07, 0.10 and 0.15 bits per pixel. Reel Edit runs the export as a separate task in a TaskWindow, working from a copy of the project, so anything you edit meanwhile doesn't affect it.</div>
+<div class="box tech"><b class="label">TECHNICAL STUFF</b>The file is an MP4 with H.264 video and AAC sound (48 kHz, stereo), with its index at the start so it can be streamed. It's encoded by the VideoCore (h264_encvchiq) if you tick the option, otherwise by libx264, or failing that MPEG-4 part 2. The three qualities use 0.07, 0.10 and 0.15 bits per pixel. ReelEdit runs the export as a separate task in a TaskWindow, working from a copy of the project, so anything you edit meanwhile doesn't affect it.</div>
 
 <!-- ======================================================================= -->
 <h2 class="part" id="part5">Part V: The Part of Tens<small>Short lists for quick reference</small></h2>
@@ -521,21 +540,21 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <tr><td>"Its speed can't be changed"</td><td>Pictures have no speed, and you can't change the speed of a clip with a dissolve at either end. Delete the dissolve first.</td></tr>
 <tr><td>"There's no room to paste it there" (or no room for a title)</td><td>V2 and the audio tracks need an empty stretch at the playhead, inside the project. Move the playhead, or make some room.</td></tr>
 <tr><td>Exporting is slow</td><td>Tick <b>VideoCore encoder</b> (on a Pi with the VCHIQ module), or choose a smaller size.</td></tr>
-<tr><td>Reel Edit crashed</td><td>Open it again and choose <b>Recover</b>. Then please send the log file (see below) to the author.</td></tr>
-<tr><td>Something odd happened and you want to know why</td><td>Look at the log, <code>&lt;Wimp$ScrapDir&gt;.ReelEditLog</code>. It records what Reel Edit has been doing.</td></tr>
+<tr><td>ReelEdit crashed</td><td>Open it again and choose <b>Recover</b>. If you can make it happen again, turn on logging (<a href="#ch2">Chapter 2</a>), repeat what you did, and send the log to the author.</td></tr>
+<tr><td>Something odd happened and you want to know why</td><td>Turn on logging from the icon bar menu, do it again, then look at <code>&lt;Wimp$ScrapDir&gt;.ReelEditLog</code>. It records what ReelEdit has been doing.</td></tr>
 </table>
 
 <h3 class="chapter" id="ch20"><span>20</span> Ten things for experienced users</h3>
 <ol>
-<li><b>Projects are MLT XML.</b> Reel Edit uses Shotcut's track layout: V1 is a playlist, and V2 and the audio tracks are marked the way Shotcut marks them, with <code>store=shotcut</code>. melt can play the files, and Shotcut should be able to open them. Settings of Reel Edit's own (overlay place, size, opacity and fades, and the Clips list) are kept in <code>shotcut:reeledit_*</code> properties.</li>
-<li><b>The log</b>, <code>&lt;Wimp$ScrapDir&gt;.ReelEditLog</code>, records edits, which decoder each clip uses, playback statistics every second, and render and proxy jobs. It starts afresh each time Reel Edit runs. Set <code>ReelEdit$Log</code> to a file name to write it somewhere else, or to <code>off</code> to turn it off.</li>
+<li><b>Projects are MLT XML.</b> ReelEdit uses Shotcut's track layout: V1 is a playlist, and V2 and the audio tracks are marked the way Shotcut marks them, with <code>store=shotcut</code>. melt can play the files, and Shotcut should be able to open them. Settings of ReelEdit's own (overlay place, size, opacity and fades, and the Clips list) are kept in <code>shotcut:reeledit_*</code> properties.</li>
+<li><b>The log</b>, <code>&lt;Wimp$ScrapDir&gt;.ReelEditLog</code>, records edits, which decoder each clip uses, playback statistics every second, and render and proxy jobs, along with MLT's and FFmpeg's own messages. It's off as standard; the icon bar menu's <b>Logging</b> item turns it on, and the choice is kept in <code>&lt;Choices$Write&gt;.ReelEdit.Logging</code>. Turned on again in the same session, it adds to the file; a new session starts it afresh. For testing, set <code>ReelEdit$Log</code> to a file name to log there from the start, or to <code>off</code>; either overrides the menu at start-up.</li>
 <li><b>Background jobs run in TaskWindows.</b> Exports, render previews and proxies are made by <code>!RunImage -export</code> or <code>-proxy</code> in a TaskWindow, which RISC OS multitasks pre-emptively. That's why the desktop keeps working while they run.</li>
 <li><b>How rendered stretches are recognised.</b> Each busy stretch gets a fingerprint (a hash) of everything in it (clips, overlays, sounds, frame numbers and settings), measured from the start of the stretch. As long as the fingerprint matches, the rendered file is used. That's why a ripple edit earlier in the project doesn't throw previews away.</li>
 <li><b>How proxies are swapped in.</b> When a proxy is ready, the project is rebuilt from its XML with each file's name replaced by its proxy's, and undo and redo do the same. Saving puts the original names back, so a saved project never refers to a proxy.</li>
 <li><b>Where the files go.</b> Render previews are kept in <code>&lt;Wimp$ScrapDir&gt;.ReelEdPrv</code> and proxies in <code>&lt;Wimp$ScrapDir&gt;.ReelEdPxy</code>, with an <code>Index</code> file recording which proxy belongs to which file. Both are cleared when you close the editor or quit, and when it opens, unless you recover a project.</li>
-<li><b>One VideoCore decoder.</b> With <code>gpu_mem=128</code> a second <code>h264_vchiq</code> decoder opens but never produces a picture, so Reel Edit keeps one and passes it from clip to clip. During a dissolve or picture in picture the second video is decoded by the ARM, and that's where render previews and proxies help most.</li>
-<li><b>Thumbnails and waveforms</b> are made with FFmpeg's software decoders, so the VideoCore is left free for playback. Reel Edit makes them a little at a time when the desktop is idle, starting with what's on screen. Waveforms are drawn on a decibel scale covering 48 dB.</li>
-<li><b>Speed changes use MLT's timewarp producer</b> (<code>timewarp:2:file</code>), as Shotcut does. Reel Edit creates it through MLT's loader so that the sound is resampled to 48 kHz. Keeping the pitch the same would need the Rubber Band library, which isn't included.</li>
+<li><b>One VideoCore decoder.</b> With <code>gpu_mem=128</code> a second <code>h264_vchiq</code> decoder opens but never produces a picture, so ReelEdit keeps one and passes it from clip to clip. During a dissolve or picture in picture the second video is decoded by the ARM, and that's where render previews and proxies help most.</li>
+<li><b>Thumbnails and waveforms</b> are made with FFmpeg's software decoders, so the VideoCore is left free for playback. ReelEdit makes them a little at a time when the desktop is idle, starting with what's on screen. Waveforms are drawn on a decibel scale covering 48 dB.</li>
+<li><b>Speed changes use MLT's timewarp producer</b> (<code>timewarp:2:file</code>), as Shotcut does. ReelEdit creates it through MLT's loader so that the sound is resampled to 48 kHz. Keeping the pitch the same would need the Rubber Band library, which isn't included.</li>
 <li><b>Interactive help covers everything.</b> Run !Help and point at any button, track or part of a window to see what it does and which key does the same.</li>
 </ol>
 
@@ -601,7 +620,7 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <figure><img src="images/view-menu.png" alt="View menu"><figcaption>View: zoom, Attach the Timeline, Snapping, Viewer size, Clips… and Use proxies.</figcaption></figure>
 <figure><img src="images/info-window.png" alt="Video information"><figcaption>Video information, from the main menu or a clip's menu: details of the selected clip and of the project.</figcaption></figure>
 
-<p class="small">Reel Edit is free software (GPL version 2 or later) by Andrew Youll. This guide is for version 0.3 (test 29). The screenshots were taken on RISC OS 5 running in the RISC OS for Linux testbed.</p>
+<p class="small">ReelEdit is free software (GPL version 2 or later) by Andrew Youll. This guide is for ReelEdit 0.3 Beta. The screenshots were taken on RISC OS 5 running in the RISC OS for Linux testbed.</p>
 </main>
 </body>
 </html>

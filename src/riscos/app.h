@@ -31,7 +31,7 @@
 #include "../project.h"
 #include "ro.h"
 
-#define APP "Reel Edit"
+#define APP "ReelEdit"
 #define FILETYPE_MLT 0xF80 /* (XML: an MLT project has no filetype of its own yet) */
 
 typedef struct
@@ -51,6 +51,12 @@ extern re_app A;
 
 /* ---- viewer.c ---- */
 void app_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+/* logging.c: the log, off unless chosen (icon bar menu > Logging, kept in
+   Choices) or ReelEdit$Log names a file; app_log does nothing while off */
+void lg_start(void);
+int lg_on(void);
+void lg_set(int on);
+void lg_end(void);
 void app_report(const char *text);
 /* A question: buttons (a comma list); 3 the first, 4 the second... */
 int app_ask(const char *text, const char *buttons);
@@ -169,7 +175,7 @@ void app_audio_menu_opened(void);  /* a menu of audiotracks.c's open */
 /* ---- autosave.c: a copy of the project kept while it's edited ---- */
 void as_edited(void);  /* after an edit: a copy, if half a minute since the last (or none) */
 void as_forget(void);  /* saved, closed, quit: the copy taken away */
-int as_offer(void);    /* a copy there (Reel Edit stopped): recover it? 1: A.proj (and A.path) set */
+int as_offer(void);    /* a copy there (ReelEdit stopped): recover it? 1: A.proj (and A.path) set */
 
 /* ---- clips.c: the Clips window (the project's clips list) ---- */
 int cl_window(void);
@@ -244,7 +250,7 @@ void px_toggle(void);
 int px_making(int *made, int *all); /* 1: being made (*made of *all) */
 void px_close(void);   /* the editor closed, quitting: stopped, deleted */
 void px_wipe(void);    /* deleted (and anything left in their directory) */
-void px_forget(void);  /* forgotten, the files left (Reel Edit stopping: tests) */
+void px_forget(void);  /* forgotten, the files left (ReelEdit stopping: tests) */
 void px_recover(void); /* a project recovered: the proxies of the session that stopped, known again */
 void rr_wipe(void);    /* (renders.c) previews left by a session that stopped, deleted */
 

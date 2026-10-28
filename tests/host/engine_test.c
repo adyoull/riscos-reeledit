@@ -1,4 +1,4 @@
-/* engine_test - src/engine.c, Reel Edit's player, driven as the Wimp would
+/* engine_test - src/engine.c, ReelEdit's player, driven as the Wimp would
  * drive it, against a clock this test controls.
  *
  * Usage: engine_test project.mlt

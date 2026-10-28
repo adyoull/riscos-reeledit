@@ -1,5 +1,5 @@
 /* bench - how long MLT takes to make each picture of a clip or project, as
- * Reel Edit's player asks for them (yuv420p at the profile's size, one
+ * ReelEdit's player asks for them (yuv420p at the profile's size, one
  * after another, no threads). For profiling on Linux, and on RISC OS.
  *
  *   bench FILE [FRAMES] [SCALE]
@@ -134,8 +134,8 @@ int main(int argc, char **argv)
     mlt_static_modules_register();
 #endif
     mlt_factory_init(NULL);
-    re_still_register(); /* (pictures as Reel Edit reads them) */
-    /* (as Reel Edit: NEON where there is, quick scaling; BENCH_C or
+    re_still_register(); /* (pictures as ReelEdit reads them) */
+    /* (as ReelEdit: NEON where there is, quick scaling; BENCH_C or
        BENCH_ACCURATE set to any value leaves either out, to compare) */
     int fast = !getenv("BENCH_ACCURATE");
     if ((av_get_cpu_flags() & AV_CPU_FLAG_NEON) && !getenv("BENCH_C"))
@@ -167,7 +167,7 @@ int main(int argc, char **argv)
         double t0 = now();
         mlt_producer_seek(producer, i);
         mlt_frame frame = mlt_consumer_get_frame(consumer);
-        mlt_properties_set_int(MLT_FRAME_PROPERTIES(frame), "consumer.source_colours", 1); /* (as Reel Edit's player) */
+        mlt_properties_set_int(MLT_FRAME_PROPERTIES(frame), "consumer.source_colours", 1); /* (as ReelEdit's player) */
         mlt_properties_set_int(MLT_FRAME_PROPERTIES(frame), "consumer.fast_scale", fast);
         mlt_image_format format = mlt_image_yuv420p;
         int w = w0, h = h0;

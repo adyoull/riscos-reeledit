@@ -4,7 +4,7 @@
  * <Choices$Write>.ReelEdit.Autosave (MLT XML), with where it was saved
  * from in AutosaveFor beside it. Saving, closing the editor (keeping or
  * discarding its changes) and quitting take the copy away: a copy left is
- * a project whose changes were lost (Reel Edit stopped, the computer
+ * a project whose changes were lost (ReelEdit stopped, the computer
  * reset).
  *
  * Opening the editor with a copy there asks whether to recover it: the
@@ -80,7 +80,7 @@ int as_offer(void)
     }
     char t[400];
     snprintf(t, sizeof(t),
-             "Reel Edit didn't close properly, and %.200s had changes that weren't saved. Recover them?",
+             "ReelEdit didn't close properly, and %.200s had changes that weren't saved. Recover them?",
              path[0] ? path : "a project");
     if (app_ask(t, "Recover,Discard") != 3) {
         app_log("autosave: discarded");

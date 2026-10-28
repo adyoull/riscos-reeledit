@@ -105,7 +105,7 @@ void cl_open(void)
     _kernel_swi_regs r;
     int st[9];
     if (!A.proj) {
-        app_report("Open the editor first (click Reel Edit's icon).");
+        app_report("Open the editor first (click ReelEdit's icon).");
         return;
     }
     if (!C.win && create() < 0)

@@ -1,4 +1,4 @@
-| !Boot for !ReelEdit (Reel Edit, a video editor for RISC OS, on MLT)
+| !Boot for !ReelEdit (ReelEdit, a video editor for RISC OS, on MLT)
 | Seen by the Filer: the icon, and where MLT finds its data files.
 If "<ReelEdit$Dir>"="" Then Set ReelEdit$Dir <Obey$Dir>
 IconSprites <ReelEdit$Dir>.!Sprites
