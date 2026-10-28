@@ -20,9 +20,13 @@
 #include "measure.h"
 #include "media.h"
 #include "render.h"
+#include "proxy.h"
 #include "sprites.h"
 #include "still.h"
+#include <dirent.h>
+#include <limits.h>
 #include <math.h>
+#include <sys/stat.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1605,6 +1609,87 @@ static void render_previews(const char *a, const char *b, const char *numbered, 
     re_project_close(p);
 }
 
+/* ---- proxies: which files want one, one made, the project swapped to
+   it and back, saved with the file's name, leftovers wiped -------------------- */
+static void proxies(const char *numbered_rel, const char *big_rel, const char *m2v, const char *pic, const char *out)
+{
+    char numbered[PATH_MAX], big[PATH_MAX]; /* (as the desktop names them: whole) */
+    if (!realpath(numbered_rel, numbered) || !realpath(big_rel, big))
+        return;
+    re_engine_io io = {show, NULL, clk, NULL, 48000, 2, NULL};
+    CHECK(!re_proxy_wanted(numbered) && re_proxy_wanted(big) && !re_proxy_wanted(m2v) && re_proxy_wanted("four3-709.mp4") == 0
+              && !re_proxy_wanted(pic)
+              && !re_proxy_wanted("tone880.wav") && !re_proxy_wanted("no-such-file.mp4"),
+          "proxy: wanted: numbered %d, big %d, m2v %d, a picture %d, sound %d", re_proxy_wanted(numbered),
+          re_proxy_wanted(big), re_proxy_wanted(m2v), re_proxy_wanted(pic), re_proxy_wanted("tone880.wav"));
+    mkdir("proxy-test", 0777);
+    char err[200];
+    CHECK(re_export_proxy(big, "proxy-test/P1", 0, NULL, NULL, NULL, err, sizeof(err)) == 0, "proxy: not made: %s", err);
+    re_project *made = re_project_open("proxy-test/P1", 0), *orig = re_project_open(big, 0);
+    CHECK(made && orig && re_project_profile(made)->height == RE_PROXY_HEIGHT
+              && re_project_length(made) == re_project_length(orig),
+          "proxy: %d lines, %d frames (%d)", made ? re_project_profile(made)->height : -1,
+          made ? re_project_length(made) : -1, orig ? re_project_length(orig) : -1);
+    re_project_close(made);
+    re_project_close(orig);
+
+    re_project *p = re_project_new();
+    re_item it;
+    re_project_add(p, numbered, -1);
+    re_project_add(p, big, -1);
+    re_project_speed(p, 1, 50); /* (a timewarp: its file swapped too) */
+    re_project_fade(p, 0, 0, 10);
+    re_project_item(p, 1, &it);
+    int s1 = it.start, l1 = it.length;
+    uint64_t sig = re_render_signature(p, s1, l1);
+    re_engine *e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    int live = luma_at(e, 80);
+    re_engine_close(e);
+    re_project_set_proxy(p, big, "proxy-test/P1");
+    CHECK(re_project_proxies(p) == 1 && re_project_apply_proxies(p) == 0, "proxy: swapped while off");
+    re_project_use_proxies(p, 1);
+    unsigned state = re_project_modified(p);
+    CHECK(re_project_apply_proxies(p) == 1 && re_project_item_file(p, 1)
+              && !strcmp(re_project_item_file(p, 1), "proxy-test/P1"),
+          "proxy: on: the clip's file %s", re_project_item_file(p, 1) ? re_project_item_file(p, 1) : "-");
+    re_project_item(p, 1, &it);
+    CHECK(!strcmp(it.name, "big.mp4") && it.speed == 50 && re_project_modified(p) == (int) state
+              && re_render_signature(p, s1, l1) == sig,
+          "proxy: named %s, %d%%; the signature kept %d", it.name, it.speed, re_render_signature(p, s1, l1) == sig);
+    e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    CHECK(abs(luma_at(e, 80) - live) <= 12, "proxy: the same picture: %d (%d)", luma_at(e, 80), live);
+    re_engine_close(e);
+    /* saved: the file's name */
+    CHECK(!re_project_save(p, out), "proxy: not saved");
+    FILE *f = fopen(out, "r");
+    char xml[20000] = "";
+    size_t n = f ? fread(xml, 1, sizeof(xml) - 1, f) : 0;
+    xml[n] = 0;
+    if (f)
+        fclose(f);
+    CHECK(!strstr(xml, "proxy-test/P1") && strstr(xml, "big.mp4"), "proxy: the saved project names the proxy");
+    /* edits and undo keep to it */
+    re_project_split(p, 50);
+    CHECK(re_project_undo(p) && re_project_item_file(p, 1) && !strcmp(re_project_item_file(p, 1), "proxy-test/P1"),
+          "proxy: undone: %s", re_project_item_file(p, 1) ? re_project_item_file(p, 1) : "-");
+    re_project_undo(p); /* (to before the proxies were on: they stay on) */
+    CHECK(re_project_item_file(p, 1) && !strcmp(re_project_item_file(p, 1), "proxy-test/P1"), "proxy: undone again: %s",
+          re_project_item_file(p, 1) ? re_project_item_file(p, 1) : "-");
+    re_project_redo(p); /* (the split not) */
+    /* off: the file again */
+    re_project_use_proxies(p, 0);
+    CHECK(re_project_apply_proxies(p) == 1 && !strcmp(re_project_item_file(p, 1), big), "proxy: off: %s",
+          re_project_item_file(p, 1));
+    re_project_close(p);
+    /* leftovers wiped */
+    f = fopen("proxy-test/Index", "w");
+    if (f)
+        fclose(f);
+    CHECK(re_wipe_dir("proxy-test") == 0 && !fopen("proxy-test/P1", "r") && !opendir("proxy-test")
+              && re_wipe_dir("proxy-test") == 0,
+          "proxy: leftovers not wiped");
+}
+
 /* ---- media: thumbnails and waveforms, made a step at a time ---------------- */
 
 /* Steps until there's nothing to do: how many (or -1, too many) */
@@ -1986,6 +2071,7 @@ int main(int argc, char **argv)
     copy_paste(a, argv[9], argv[11]);
     speeds(n, argv[9], argv[12], a, out);
     render_previews(a, b, n, argv[12], out);
+    proxies(n, argv[7], argv[5], argv[12], out);
     overlays(a, b, argv[9], out, argv[10], argv[11], argv[12]);
     video_overlays(a, b, argv[9], n, argv[5], out);
     char dir[512];

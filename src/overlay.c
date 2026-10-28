@@ -31,6 +31,7 @@
  * Part of riscos-reeledit. GPL version 2 or later.
  */
 #include "project_internal.h"
+#include "proxy.h"
 #include "still.h"
 #include "title.h"
 
@@ -92,7 +93,7 @@ int re_project_overlay(re_project *p, int i, re_overlay *o)
     o->sound_fade_out = o->video ? rp_cut_fade(info.cut, RP_SOUND, 1) : 0;
     /* (its leaf name, a picture's without its .png or .jpg: MLT's names are Unix ones) */
     char name[256];
-    snprintf(name, sizeof(name), "%s", info.resource ? info.resource : "");
+    snprintf(name, sizeof(name), "%s", info.resource ? re_project_original(p, info.resource) : "");
     char *dot = strrchr(name, '.'), *slash = strrchr(name, '/');
     if (dot && dot > slash && !o->video && (!strcmp(dot, ".png") || !strcmp(dot, ".jpg") || !strcmp(dot, ".jpeg")))
         *dot = 0;
@@ -410,6 +411,15 @@ int re_project_overlay_add(re_project *p, const char *file, int frame, int lengt
     int big = !video && (pw * 2 >= p->profile->width || ph * 2 >= p->profile->height);
     return rp_overlay_put(p, pic, 0, frame, length, video ? RE_PLACE_BOTTOM_RIGHT : big ? RE_PLACE_FULL : RE_PLACE_TOP_RIGHT,
                video ? 33 : big ? 100 : 20);
+}
+
+const char *re_project_overlay_file(re_project *p, int i)
+{
+    mlt_playlist_clip_info info;
+    int e = entry(p, i);
+    if (e < 0 || mlt_playlist_get_clip_info(p->v2, &info, e))
+        return NULL;
+    return rp_speed_file(info.producer, info.resource);
 }
 
 int re_project_overlay_span(re_project *p, int i, int start, int length)

@@ -5,6 +5,7 @@
  */
 #include "render.h"
 #include "project_internal.h"
+#include "proxy.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -104,13 +105,13 @@ static uint64_t fnv(uint64_t h, const char *fmt, ...)
     return h;
 }
 
-static const char *resource(mlt_playlist pl, int entry)
+static const char *resource(re_project *p, mlt_playlist pl, int entry)
 {
     mlt_playlist_clip_info info;
     if (!pl || entry < 0 || mlt_playlist_get_clip_info(pl, &info, entry))
         return "";
     const char *r = rp_speed_file(info.producer, info.resource);
-    return r ? r : "";
+    return r ? re_project_original(p, r) : ""; /* (proxies or not: the same stretch) */
 }
 
 uint64_t re_render_signature(re_project *p, int start, int length)
@@ -126,7 +127,7 @@ uint64_t re_render_signature(re_project *p, int start, int length)
             continue;
         h = fnv(h, "V1 %d %d %d %d %d %d %d %d %d %d %d %d %d %d %s|", it.start - start, it.length, it.in, it.out,
                 it.gap, it.mix, it.fade_in, it.fade_out, it.sound_fade_in, it.sound_fade_out, it.muted, it.volume,
-                it.speed, it.source_length, it.gap || it.mix ? "" : resource(p->v1, i));
+                it.speed, it.source_length, it.gap || it.mix ? "" : resource(p, p->v1, i));
     }
     for (int i = 0; i < re_project_overlays(p); i++) {
         re_overlay o;
@@ -135,7 +136,7 @@ uint64_t re_render_signature(re_project *p, int start, int length)
             continue;
         h = fnv(h, "V2 %d %d %d %d %d %d %d %d %d %d %d %d %d %s|", o.start - start, o.length, o.in, o.place, o.size,
                 o.opacity, o.fade_in, o.fade_out, o.video, o.muted, o.volume, o.sound_fade_in, o.sound_fade_out,
-                resource(p->v2, rp_track_entry(p->v2, i)));
+                resource(p, p->v2, rp_track_entry(p->v2, i)));
         if (o.title && !re_project_title(p, i, &t))
             h = fnv(h, "T %s %s %d %06X %d %d|", t.text, t.font, t.size, (unsigned) t.colour, t.style, t.align);
     }
@@ -145,7 +146,7 @@ uint64_t re_render_signature(re_project *p, int start, int length)
             if (re_project_audio(p, k, i, &a) || a.start >= end || a.start + a.length <= start)
                 continue;
             h = fnv(h, "A %d %d %d %d %d %d %d %d %s|", k, a.start - start, a.length, a.in, a.muted, a.volume,
-                    a.fade_in, a.fade_out, resource(rp_audio_track(p, k), rp_track_entry(rp_audio_track(p, k), i)));
+                    a.fade_in, a.fade_out, resource(p, rp_audio_track(p, k), rp_track_entry(rp_audio_track(p, k), i)));
         }
     return h;
 }

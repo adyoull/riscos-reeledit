@@ -210,6 +210,8 @@ int re_project_overlay_add(re_project *p, const char *file, int frame, int lengt
    within the project, a video within its file (trimming its start moves
    its in). 1 changed, 0 already so, -1 not. Between begin and end too. */
 int re_project_overlay_span(re_project *p, int i, int start, int length);
+/* Its file (NULL: a title's has none worth a name; good until the next edit) */
+const char *re_project_overlay_file(re_project *p, int i);
 /* Its place (RE_PLACE_), size and opacity (%; each -1: kept). 1 changed,
    0 not. */
 int re_project_overlay_set(re_project *p, int i, int place, int size, int opacity);

@@ -55,7 +55,19 @@ int re_test_previews_pending(void);
 int re_test_renders(void); /* (renders.c's) */
 int re_test_previews_playing(void);
 int rr_stretches(int i, int *start, int *length, int *made);
-static int render_starts, render_jobs, render_progress_seen;
+static int render_starts, render_jobs, render_progress_seen, proxy_starts;
+static char proxy_made[300];
+const char *re_test_tl_title(void);
+re_project *re_test_project(void);
+static int big_item(void) /* (the big clip's item: -1 none) */
+{
+    for (int i = 0; i < re_project_items(re_test_project()); i++) {
+        re_item it;
+        if (!re_project_item(re_test_project(), i, &it) && !strcmp(it.name, "big.mp4"))
+            return i;
+    }
+    return -1;
+}
 static int thumb_plots; /* (the Timeline's thumbnails plotted) */
 
 int reeledit_main(int argc, char **argv);
@@ -93,7 +105,7 @@ static int phase, phase_cs;
         }                                                                                                          \
     } while (0)
 
-static const char *clip, *clip2, *clip3;
+static const char *clip, *clip2, *clip3, *clip4;
 static char typed_path[300], dragged_path[300];
 
 /* ---- the fake machine ------------------------------------------------------- */
@@ -2752,8 +2764,87 @@ static int script(int *b, int mask)
     case 354:
         if (nulls)
             return 0;
+        /* ---- proxies: a big clip dropped at the end; its proxy's TaskWindow
+           played by the script (made here, from the command); used; View >
+           Use proxies off and on ---- */
+        proxy_starts = starts;
+        next(355);
+        data_load(b, TL, W[1].box[0] - W[1].scroll_x + 16 + (int) ((re_project_length(re_test_project()) + 5) * tl_scale),
+                  0xBF6, clip4);
+        b[8] = W[1].box[3] - TL_V1_TOP - 48;
+        return 17;
+    case 355: {
+        if (nulls)
+            return 0;
+        char file[300], outf[300];
+        int hw = -1;
+        const char *x = strstr(start_cmd, "-proxy ");
+        CHECK(starts == proxy_starts + 1 && x && sscanf(x, "-proxy %299s %299s %d", file, outf, &hw) == 3
+                  && strstr(file, "big.mp4") && strstr(re_test_tl_title(), "making proxies"),
+              "proxy: %d started (%d before): \"%s\"; the Timeline \"%s\"", starts, proxy_starts, start_cmd,
+              re_test_tl_title());
+        if (!x)
+            fail_quit("proxy: not started");
+        char err[200];
+        CHECK(re_export_proxy(file, outf, 0, NULL, NULL, NULL, err, sizeof(err)) == 0, "proxy: %s", err);
+        snprintf(proxy_made, sizeof(proxy_made), "%s", outf);
+        next(356);
+        memset(b, 0, 24);
+        b[0] = 24; b[1] = 0x790; b[2] = 90; b[4] = 0x808C2; b[5] = 0x52455058; /* TaskWindow_Ego */
+        return 17;
+    }
+    case 356:
+        next(357);
+        memset(b, 0, 64);
+        b[1] = 0x790; b[2] = 91; b[4] = 0x808C1;
+        b[5] = (int) strlen("done\n");
+        memcpy(&b[6], "done\n", b[5]);
+        b[0] = 24 + ((b[5] + 3) & ~3);
+        return 17;
+    case 357:
+        next(358);
+        memset(b, 0, 24);
+        b[0] = 20; b[1] = 0x790; b[2] = 92; b[4] = 0x808C3; /* TaskWindow_Morio */
+        return 17;
+    case 358: {
+        if (nulls)
+            return 0;
+        int i = big_item();
+        const char *f = i >= 0 ? re_project_item_file(re_test_project(), i) : NULL;
+        CHECK(f && !strcmp(f, proxy_made) && !strcmp(re_test_tl_title(), "Timeline") && starts == proxy_starts + 1,
+              "proxy: the clip's file %s (%s), the Timeline \"%s\"", f ? f : "-", proxy_made, re_test_tl_title());
+        shot("35-proxy");
+        next(359);
+        b[0] = W[0].box[0] + 50; b[1] = W[0].box[3] - 50; b[2] = 2; b[3] = VIEWER; b[4] = -1;
+        return 6; /* Menu */
+    }
+    case 359:
+        next(360);
+        b[0] = 3; b[1] = 7; b[2] = -1; /* View > Use proxies: off */
+        return 9;
+    case 360: {
+        if (nulls)
+            return 0;
+        int i = big_item();
+        const char *f = i >= 0 ? re_project_item_file(re_test_project(), i) : NULL;
+        CHECK(f && strstr(f, "big.mp4"), "proxy: off: the clip's file %s", f ? f : "-");
+        next(361);
+        b[0] = W[0].box[0] + 50; b[1] = W[0].box[3] - 50; b[2] = 2; b[3] = VIEWER; b[4] = -1;
+        return 6;
+    }
+    case 361:
+        next(362);
+        b[0] = 3; b[1] = 7; b[2] = -1; /* on */
+        return 9;
+    case 362: {
+        if (nulls)
+            return 0;
+        int i = big_item();
+        const char *f = i >= 0 ? re_project_item_file(re_test_project(), i) : NULL;
+        CHECK(f && !strcmp(f, proxy_made), "proxy: on again: the clip's file %s", f ? f : "-");
         next(45);
         return key_to(b, TL, 0x18D);
+    }
     case 45: /* the desktop shutting down: asked, Discard; the shutdown started again; quit */
         if (nulls)
             return 0;
@@ -2775,10 +2866,11 @@ static int script(int *b, int mask)
 int main(int argc, char **argv)
 {
     char cwd[256];
-    if (argc != 4) {
-        fprintf(stderr, "usage: editor_test numbered-snd.mp4 numbered.mp4 numbered.m2v\n");
+    if (argc != 5) {
+        fprintf(stderr, "usage: editor_test numbered-snd.mp4 numbered.mp4 numbered.m2v big.mp4\n");
         return 2;
     }
+    clip4 = argv[4];
     clip = argv[1];
     clip2 = argv[2];
     clip3 = argv[3];
@@ -2794,6 +2886,10 @@ int main(int argc, char **argv)
     int r = reeledit_main(0, NULL);
     CHECK(r == 0, "reeledit_main returned %d", r);
     CHECK(phase == 46, "the script stopped at phase %d", phase);
+    FILE *left = proxy_made[0] ? fopen(proxy_made, "rb") : NULL;
+    CHECK(proxy_made[0] && !left, "proxy: %s left after quitting", proxy_made);
+    if (left)
+        fclose(left);
     CHECK(questions == mark + 1 && prequit_acks == 1, "Message_PreQuit: %d questions, %d acknowledgements",
           questions - mark, prequit_acks);
     CHECK(key_sent == 0x1FC, "the shutdown not started again (key &%X sent)", key_sent);

@@ -27,6 +27,7 @@
  */
 #include "../export.h"
 #include "app.h"
+#include "../proxy.h"
 #include "menu.h"
 #include "../measure.h"
 #include "display.h"
@@ -784,6 +785,7 @@ static void edited(int picture)
     mk_edited();
     tl_edited();
     info_edited();
+    px_edited(); /* (files wanting proxies: made) */
     update_title();
     update_controls(1);
 }
@@ -907,6 +909,12 @@ void app_saved(const char *path)
 static void open_editor(void)
 {
     int recovered = !A.proj && as_offer(); /* (a copy left by Reel Edit stopping: recovered, if wanted) */
+    if (recovered) {
+        px_recover(); /* (its proxies: used again) */
+    } else if (!A.proj) {
+        px_wipe();    /* (what a session that stopped left: deleted) */
+        rr_wipe();
+    }
     if (!A.proj) {
         A.proj = re_project_new();
         A.path[0] = 0;
@@ -974,6 +982,7 @@ static int close_editor(void)
     pv_close();
     cp_close();
     rr_close();
+    px_close();  /* (its proxies deleted) */
     as_forget(); /* (kept or discarded: closed as asked) */
     if (V.win) {
         _kernel_swi_regs r;
@@ -1132,6 +1141,19 @@ int app_add(const char *path, const char *name, int frame)
 /* ---- editing ------------------------------------------------------------------------------------ */
 
 /* Undo and redo: the project is made again, so the engine with it */
+/* Proxies made, or turned on or off (proxies.c): the project made again
+   with them (or without), the Viewer as it was */
+static void proxies_apply(void)
+{
+    int pos = app_position();
+    engine_close(); /* (it plays the project as it is now) */
+    int r = re_project_apply_proxies(A.proj);
+    px_applied();
+    app_log("proxies: the project made again (%d)", r);
+    app_edited();
+    app_seek(pos);
+}
+
 static void undo(int redo)
 {
     if (!A.proj)
@@ -1280,11 +1302,11 @@ static MENU(9) m_play = {"Play", 7, 2, 7, 0, 420, 44, 0,
                           {0, -1, IT("Render previews  ^R")}, {0x80, -1, IT("Stop rendering")}}};
 static MENU(3) m_viewer_size = {"Viewer size", 7, 2, 7, 0, 200, 44, 0,
                                 {{0, -1, IT("Small")}, {0, -1, IT("Medium")}, {0x80, -1, IT("Large")}}};
-static MENU(7) m_view = {"View", 7, 2, 7, 0, 520, 44, 0,
+static MENU(8) m_view = {"View", 7, 2, 7, 0, 520, 44, 0,
                          {{0, -1, IT("Zoom the Timeline in       +")}, {0, -1, IT("Zoom the Timeline out      -")},
                           {2, -1, IT("The whole project     \x8bZ")}, {0, -1, IT("Attach the Timeline")},
                           {0, -1, IT("Snapping                   N")}, {0, 0, IT("Viewer size")},
-                          {0x80, -1, IT("Clips...                  ^B")}}};
+                          {2, -1, IT("Clips...                  ^B")}, {0x80, -1, IT("Use proxies")}}};
 static MENU(5) m_main = {"Reel Edit", 7, 2, 7, 0, 340, 44, 0,
                          {{0, 0, IT("File")}, {0, 0, IT("Edit")}, {0, 0, IT("Play")}, {0, 0, IT("View")},
                           {0x80, -1, IT("Video information...")}}};
@@ -1359,6 +1381,7 @@ void app_menu(int x, int y)
     menu_shade(&m_play.item[7].iflags, !has || rr_running());
     menu_shade(&m_play.item[8].iflags, !rr_running());
     m_view.item[4].flags = (m_view.item[4].flags & ~1) | (A.snap ? 1 : 0);
+    menu_tick(&m_view.item[7].flags, px_on());
     m_view.item[5].sub = (intptr_t) &m_viewer_size;
     for (int i = 0; i < 3; i++)
         menu_tick(&m_viewer_size.item[i].flags, i == V.viewer_size);
@@ -1514,6 +1537,8 @@ static void menu_select(int *b)
             viewer_size(b[2]);
         } else if (b[1] == 6) {
             cl_open();
+        } else if (b[1] == 7) {
+            px_toggle();
         }
         break;
     case 4: /* Video information */
@@ -1780,7 +1805,7 @@ static const char *help_for(int win, int icon, int y)
 static void message(int *b, int event)
 {
     _kernel_swi_regs r;
-    if (sb_message(b) || ex_message(b) || rr_message(b))
+    if (sb_message(b) || ex_message(b) || rr_message(b) || px_message(b))
         return;
     switch (b[4]) {
     case MSG_QUIT:
@@ -1799,6 +1824,8 @@ static void message(int *b, int event)
                     "Discard,Cancel")
                 == 3) {
                 engine_close(); /* (the engine first: it plays the project) */
+                rr_close();     /* (before the project: they're its) */
+                px_close();
                 re_project_close(A.proj);
                 A.proj = NULL;
                 V.quit = 1;
@@ -1977,6 +2004,7 @@ void re_test_crash(void)
     pv_close();
     cp_close();
     rr_close();
+    px_forget(); /* (a stop leaves them, as Reel Edit stopping would) */
     re_project_close(A.proj);
     A.proj = NULL;
     A.path[0] = 0;
@@ -1990,7 +2018,7 @@ int reeledit_main(int argc, char **argv)
                                    0x808C1, 0x808C2, 0x808C3, 0}; /* (TaskWindow's Output, Ego, Morio: exports) */
     int block[64];
     _kernel_swi_regs r;
-    if (argc > 1 && !strcmp(argv[1], "-export")) { /* (an export, in a TaskWindow: exportbox.c) */
+    if (argc > 1 && (!strcmp(argv[1], "-export") || !strcmp(argv[1], "-proxy"))) { /* (an export, a render or a proxy, in a TaskWindow) */
 #ifdef __riscos__
         re_title_set_font(fm_line); /* (titles drawn as the editor draws them) */
 #endif
@@ -2019,6 +2047,8 @@ int reeledit_main(int argc, char **argv)
     V.idle_cs = -1;
 
     while (!V.quit) {
+        if (px_pending() && !V.source && !tl_scrubbing() && !(A.e && re_engine_speed(A.e) != 0))
+            proxies_apply();
         /* Null events only while the engine has work: a seek at once,
            playing at the next picture's time; else none at all. */
         if (A.proj && re_project_changes(A.proj) != V.changes)
@@ -2088,6 +2118,8 @@ int reeledit_main(int argc, char **argv)
         }
     }
     engine_close();
+    rr_close();
+    px_close();
     as_forget(); /* (a clean quit: no copy needed) */
     if (A.proj) {
         re_project_close(A.proj);

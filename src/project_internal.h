@@ -36,6 +36,9 @@ struct re_project
     /* the Clips window's list (source.c): MLT names */
     char **bin;
     int n_bin;
+    /* proxies (proxy.c): each file's; used or not */
+    struct { char *file, *proxy; } *px;
+    int n_px, px_on;
 };
 
 /* project.c: V1 (and the tractor) made if the project is empty: 0, or -1;
@@ -67,6 +70,15 @@ const char *rp_speed_file(mlt_producer parent, const char *resource);
 /* audio.c: an audio track's playlist (NULL: none) */
 mlt_playlist rp_audio_track(re_project *p, int k);
 
+
+/* project.c: the project as MLT XML (malloc'd), and made again from it
+   (0, or -1: left as it was) */
+char *rp_snapshot(re_project *p);
+int rp_restore(re_project *p, const char *xml);
+/* proxy.c: XML (taken over) with the files' names swapped for their
+   proxies' (to_proxies), or back; the proxies forgotten */
+char *rp_proxy_xml(re_project *p, char *xml, int to_proxies);
+void rp_proxies_free(re_project *p);
 
 void rp_checkpoint(re_project *p); /* before an edit: the project as it is, to undo to */
 void rp_no_edit(re_project *p);    /* an edit that didn't happen: its checkpoint dropped */

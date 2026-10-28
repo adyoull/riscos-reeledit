@@ -99,7 +99,7 @@ static struct
     int vis_w, vis_h, scroll_x;
     int playhead;     /* the frame it's drawn at */
     int extent_w;
-    char title[32];
+    char title[64];
     int drag;         /* DRAG_: what a drag going on does */
     /* the item dragged: as it was when the drag began */
     int d_item, d_in, d_out, d_start, d_f0;
@@ -1521,6 +1521,30 @@ const char *tl_help(int screen_y)
     return "This is V1: the clips.|MClick a clip to select it; drag its edge to trim it (with Ctrl: roll the "
            "cut), its middle to move it.|MMenu over a clip gives its effects.|MCtrl and the wheel zoom.";
 }
+
+void tl_title(void)
+{
+    char t[sizeof(T.title)];
+    int made, all;
+    if (px_making(&made, &all))
+        snprintf(t, sizeof(t), "Timeline (making proxies: %d of %d made)", made, all);
+    else
+        snprintf(t, sizeof(t), "Timeline");
+    if (!strcmp(t, T.title))
+        return;
+    snprintf(T.title, sizeof(T.title), "%s", t);
+    if (T.win) {
+        _kernel_swi_regs r;
+        r.r[0] = T.win;
+        r.r[1] = 0x4B534154; /* "TASK": R2 says what */
+        r.r[2] = 3;          /* the title bar */
+        ro_swi(Wimp_ForceRedraw, &r);
+    }
+}
+
+#ifdef RE_TEST
+const char *re_test_tl_title(void) { return T.title; }
+#endif
 
 void tl_refresh(void)
 {

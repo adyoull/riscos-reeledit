@@ -19,6 +19,7 @@
  */
 #include "app.h"
 #include "../render.h"
+#include "../proxy.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -255,6 +256,12 @@ mlt_producer rr_playlist(int *rendered)
     return R.pv && A.proj ? re_previews_producer(R.pv, A.proj, rendered) : NULL;
 }
 
+void rr_wipe(void)
+{
+    char unix_dir[512];
+    re_wipe_dir(app_mlt_name(DIR, unix_dir, sizeof(unix_dir)));
+}
+
 void rr_close(void)
 {
     R.on = 0;
@@ -262,6 +269,7 @@ void rr_close(void)
     R.running = 0;
     R.child = 0;
     re_previews_free(R.pv); /* (its files deleted) */
+    rr_wipe();              /* (and a part made: its TaskWindow killed) */
     R.pv = NULL;
     R.n = 0;
     R.known = 0;

@@ -10,6 +10,7 @@
 #include "project.h"
 #include "engine.h"
 #include "project_internal.h"
+#include "proxy.h"
 #include "still.h"
 
 #include <limits.h>
@@ -48,7 +49,7 @@ void rp_changed(re_project *p)
 /* The project as MLT XML in memory (the xml consumer keeps a document in
    a property when its name has no '.'); paths relative to the current
    directory, which is what the xml producer resolves them against too */
-static char *snapshot(re_project *p)
+char *rp_snapshot(re_project *p)
 {
     if (!p->tractor)
         return strdup("");
@@ -97,7 +98,7 @@ void rp_checkpoint(re_project *p)
 {
     if (p->in_edit) /* (within re_project_begin/end: its undo point is the edit's) */
         return;
-    push(&p->undo, &p->n_undo, snapshot(p), p->state);
+    push(&p->undo, &p->n_undo, rp_snapshot(p), p->state);
     drop_snaps(p->redo, &p->n_redo);
 }
 
@@ -112,8 +113,17 @@ void rp_no_edit(re_project *p)
 
 static int adopt(re_project *p, mlt_producer prod);
 
-/* The project made again from a snapshot. 0, or -1 (left as it was). */
+/* A snapshot made again (undo, redo), with the proxies as they are now */
 static int restore(re_project *p, const char *xml)
+{
+    char *x = rp_proxy_xml(p, strdup(xml), p->px_on);
+    int r = x ? rp_restore(p, x) : -1;
+    free(x);
+    return r;
+}
+
+/* The project made again from a snapshot. 0, or -1 (left as it was). */
+int rp_restore(re_project *p, const char *xml)
 {
     re_project old = *p;
     if (!*xml) {
@@ -147,7 +157,7 @@ int re_project_undo(re_project *p)
 {
     if (p->n_undo == 0)
         return 0;
-    char *now = snapshot(p);
+    char *now = rp_snapshot(p);
     struct snap s = p->undo[p->n_undo - 1];
     if (!now || restore(p, s.xml) < 0) {
         free(now);
@@ -164,7 +174,7 @@ int re_project_redo(re_project *p)
 {
     if (p->n_redo == 0)
         return 0;
-    char *now = snapshot(p);
+    char *now = rp_snapshot(p);
     struct snap s = p->redo[p->n_redo - 1];
     if (!now || restore(p, s.xml) < 0) {
         free(now);
@@ -343,6 +353,7 @@ void re_project_close(re_project *p)
     free(p->undo);
     free(p->redo);
     rp_bin_free(p);
+    rp_proxies_free(p);
     free(p);
 }
 
@@ -415,7 +426,8 @@ int re_project_item(re_project *p, int i, re_item *item)
         item->volume = rp_cut_volume(cut);
         item->speed = rp_speed_percent(info.producer);
     }
-    const char *file = item->gap || item->mix ? NULL : rp_speed_file(info.producer, info.resource);
+    const char *file =
+        item->gap || item->mix ? NULL : re_project_original(p, rp_speed_file(info.producer, info.resource));
     if (file) {
         const char *leaf = file;
         for (const char *c = file; *c; c++)
@@ -644,7 +656,7 @@ void re_project_end(re_project *p)
     p->in_edit = 0;
     /* (unchanged in the end: no undo point; as modified as before) */
     const char *before = p->n_undo > 0 ? p->undo[p->n_undo - 1].xml : NULL;
-    char *now = snapshot(p);
+    char *now = rp_snapshot(p);
     if (before && now && !strcmp(before, now)) {
         rp_no_edit(p);
         p->state = p->edit_state;
@@ -903,7 +915,24 @@ static int save(re_project *p, const char *file, int as_saved)
         return -1;
     fseek(f, 0, SEEK_END);
     long size = ftell(f);
-    fclose(f);
+    if (size > 0 && p->n_px > 0) { /* (the files named, not their proxies) */
+        char *x = malloc((size_t) size + 1);
+        rewind(f);
+        if (!x || fread(x, 1, (size_t) size, f) != (size_t) size) {
+            free(x);
+            fclose(f);
+            remove(tmp);
+            return -1;
+        }
+        x[size] = 0;
+        fclose(f);
+        x = rp_proxy_xml(p, x, 0);
+        f = x ? fopen(tmp, "w") : NULL;
+        size = f && fputs(x, f) >= 0 ? (long) strlen(x) : -1;
+        free(x);
+    }
+    if (f)
+        fclose(f);
     if (size <= 0) {
         remove(tmp);
         return -1;

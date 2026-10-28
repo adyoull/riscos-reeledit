@@ -20,6 +20,7 @@ typedef struct
     int hardware;        /* 1: the VideoCore's H.264 encoder (h264_encvchiq), if FFmpeg has it */
     const char *vcodec;  /* (NULL: the VideoCore's when hardware, else libx264, else mpeg4) */
     int range, in, out;  /* range: only the project's frames in to out (render previews: render.h) */
+    int gop;             /* a keyframe every this many frames (0: two seconds') */
 } re_export_settings;
 
 /* The project file exported to out. progress (if given) is told each
@@ -30,13 +31,19 @@ int re_export(const char *project, const char *out, const re_export_settings *s,
               void (*progress)(void *ctx, int done, int total), int (*stop)(void *ctx), void *ctx, char *err,
               int errsize);
 
+/* A clip's file made into its proxy (proxy.h): RE_PROXY_HEIGHT lines, a
+   keyframe every 5 frames, its own frame rate and sound; as re_export */
+int re_export_proxy(const char *file, const char *out, int hardware, void (*progress)(void *ctx, int done, int total),
+                    int (*stop)(void *ctx), void *ctx, char *err, int errsize);
+
 /* The video bit rate (bits a second) for a size, frame rate and quality */
 int re_export_bitrate(int width, int height, double fps, int quality);
 
 /* !RunImage -export project out height quality hardware [in out]: re_export, the
    progress written as "progress DONE TOTAL" lines (at most four a second),
    then "done" or "failed: why" (stopped: killed by its TaskWindow; the
-   caller deletes what was written). The exit status: 0, or 2. */
+   caller deletes what was written). The exit status: 0, or 2.
+   !RunImage -proxy file out hardware: re_export_proxy, the same way. */
 int re_export_main(int argc, char **argv);
 
 #endif

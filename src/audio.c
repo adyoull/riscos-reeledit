@@ -19,6 +19,7 @@
  * Part of riscos-reeledit. GPL version 2 or later.
  */
 #include "project_internal.h"
+#include "proxy.h"
 
 #include <limits.h>
 #include <stdio.h>
@@ -115,7 +116,7 @@ int re_project_audio(re_project *p, int k, int i, re_audio *o)
     o->volume = rp_cut_volume(info.cut);
     o->fade_in = rp_cut_fade(info.cut, RP_SOUND, 0);
     o->fade_out = rp_cut_fade(info.cut, RP_SOUND, 1);
-    const char *leaf = info.resource ? info.resource : "";
+    const char *leaf = info.resource ? re_project_original(p, info.resource) : "";
     for (const char *c = leaf; *c; c++)
         if (*c == '/' || *c == '\\')
             leaf = c + 1;

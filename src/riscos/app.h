@@ -19,6 +19,7 @@
  *   previews.c  the Timeline's thumbnails and waveforms (src/media.c's)
  *   copypaste.c Cut, Copy and Paste
  *   renders.c   render previews: costly stretches made into files, played from them
+ *   proxies.c   proxies: small copies of big or hard-to-decode videos, played in their place
  *   info.c      the Video information window
  *   display.c, sound.c   the picture (overlay or sprite) and the sound
  *
@@ -110,6 +111,7 @@ const char *tl_help(int screen_y); /* interactive help: the ruler, V2 or V1 */
    moving the playhead to the pointer */
 int tl_scrubbing(void);         /* (any drag on the Timeline) */
 void tl_refresh(void);          /* drawn again (its thumbnails and waveforms made) */
+void tl_title(void);            /* its title again (proxies being made) */
 void tl_scrub_tick(void);
 void tl_drag_end(int *block);
 /* Scroll_Request: the wheel scrolls the Timeline sideways; Ctrl+wheel zooms
@@ -231,6 +233,20 @@ int rr_stretches(int i, int *start, int *length, int *made);
    (the caller closes it), or NULL (none: the project) */
 mlt_producer rr_playlist(int *rendered);
 void rr_close(void);   /* the editor closed: stopped, the files deleted */
+
+/* ---- proxies.c: proxies ---- */
+void px_edited(void);  /* the project changed: files wanting proxies found, made one after another */
+int px_message(int *block); /* 1: it was a proxy's (TaskWindow's) */
+int px_pending(void);  /* the project to be made again (proxies made, or turned on or off) */
+void px_applied(void); /* (viewer.c: done) */
+int px_on(void);       /* View > Use proxies */
+void px_toggle(void);
+int px_making(int *made, int *all); /* 1: being made (*made of *all) */
+void px_close(void);   /* the editor closed, quitting: stopped, deleted */
+void px_wipe(void);    /* deleted (and anything left in their directory) */
+void px_forget(void);  /* forgotten, the files left (Reel Edit stopping: tests) */
+void px_recover(void); /* a project recovered: the proxies of the session that stopped, known again */
+void rr_wipe(void);    /* (renders.c) previews left by a session that stopped, deleted */
 
 /* ---- exportbox.c: the Export window ---- */
 int ex_window(void);

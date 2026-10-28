@@ -19,6 +19,7 @@
 #include "export.h"
 #include "engine.h"
 #include "project.h"
+#include "proxy.h"
 
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
@@ -86,7 +87,7 @@ static int encode(re_project *p, const char *out, const re_export_settings *s, c
     mlt_properties_set(cp, "movflags", "+faststart");
     mlt_properties_set(cp, "vcodec", vcodec);
     mlt_properties_set(cp, "pix_fmt", "yuv420p");
-    mlt_properties_set_int(cp, "g", (int) (fps * 2 + 0.5));
+    mlt_properties_set_int(cp, "g", s->gop > 0 ? s->gop : (int) (fps * 2 + 0.5));
     if (!strcmp(vcodec, "libx264")) {
         static const int CRF[3] = {28, 23, 19};
         mlt_properties_set(cp, "vpreset", "veryfast");
@@ -155,12 +156,34 @@ static long size_of(const char *file)
     return n;
 }
 
+static int export_open(re_project *p, const char *out, const re_export_settings *s,
+                       void (*progress)(void *ctx, int done, int total), int (*stop)(void *ctx), void *ctx, char *err,
+                       int errsize);
+
 int re_export(const char *project, const char *out, const re_export_settings *s,
               void (*progress)(void *ctx, int done, int total), int (*stop)(void *ctx), void *ctx, char *err,
               int errsize)
 {
     snprintf(err, errsize, "%s", "");
-    re_project *p = re_project_open(project, 1);
+    return export_open(re_project_open(project, 1), out, s, progress, stop, ctx, err, errsize);
+}
+
+int re_export_proxy(const char *file, const char *out, int hardware, void (*progress)(void *ctx, int done, int total),
+                    int (*stop)(void *ctx), void *ctx, char *err, int errsize)
+{
+    re_export_settings s = {RE_PROXY_HEIGHT, RE_EXPORT_SMALL, hardware, NULL, 0, 0, 0, 5};
+    snprintf(err, errsize, "%s", "");
+    re_project *p = re_project_open(file, 0); /* (the clip as a project of it: its own size and rate) */
+    if (p && re_project_profile(p)->height <= RE_PROXY_HEIGHT)
+        s.height = 0; /* (as it is: small already, but not H.264) */
+    return export_open(p, out, &s, progress, stop, ctx, err, errsize);
+}
+
+/* A project opened (or NULL), exported, closed */
+static int export_open(re_project *p, const char *out, const re_export_settings *s,
+                       void (*progress)(void *ctx, int done, int total), int (*stop)(void *ctx), void *ctx, char *err,
+                       int errsize)
+{
     if (!p || re_project_length(p) <= 0) {
         snprintf(err, errsize, "the project couldn't be read");
         if (p)
@@ -221,8 +244,9 @@ static void say_progress(void *ctx, int done, int total)
 
 int re_export_main(int argc, char **argv)
 {
+    int proxy = argc > 1 && !strcmp(argv[1], "-proxy");
     if (argc < 4) {
-        printf("failed: usage: -export project out [height [quality [hardware [in out]]]]\n");
+        printf("failed: usage: -export project out [height [quality [hardware [in out]]]], -proxy file out [hardware]\n");
         return 2;
     }
     re_export_settings s = {argc > 4 ? atoi(argv[4]) : 0, argc > 5 ? atoi(argv[5]) : RE_EXPORT_NORMAL,
@@ -236,7 +260,9 @@ int re_export_main(int argc, char **argv)
     clock_t last = 0;
     printf("progress 0 0\n");
     fflush(stdout);
-    int r = re_export(argv[2], argv[3], &s, say_progress, NULL, &last, err, sizeof(err));
+    int r = proxy ? re_export_proxy(argv[2], argv[3], argc > 4 && atoi(argv[4]), say_progress, NULL, &last, err,
+                                    sizeof(err))
+                  : re_export(argv[2], argv[3], &s, say_progress, NULL, &last, err, sizeof(err));
     printf(r == 0 ? "done\n" : r == 1 ? "stopped\n" : "failed: %s\n", err);
     fflush(stdout);
     return r < 0 ? 2 : r;
