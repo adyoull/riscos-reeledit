@@ -1,32 +1,69 @@
 # riscos-reeledit
 
-ReelEdit: a video editor for RISC OS, being written. Its engine is the
+ReelEdit: a non-linear video editor for RISC OS. Its engine is the
 [MLT multimedia framework](https://www.mltframework.org) (the engine of
 Shotcut and Kdenlive), patched to run on RISC OS without threads, with the
 Raspberry Pi's video hardware through
 [riscos-reelhwaccel](https://github.com/adyoull/riscos-reelhwaccel) and
 FFmpeg from [riscos-ffmpeg](https://github.com/adyoull/riscos-ffmpeg).
 
-**State:** the engine works on a Raspberry Pi 4 (`!MLT`, engine tests 1-5:
-1080p H.264 on the VideoCore at about 10 ms a picture through MLT, and
-exports in about real time). The desktop program, `!ReelEdit`, has its
-first window, the Viewer (0.1, tested on Linux against a fake Wimp; not
-yet run on RISC OS). The editing windows come next: see
-[docs/DESIGN.md](docs/DESIGN.md).
+**ReelEdit 0.3 Beta** is ready for testing on RISC OS 5 (Raspberry Pi 2, 3
+and 4). Download it from
+[Releases](https://github.com/adyoull/riscos-reeledit/releases). It comes
+with an illustrated User Guide (in the zip, and in [docs/guide](docs/guide)
+here): press F1 in the editor, or choose User guide from the icon bar menu.
+
+![The editor: the Viewer above the Timeline](docs/guide/images/editor-two-clips.png)
+
+## What it does
+
+- Cut, trim, move, split and roll clips; marks, extract and lift; copy and
+  paste; 100 levels of undo
+- Fades and dissolves
+- Each clip's sound muted, faded or set louder or quieter, and music and
+  sound effects on audio tracks that stack as you add them
+- Logos, pictures and picture in picture on an overlay track (V2)
+- Titles in RISC OS fonts, on their own track, so a title can go over a
+  logo or a picture in picture
+- Slow motion, fast motion and reverse
+- A Clips window with three-point editing (insert and overwrite)
+- Render previews and automatic proxies for smooth playback of busy
+  projects and HEVC
+- Autosave with crash recovery
+- Export to MP4 (H.264 and AAC), with the Pi's VideoCore encoder
+- Logging (off as standard; on from the icon bar menu) for bug reports
+
+| | |
+|---|---|
+| ![A title over a logo](docs/guide/images/title-over-logo.png) | ![Picture in picture](docs/guide/images/pip.png) |
+| A title on its own track, over a logo on V2 | Picture in picture |
+| ![Audio tracks](docs/guide/images/audio-stacked.png) | ![Render previews](docs/guide/images/render-bars.png) |
+| Sounds stacking on audio tracks | Render previews: red, rendering, rendered |
+| ![The Clips window](docs/guide/images/clips-window.png) | ![Export](docs/guide/images/export-window.png) |
+| The Clips window | Exporting to MP4 |
+
+**Needs:** RISC OS 5 on ARMv7 with VFP (Raspberry Pi 2, 3, 4);
+SharedUnixLibrary 1.16 or later and ARMEABISupport (PackMan);
+SharedSoundBuffer and StreamManager for sound; `gpu_mem=128` in
+`config.txt` for 1080p.
+
+**Reporting a problem:** choose Logging from the icon bar menu, do it
+again, and attach `<Wimp$ScrapDir>.ReelEditLog` to an
+[issue](https://github.com/adyoull/riscos-reeledit/issues).
 
 ## What's here
 
 | Path | What |
 |---|---|
-| `patches/mlt/` | Five patches to MLT 7.42.0: static modules (no dlopen), no threads, the avformat module without threads, preferred (hardware) decoders with a fallback, opened only when used, and no needless picture conversions |
+| `patches/mlt/` | Patches to MLT 7.42.0 (see [PORTING.md](docs/PORTING.md)): static modules (no dlopen), no threads, the avformat module without threads, preferred (hardware) decoders with a fallback, no needless picture conversions, and faster compositing, scaling and fades (NEON) |
 | `build/` | Fetching the sources, the RISC OS build, the Linux build for the tests, the `!MLT` zip |
 | `src/engine.c` | ReelEdit's player: a project played from Wimp null events, a picture at a time |
 | `src/project.c` | The editing model (MLT's tractor and playlists): add, split, remove, save, open |
-| `src/riscos/` | The desktop program, `!ReelEdit`: the editor (the Viewer and the Timeline, 0.2), the save box, overlay and sprite drawing, sound |
+| `src/riscos/` | The desktop program, `!ReelEdit`: the Viewer, the Timeline, menus and windows, render previews, proxies, autosave, logging, sound |
 | `app/!ReelEdit/` | The application's files (`build/package-reeledit.sh` makes the zip) |
 | `app/!MLT/` | The engine test application: `*melt`, `*mltbench` (`tools/bench.c`), and `Test`, which tries MLT on the machine |
 | `tests/host/` | Linux tests |
-| `docs/` | [DESIGN.md](docs/DESIGN.md): the editor; [PORTING.md](docs/PORTING.md): what was changed for RISC OS and why |
+| `docs/` | [guide/](docs/guide): the User Guide; [DESIGN.md](docs/DESIGN.md): the editor; [PORTING.md](docs/PORTING.md): what was changed for RISC OS and why |
 
 ## Building
 
