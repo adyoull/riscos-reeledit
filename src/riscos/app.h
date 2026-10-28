@@ -17,6 +17,7 @@
  *   titles.c    the Title window: text over the video
  *   fonts.c     titles' text drawn by the Font Manager
  *   previews.c  the Timeline's thumbnails and waveforms (src/media.c's)
+ *   copypaste.c Cut, Copy and Paste
  *   info.c      the Video information window
  *   display.c, sound.c   the picture (overlay or sprite) and the sound
  *
@@ -207,6 +208,12 @@ int pv_busy(void);  /* things to make, and nothing playing or being dragged: nul
 void pv_tick(void); /* a null event: some made (the Timeline drawn again when there's something to see) */
 void pv_close(void); /* the editor closed: all forgotten */
 void pv_redraw_begin(void); /* (the Timeline's redraw starting) */
+
+/* ---- copypaste.c: Cut, Copy and Paste ---- */
+int cp_copy(int cut);  /* the selection copied (cut: then deleted). 1 done, 0 nothing selected */
+void cp_paste(void);   /* at the playhead; selected, the playhead after it */
+int cp_have(void);     /* there's something to paste */
+void cp_close(void);   /* the editor closed: the copy forgotten */
 
 /* ---- exportbox.c: the Export window ---- */
 int ex_window(void);

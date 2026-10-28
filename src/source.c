@@ -158,16 +158,21 @@ static int item_starting(re_project *p, int frame)
 
 int re_project_insert(re_project *p, const char *file, int in, int out, int frame)
 {
+    mlt_producer cut = source(p, file, in, out);
+    return cut ? rp_insert_cut(p, cut, frame) : -1;
+}
+
+int rp_insert_cut(re_project *p, mlt_producer cut, int frame)
+{
     if (frame < 0)
         frame = 0;
     int len = re_project_length(p);
     if (frame > len)
         frame = len;
-    if (frame > 0 && frame < len && dissolved(p, frame - 1, frame))
+    if (frame > 0 && frame < len && dissolved(p, frame - 1, frame)) {
+        mlt_producer_close(cut);
         return -1;
-    mlt_producer cut = source(p, file, in, out);
-    if (!cut)
-        return -1;
+    }
     rp_checkpoint(p);
     if (rp_make_tracks(p) < 0) {
         rp_no_edit(p);

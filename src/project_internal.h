@@ -3,8 +3,9 @@
  * overlay.c). Not for the editor's
  * windows or the engine: they use project.h.
  *
- * An edit: rp_checkpoint (the undo point; not within re_project_begin/end),
- * the MLT playlist calls, then rp_changed; or rp_no_edit if nothing was done.
+ * An edit: rp_checkpoint (the undo point; within re_project_begin/end,
+ * none: the edit's is begin's), the MLT playlist calls, then rp_changed; or
+ * rp_no_edit if nothing was done.
  *
  * Part of riscos-reeledit. GPL version 2 or later.
  */
@@ -50,6 +51,17 @@ int rp_split_at(re_project *p, int frame);
 void rp_bin_read(re_project *p);
 void rp_bin_write(re_project *p);
 void rp_bin_free(re_project *p);
+/* source.c: a cut put on V1 at a frame (insert: what's there split, what
+   follows moving on; past the end: at the end), taken over. Its index, or
+   -1 (into a dissolve; closed) */
+int rp_insert_cut(re_project *p, mlt_producer cut, int frame);
+/* overlay.c: a producer (taken over) put on V2 from a frame, its frames
+   in.. for length, placed so: as an overlay's added. Its index, or -1.
+   audio.c: the same on the audio tracks (stacked); 0 (*track, *i), or -1 */
+int rp_overlay_put(re_project *p, mlt_producer prod, int in, int frame, int length, int place, int size);
+int rp_audio_put(re_project *p, mlt_producer prod, int in, int frame, int length, int *track, int *i);
+/* audio.c: an audio track's playlist (NULL: none) */
+mlt_playlist rp_audio_track(re_project *p, int k);
 
 
 void rp_checkpoint(re_project *p); /* before an edit: the project as it is, to undo to */

@@ -936,6 +936,7 @@ static int close_editor(void)
     V.source = 0;
     cl_close();
     pv_close();
+    cp_close();
     as_forget(); /* (kept or discarded: closed as asked) */
     if (V.win) {
         _kernel_swi_regs r;
@@ -1123,6 +1124,28 @@ static void trim(int end)
     }
 }
 
+/* E (Premiere's "extend the edit"): the cut nearest the playhead rolled to
+   it, the clips either side trimmed together */
+static void roll(void)
+{
+    if (!A.proj || V.source)
+        return;
+    int pos = app_position(), len = re_project_length(A.proj);
+    int b = re_project_cut(A.proj, pos, -1), a = re_project_cut(A.proj, pos, 1);
+    if (b == 0)
+        b = -1; /* (the start and the end aren't between two items) */
+    if (a >= len)
+        a = -1;
+    int cut = b < 0 ? a : a < 0 ? b : pos - b <= a - pos ? b : a;
+    int i = cut > 0 ? re_project_item_at(A.proj, cut - 1) : -1;
+    if (i < 0 || !re_project_roll(A.proj, i, pos)) {
+        app_log("roll: the cut at %d not rolled to %d", cut, pos);
+        return;
+    }
+    app_log("roll: the cut at %d rolled to %d", cut, pos);
+    app_edited();
+}
+
 static void to_cut(int dir)
 {
     if (!A.proj)
@@ -1195,10 +1218,16 @@ static void save(int x, int y)
 static MENU(4) m_file = {"File", 7, 2, 7, 0, 300, 44, 0,
                          {{0, -1, IT("New")}, {0, -1, IT("Save           F3")}, {2, -1, IT("Save as...")},
                           {0x80, -1, IT("Export...      ^E")}}};
-static MENU(14) m_edit = {"Edit", 7, 2, 7, 0, 520, 44, 0,
+/* (the Edit menu's items: E_ */
+enum { E_UNDO, E_REDO, E_CUT, E_COPY, E_PASTE, E_SPLIT, E_TRIM_START, E_TRIM_END, E_ROLL, E_DISSOLVE, E_FADE_IN,
+       E_FADE_OUT, E_DELETE, E_DELETE_GAP, E_EXTRACT, E_LIFT, E_CLEAR, E_TITLE, E_N };
+static MENU(E_N) m_edit = {"Edit", 7, 2, 7, 0, 520, 44, 0,
                          {{0, -1, IT("Undo                     F8")}, {2, -1, IT("Redo                     F9")},
+                          {0, -1, IT("Cut                      ^X")}, {0, -1, IT("Copy                     ^C")},
+                          {2, -1, IT("Paste at the playhead    ^V")},
                           {0, -1, IT("Split at the playhead     S")}, {0, -1, IT("Trim the start to it      Q")},
-                          {0, -1, IT("Trim the end to it        W")}, {2, -1, IT("Dissolve at the cut       D")},
+                          {0, -1, IT("Trim the end to it        W")}, {0, -1, IT("Roll the nearest cut to it E")},
+                          {2, -1, IT("Dissolve at the cut       D")},
                           {0, -1, IT("Fade in")}, {2, -1, IT("Fade out")},
                           {0, -1, IT("Delete               Delete")},
                           {2, -1, IT("Delete, leaving a gap   \x8b" "Del")},
@@ -1262,24 +1291,29 @@ void app_menu(int x, int y)
     menu_shade(&m_file.item[1].iflags, !has);
     menu_shade(&m_file.item[2].iflags, !has);
     menu_shade(&m_file.item[3].iflags, !has);
-    menu_shade(&m_edit.item[0].iflags, !A.proj || !re_project_can_undo(A.proj));
-    menu_shade(&m_edit.item[1].iflags, !A.proj || !re_project_can_redo(A.proj));
-    for (int i = 2; i <= 4; i++)
-        menu_shade(&m_edit.item[i].iflags, !has);
-    menu_shade(&m_edit.item[5].iflags, !A.proj || re_project_dissolve_cut(A.proj, app_position()) < 0);
+    menu_shade(&m_edit.item[E_UNDO].iflags, !A.proj || !re_project_can_undo(A.proj));
+    menu_shade(&m_edit.item[E_REDO].iflags, !A.proj || !re_project_can_redo(A.proj));
     re_item sel;
     int clip = A.proj && A.sel >= 0 && !re_project_item(A.proj, A.sel, &sel) && !sel.gap && !sel.mix;
-    for (int i = 6; i <= 7; i++) { /* (ticked: it has one) */
+    int any = clip || A.ov_sel >= 0 || A.au_sel >= 0; /* (something to copy) */
+    menu_shade(&m_edit.item[E_CUT].iflags, !any);
+    menu_shade(&m_edit.item[E_COPY].iflags, !any);
+    menu_shade(&m_edit.item[E_PASTE].iflags, !has || !cp_have() || V.source);
+    for (int i = E_SPLIT; i <= E_ROLL; i++)
+        menu_shade(&m_edit.item[i].iflags, !has);
+    menu_shade(&m_edit.item[E_DISSOLVE].iflags, !A.proj || re_project_dissolve_cut(A.proj, app_position()) < 0);
+    for (int i = E_FADE_IN; i <= E_FADE_OUT; i++) { /* (ticked: it has one) */
         menu_shade(&m_edit.item[i].iflags, !clip);
-        m_edit.item[i].flags = (m_edit.item[i].flags & ~1) | (clip && (i == 6 ? sel.fade_in : sel.fade_out) ? 1 : 0);
+        m_edit.item[i].flags =
+            (m_edit.item[i].flags & ~1) | (clip && (i == E_FADE_IN ? sel.fade_in : sel.fade_out) ? 1 : 0);
     }
-    for (int i = 8; i <= 9; i++)
-        menu_shade(&m_edit.item[i].iflags, A.sel < 0 && (i == 9 || A.ov_sel < 0));
+    for (int i = E_DELETE; i <= E_DELETE_GAP; i++)
+        menu_shade(&m_edit.item[i].iflags, A.sel < 0 && (i == E_DELETE_GAP || (A.ov_sel < 0 && A.au_sel < 0)));
     int marked = A.mark_in >= 0 || A.mark_out >= 0;
-    menu_shade(&m_edit.item[10].iflags, !marked);
-    menu_shade(&m_edit.item[11].iflags, !marked);
-    menu_shade(&m_edit.item[12].iflags, A.sel < 0 && A.ov_sel < 0);
-    menu_shade(&m_edit.item[13].iflags, !has);
+    menu_shade(&m_edit.item[E_EXTRACT].iflags, !marked);
+    menu_shade(&m_edit.item[E_LIFT].iflags, !marked);
+    menu_shade(&m_edit.item[E_CLEAR].iflags, A.sel < 0 && A.ov_sel < 0 && A.au_sel < 0);
+    menu_shade(&m_edit.item[E_TITLE].iflags, !has);
     for (int i = 3; i <= 4; i++)
         menu_shade(&m_play.item[i].iflags, !has);
     menu_shade(&m_play.item[5].iflags, !marked);
@@ -1397,20 +1431,24 @@ static void menu_select(int *b)
         break;
     case 1: /* Edit */
         switch (b[1]) {
-        case 0: undo(0); break;
-        case 1: undo(1); break;
-        case 2: split(); break;
-        case 3: trim(0); break;
-        case 4: trim(1); break;
-        case 5: fx_dissolve_at_cut(); break;
-        case 6: fx_fade_toggle(A.sel, 0); break;
-        case 7: fx_fade_toggle(A.sel, 1); break;
-        case 8: app_delete_selection(1); break;
-        case 9: app_delete(A.sel, 0); break;
-        case 10: mk_take(1); break;
-        case 11: mk_take(0); break;
-        case 12: tl_select(-1); break;
-        case 13: ti_open(-1); break;
+        case E_UNDO: undo(0); break;
+        case E_REDO: undo(1); break;
+        case E_CUT: cp_copy(1); break;
+        case E_COPY: cp_copy(0); break;
+        case E_PASTE: cp_paste(); break;
+        case E_SPLIT: split(); break;
+        case E_TRIM_START: trim(0); break;
+        case E_TRIM_END: trim(1); break;
+        case E_ROLL: roll(); break;
+        case E_DISSOLVE: fx_dissolve_at_cut(); break;
+        case E_FADE_IN: fx_fade_toggle(A.sel, 0); break;
+        case E_FADE_OUT: fx_fade_toggle(A.sel, 1); break;
+        case E_DELETE: app_delete_selection(1); break;
+        case E_DELETE_GAP: app_delete(A.sel, 0); break;
+        case E_EXTRACT: mk_take(1); break;
+        case E_LIFT: mk_take(0); break;
+        case E_CLEAR: tl_select(-1); break;
+        case E_TITLE: ti_open(-1); break;
         }
         break;
     case 2: /* Play */
@@ -1485,6 +1523,10 @@ int app_key(int k)
     case 0x1E: app_seek(0); return 1;             /* Home */
     case 0x18B: if (A.e) app_seek(re_engine_length(A.e) - 1); return 1; /* Copy (End) */
     case 's': case 'S': split(); return 1;
+    case 'e': case 'E': roll(); return 1;
+    case 3: cp_copy(0); return 1;                 /* Ctrl-C */
+    case 24: cp_copy(1); return 1;                /* Ctrl-X */
+    case 22: cp_paste(); return 1;                /* Ctrl-V */
     case 0x7F: case 8: app_delete_selection(!shift_down()); return 1; /* Delete, Backspace */
     case '+': case '=': tl_zoom(1); return 1;
     case '-': case '_': tl_zoom(0); return 1;
@@ -1889,6 +1931,7 @@ void re_test_crash(void)
     }
     tl_close();
     pv_close();
+    cp_close();
     re_project_close(A.proj);
     A.proj = NULL;
     A.path[0] = 0;

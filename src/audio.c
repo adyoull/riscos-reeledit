@@ -123,6 +123,11 @@ int re_project_audio(re_project *p, int k, int i, re_audio *o)
     return 0;
 }
 
+mlt_playlist rp_audio_track(re_project *p, int k)
+{
+    return track(p, k);
+}
+
 const char *re_project_audio_file(re_project *p, int k, int i)
 {
     mlt_playlist_clip_info info;
@@ -164,6 +169,11 @@ int re_project_audio_add(re_project *p, const char *file, int frame, int length,
     }
     if (length <= 0 || length > len)
         length = len;
+    return rp_audio_put(p, prod, 0, frame, length, at_track, at);
+}
+
+int rp_audio_put(re_project *p, mlt_producer prod, int in, int frame, int length, int *at_track, int *at)
+{
     if (frame < 0)
         frame = 0;
     int end = re_project_length(p);
@@ -211,11 +221,11 @@ int re_project_audio_add(re_project *p, const char *file, int frame, int length,
         }
         s = more;
     }
-    s[items].cut = mlt_producer_cut(prod, 0, want - 1);
+    s[items].cut = mlt_producer_cut(prod, in, in + want - 1);
     mlt_producer_close(prod);
     s[items].start = frame;
     s[items].length = want;
-    s[items].in = 0;
+    s[items].in = in;
     rp_track_sort(s, items + 1);
     rp_track_write(target, s, items + 1);
     rp_changed(p);

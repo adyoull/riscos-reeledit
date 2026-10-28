@@ -95,6 +95,8 @@ static int push(struct snap **v, int *n, char *xml, unsigned state)
 /* Before an edit: the project as it is, to go back to (and nothing to redo) */
 void rp_checkpoint(re_project *p)
 {
+    if (p->in_edit) /* (within re_project_begin/end: its undo point is the edit's) */
+        return;
     push(&p->undo, &p->n_undo, snapshot(p), p->state);
     drop_snaps(p->redo, &p->n_redo);
 }
@@ -102,6 +104,8 @@ void rp_checkpoint(re_project *p)
 /* An edit that didn't happen: its checkpoint dropped */
 void rp_no_edit(re_project *p)
 {
+    if (p->in_edit) /* (begin's point stays: end drops it if nothing changed) */
+        return;
     if (p->n_undo > 0)
         free(p->undo[--p->n_undo].xml);
 }
@@ -643,6 +647,39 @@ void re_project_end(re_project *p)
         p->state = p->edit_state;
     }
     free(now);
+}
+
+int re_project_roll(re_project *p, int item, int frame)
+{
+    re_item a, b;
+    if (re_project_item(p, item, &a) || re_project_item(p, item + 1, &b) || a.mix || b.mix || (a.gap && b.gap))
+        return 0;
+    int d = frame - b.start;
+    /* (each side keeps a frame at least, and a clip its file's frames) */
+    int lo = a.gap ? -(a.length - 1) : -(a.out - a.in), hi = a.gap ? d : a.source_length - 1 - a.out;
+    if (!b.gap) {
+        if (-b.in > lo)
+            lo = -b.in;
+        if (b.out - b.in < hi)
+            hi = b.out - b.in;
+    } else if (b.length - 1 < hi) {
+        hi = b.length - 1;
+    }
+    d = d < lo ? lo : d > hi ? hi : d;
+    if (d == 0)
+        return 0;
+    if (!p->in_edit)
+        rp_checkpoint(p);
+    if (a.gap)
+        mlt_playlist_resize_clip(p->v1, item, 0, a.length - 1 + d);
+    else
+        mlt_playlist_resize_clip(p->v1, item, a.in, a.out + d);
+    if (b.gap)
+        mlt_playlist_resize_clip(p->v1, item + 1, 0, b.length - 1 - d);
+    else
+        mlt_playlist_resize_clip(p->v1, item + 1, b.in + d, b.out);
+    rp_changed(p);
+    return 1;
 }
 
 int re_project_set_in_out(re_project *p, int item, int in, int out)

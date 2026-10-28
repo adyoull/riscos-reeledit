@@ -1357,7 +1357,7 @@ static int script(int *b, int mask)
         return 6; /* Menu */
     case 128:
         next(129);
-        b[0] = 1; b[1] = 7; b[2] = -1; /* Edit > Fade out */
+        b[0] = 1; b[1] = 11; b[2] = -1; /* Edit > Fade out */
         return 9;
     case 129: {
         if (nulls)
@@ -2486,8 +2486,135 @@ static int script(int *b, int mask)
         CHECK(re_test_speed() == 0 && mark == 0 && th > 0 && re_test_previews_stand_ins() == 0,
               "previews: stopped, %d to make, %d drawn, %d stand-ins in the last redraw", mark, th,
               re_test_previews_stand_ins());
+        /* ---- copy and paste (copypaste.c); rolls ---- */
+        for (int i = 0; i < re_project_items(re_test_project()); i++) { /* (a clip 20 frames long or more) */
+            re_item it;
+            re_project_item(re_test_project(), i, &it);
+            if (!it.gap && !it.mix && it.length >= 20) {
+                rec = it.length;
+                th = i;
+                next(327);
+                return click_tl(b, it.start + it.length / 2, 0, 0x400);
+            }
+        }
+        fail_quit("copy: no clip 20 frames long to copy");
+        return 0;
+    case 327:
+        if (nulls)
+            return 0;
+        CHECK(re_test_selected() == th, "copy: clip %d not selected (%d)", th, re_test_selected());
+        mark = re_project_items(re_test_project());
+        wr = re_project_length(re_test_project());
+        next(328);
+        return key_to(b, TL, 3); /* Ctrl-C */
+    case 328:
+        if (nulls)
+            return 0;
+        next(329);
+        return key_to(b, TL, 0x1E); /* Home */
+    case 329:
+        if (nulls)
+            return 0;
+        next(330);
+        return key_to(b, TL, 22); /* Ctrl-V */
+    case 330: {
+        if (nulls)
+            return 0;
+        re_item it;
+        re_project_item(re_test_project(), 0, &it);
+        CHECK(re_project_items(re_test_project()) == mark + 1 && re_test_selected() == 0 && it.length == rec
+                  && pos == rec && re_project_length(re_test_project()) == wr + rec,
+              "paste: %d items (%d), selected %d, the first %d long (%d), the playhead at %d", re_project_items(re_test_project()),
+              mark + 1, re_test_selected(), it.length, rec, pos);
+        shot("32-pasted");
+        next(331);
+        return key_to(b, TL, 24); /* Ctrl-X */
+    }
+    case 331:
+        if (nulls)
+            return 0;
+        CHECK(re_project_items(re_test_project()) == mark && re_project_length(re_test_project()) == wr,
+              "cut: %d items (%d)", re_project_items(re_test_project()), mark);
+        next(332);
+        return key_to(b, TL, 22); /* Ctrl-V: back */
+    case 332:
+        if (nulls)
+            return 0;
+        CHECK(re_project_items(re_test_project()) == mark + 1, "cut, pasted: %d items (%d)",
+              re_project_items(re_test_project()), mark + 1);
+        wr = re_project_length(re_test_project());
+        next(333);
+        return click_tl(b, rec / 2, 1, 0x400); /* (the ruler: the playhead to the pasted clip's middle) */
+    case 333:
+        if (nulls)
+            return 0;
+        CHECK(pos == rec / 2, "roll: the playhead at %d, not %d", pos, rec / 2);
+        next(334);
+        return key_to(b, TL, 's');
+    case 334: {
+        if (nulls)
+            return 0;
+        re_item it;
+        re_project_item(re_test_project(), 0, &it);
+        CHECK(it.length == rec / 2, "roll: split at %d: %d long", rec / 2, it.length);
+        next(335);
+        return click_tl(b, rec / 2 - 3, 1, 0x400);
+    }
+    case 335:
+        if (nulls)
+            return 0;
+        next(336);
+        return key_to(b, TL, 'e'); /* the cut 3 frames on rolled to the playhead */
+    case 336: {
+        if (nulls)
+            return 0;
+        re_item it;
+        re_project_item(re_test_project(), 0, &it);
+        CHECK(it.length == rec / 2 - 3 && re_project_length(re_test_project()) == wr
+                  && re_project_items(re_test_project()) == mark + 2,
+              "roll (E): the first clip %d long (%d), the project %d (%d)", it.length, rec / 2 - 3,
+              re_project_length(re_test_project()), wr);
+        ctrl_key = 1; /* (a Ctrl-drag at the cut: a roll) */
+        next(337);
+        b[0] = W[1].box[0] - W[1].scroll_x + 16 + (int) ((rec / 2 - 3) * tl_scale) - 4;
+        b[1] = W[1].box[3] - TL_V1_TOP - 48;
+        b[2] = 0x40; b[3] = TL; b[4] = -1;
+        return 6;
+    }
+    case 337:
+        ptr[0] = W[1].box[0] - W[1].scroll_x + 16 + (int) ((rec / 2 - 3) * tl_scale) - 4 + (int) (5 * tl_scale);
+        ptr[1] = W[1].box[3] - 100;
+        next(338);
+        return script(b, mask);
+    case 338: {
+        re_item it;
+        re_project_item(re_test_project(), 0, &it);
+        if (it.length == rec / 2 + 2 && !re_test_busy()) {
+            CHECK(re_project_length(re_test_project()) == wr && re_project_items(re_test_project()) == mark + 2,
+                  "roll (Ctrl-drag): the project %d long (%d), %d items", re_project_length(re_test_project()), wr,
+                  re_project_items(re_test_project()));
+            ctrl_key = 0;
+            next(339);
+            return 7; /* the drag ends */
+        }
+        if (fake_cs - phase_cs > 100)
+            fail_quit("roll: a Ctrl-drag 5 frames on: the first clip %d long, not %d", it.length, rec / 2 + 2);
+        return nulls ? 0 : (fail_quit("null events masked while rolling"), 0);
+    }
+    case 339:
+        if (nulls)
+            return 0;
+        next(340);
+        return key_to(b, TL, 0x188); /* F8 */
+    case 340: {
+        if (nulls)
+            return 0;
+        re_item it;
+        re_project_item(re_test_project(), 0, &it);
+        CHECK(it.length == rec / 2 - 3, "roll: one F8 for the drag: %d long (%d)", it.length, rec / 2 - 3);
         next(45);
         return key_to(b, TL, 0x18D);
+    }
     case 45: /* the desktop shutting down: asked, Discard; the shutdown started again; quit */
         if (nulls)
             return 0;

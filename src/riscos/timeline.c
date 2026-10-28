@@ -13,7 +13,8 @@
  * it go in at the frame they're dropped on. Dragged on the track (see
  * drag_mode_at):
  *   - a clip's edge trims it (ripple: what follows moves along; the Viewer
- *     shows the frame at the edge);
+ *     shows the frame at the edge); with Ctrl, rolls the cut there (the
+ *     clips either side trimmed together, nothing else moving);
  *   - a clip's middle moves it (a line shows where it'll go, at the cut
  *     nearest the pointer);
  *   - the white mark at the bottom of a cut makes a dissolve there, as long
@@ -86,7 +87,7 @@ static int audio_rows(void)
    a clip's fade in or out made longer or shorter (from its handle at the
    top of the clip) */
 enum { DRAG_NONE, DRAG_SCRUB, DRAG_IN, DRAG_OUT, DRAG_MOVE, DRAG_DISSOLVE, DRAG_MIX_IN, DRAG_MIX_OUT, DRAG_FADE_IN,
-       DRAG_FADE_OUT, DRAG_OV_MOVE, DRAG_OV_IN, DRAG_OV_OUT, DRAG_AU_MOVE, DRAG_AU_IN, DRAG_AU_OUT };
+       DRAG_FADE_OUT, DRAG_OV_MOVE, DRAG_OV_IN, DRAG_OV_OUT, DRAG_AU_MOVE, DRAG_AU_IN, DRAG_AU_OUT, DRAG_ROLL };
 
 static struct
 {
@@ -1008,7 +1009,14 @@ static const char *const drag_names[] = {"", "scrubbing", "trimming the start of
                                          "making a dissolve after", "dragging the start of", "dragging the end of",
                                          "fading in", "fading out", "moving overlay", "trimming the start of overlay",
                                          "trimming the end of overlay", "moving sound", "trimming the start of sound",
-                                         "trimming the end of sound"};
+                                         "trimming the end of sound", "rolling the cut after"};
+
+static int ctrl_down(void)
+{
+    _kernel_swi_regs r;
+    r.r[0] = 121; r.r[1] = 1 ^ 0x80; /* OS_Byte 121: Ctrl down? */
+    return !ro_swi(OS_Byte, &r) && (r.r[1] & 0xFF) == 0xFF;
+}
 
 /* While dragging, the Viewer shows a frame (the edge trimmed, a fade's or
    a dissolve's middle) once the pointer rests: a picture decoded at each
@@ -1105,10 +1113,20 @@ static void audio_drag_start(int k, int f, int wx, int *b, int *st)
 static void drag_start(int f, int wx, int wy, int *b, int *st)
 {
     int i = -1, mode = drag_mode_at(wx, wy, &i);
-    re_item it;
+    re_item it, other;
     if (mode == DRAG_NONE || re_project_item(A.proj, i, &it)) {
         app_log("timeline: a drag at %d,%d, on no clip", wx, wy);
         return;
+    }
+    /* with Ctrl, a clip's edge: the cut there rolled (a clip or a gap the
+       other side; not a dissolve) */
+    if ((mode == DRAG_IN || mode == DRAG_OUT) && ctrl_down()) {
+        int before = mode == DRAG_OUT ? i : i - 1;
+        if (before >= 0 && !re_project_item(A.proj, before + 1, &other) && !other.mix
+            && !re_project_item(A.proj, before, &it) && !it.mix) {
+            mode = DRAG_ROLL;
+            i = before;
+        }
     }
     app_set_speed(0);
     T.d_item = i;
@@ -1133,7 +1151,7 @@ static void drag_start(int f, int wx, int wy, int *b, int *st)
     if (mode == DRAG_MOVE)
         return;
     re_project_begin(A.proj); /* (one undo for the whole drag) */
-    if (mode == DRAG_IN || mode == DRAG_OUT)
+    if (mode == DRAG_IN || mode == DRAG_OUT || mode == DRAG_ROLL)
         app_seek(mode == DRAG_IN ? it.start : it.start + it.length - 1);
     else if (mode == DRAG_MIX_IN || mode == DRAG_MIX_OUT)
         show_dissolve(i);
@@ -1177,6 +1195,13 @@ static void drag_tick(int f)
             app_edited_dragging();
             if (!re_project_item(A.proj, T.d_item, &it))
                 show_later(it.start + it.length - 1); /* (its last frame now) */
+        }
+        break;
+    case DRAG_ROLL: /* (the cut was at the clip's end; the Viewer shows the frame before it) */
+        if (re_project_roll(A.proj, T.d_item, T.d_start + T.d_len + delta)) {
+            app_edited_dragging();
+            if (!re_project_item(A.proj, T.d_item, &it))
+                show_later(it.start + it.length - 1);
         }
         break;
     case DRAG_DISSOLVE: { /* (as long as the pointer has come from the cut, either way) */
@@ -1407,9 +1432,7 @@ void tl_scroll(int *b)
 {
     _kernel_swi_regs r;
     int dx = b[8], dy = b[9];
-    r.r[0] = 121; r.r[1] = 1 ^ 0x80; /* OS_Byte 121: Ctrl down? */
-    int ctrl = !ro_swi(OS_Byte, &r) && (r.r[1] & 0xFF) == 0xFF;
-    if (ctrl && dy) {
+    if (ctrl_down() && dy) {
         int p[5];
         r.r[1] = (intptr_t) p;
         ro_swi(Wimp_GetPointerInfo, &r);
@@ -1471,8 +1494,8 @@ const char *tl_help(int screen_y)
     if (wy < TRACK_BOTTOM - 4 && audio_row(wy) >= 0)
         return "These are the audio tracks: music and sound effects.|MDrop sound here (one dropped where another "
                "plays goes on the track below); drag one to move it, its ends to trim it; Menu over it for its sound.";
-    return "This is V1: the clips.|MClick a clip to select it; drag its edge to trim it, its middle to move it.|M"
-           "Menu over a clip gives its effects (fades, sound, dissolves).|MCtrl and the wheel zoom.";
+    return "This is V1: the clips.|MClick a clip to select it; drag its edge to trim it (with Ctrl: roll the "
+           "cut), its middle to move it.|MMenu over a clip gives its effects.|MCtrl and the wheel zoom.";
 }
 
 void tl_refresh(void)

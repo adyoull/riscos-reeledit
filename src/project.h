@@ -102,6 +102,12 @@ void re_project_end(re_project *p);
    follows moving up or along: ripple trimming by dragging an edge. Kept to
    the file and to one frame at least. 1 changed, 0 not. */
 int re_project_set_in_out(re_project *p, int item, int in, int out);
+/* A roll (Premiere's rolling edit): the cut after an item moved to a
+   frame, the item ending there and the next starting there, the project's
+   length kept. Either may be a gap, not both; not a dissolve. Kept to the
+   clips' files, each side a frame at least. 1 changed, 0 not. Between
+   begin and end too. */
+int re_project_roll(re_project *p, int item, int frame);
 /* Moves an item so it comes before what is now item `before` (the number
    of items: to the end); what it leaves closes up. Its new index, or -1 if
    nothing moved (a dissolve, a clip in one, or into one, isn't moved). */
@@ -272,6 +278,22 @@ int re_project_clip_remove(re_project *p, int i);
    dissolve. Its item's index, or -1. */
 int re_project_insert(re_project *p, const char *file, int in, int out, int frame);
 int re_project_overwrite(re_project *p, const char *file, int in, int out, int frame);
+
+/* Copy and paste (clipboard.c): a clip on V1 (track not used), an overlay
+   on V2 (not used) or a sound on an audio track, copied with its fades,
+   mute, level and (an overlay) place, size and opacity; NULL if there's no
+   such thing. Pasted at a frame as one edit: a clip inserted there (what's
+   there split, what follows moving on; not into a dissolve), an overlay
+   where there's room from there, a sound on the first audio track with
+   room (*track). Its index, or -1. The copy keeps what it was copied from
+   (deleted since, it can still be pasted); for this project only. */
+typedef struct re_copy re_copy;
+enum { RE_COPY_CLIP, RE_COPY_OVERLAY, RE_COPY_SOUND };
+re_copy *re_project_copy(re_project *p, int kind, int track, int i);
+int re_project_paste(re_project *p, const re_copy *c, int frame, int *track);
+int re_copy_kind(const re_copy *c);   /* RE_COPY_ (-1: NULL) */
+int re_copy_length(const re_copy *c); /* frames */
+void re_copy_free(re_copy *c);
 
 /* Undo and redo (up to 100 edits): the project as it was before the last
    edit, and back. 1 done, 0 nothing to do. The producer changes: an

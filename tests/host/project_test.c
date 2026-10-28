@@ -1228,6 +1228,168 @@ static void source_editing(const char *a, const char *b, const char *numbered, c
     re_project_close(p);
 }
 
+/* ---- rolls: a cut moved, the clips either side changed, the length kept -- */
+static void rolls(const char *numbered, const char *b)
+{
+    re_engine_io io = {show, NULL, clk, NULL, 48000, 2, NULL};
+    re_project *p = re_project_new();
+    re_item x, y;
+    re_project_add(p, numbered, -1);
+    re_project_split(p, 30);
+    re_project_set_in_out(p, 1, 40, 74); /* numbered 0-29, then 40-74 */
+    CHECK(!strcmp(layout(p), "c30 c35"), "rolls: set up: %s", layout(p));
+    unsigned ch = re_project_changes(p);
+    CHECK(re_project_roll(p, 0, 35) == 1 && !strcmp(layout(p), "c35 c30") && re_project_length(p) == 65,
+          "rolls: to 35: %s, %d", layout(p), re_project_length(p));
+    re_project_item(p, 0, &x);
+    re_project_item(p, 1, &y);
+    CHECK(x.out == 34 && y.in == 45 && y.start == 35 && re_project_changes(p) > ch, "rolls: out %d, in %d, at %d",
+          x.out, y.in, y.start);
+    re_engine *e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    CHECK(abs(luma_at(e, 35) - (16 + 2 * 45)) <= 2 && abs(luma_at(e, 34) - (16 + 2 * 34)) <= 2,
+          "rolls: frames 34, 35 show %d, %d (not %d, %d)", luma_at(e, 34), luma_at(e, 35), 16 + 68, 16 + 90);
+    re_engine_close(e);
+    /* kept to the files, a frame each side */
+    CHECK(re_project_roll(p, 0, 1000) == 1 && !strcmp(layout(p), "c64 c1"), "rolls: right to the end: %s",
+          layout(p));
+    CHECK(re_project_roll(p, 0, -50) == 1 && !strcmp(layout(p), "c1 c64"), "rolls: left to the start: %s",
+          layout(p));
+    re_project_item(p, 1, &y);
+    CHECK(y.in == 11, "rolls: left to the start: the second's in %d, not 11", y.in);
+    CHECK(re_project_roll(p, 0, 1) == 0 && re_project_roll(p, 1, 10) == 0 && re_project_roll(p, -1, 10) == 0,
+          "rolls: nothing to do, or no cut");
+    /* one undo */
+    CHECK(re_project_undo(p) && !strcmp(layout(p), "c64 c1"), "rolls: undone: %s", layout(p));
+    /* a drag's many steps: one undo */
+    re_project_begin(p);
+    re_project_roll(p, 0, 40);
+    re_project_roll(p, 0, 50);
+    re_project_end(p);
+    CHECK(!strcmp(layout(p), "c50 c15") && re_project_undo(p) && !strcmp(layout(p), "c64 c1"),
+          "rolls: a drag, undone: %s", layout(p));
+    /* into a gap, out of one */
+    re_project_add(p, b, -1);
+    re_project_remove(p, 1, 0); /* c64 g1 c75 */
+    CHECK(!strcmp(layout(p), "c64 g1 c75"), "rolls: a gap: %s", layout(p));
+    CHECK(re_project_roll(p, 1, 55) == 0 && !strcmp(layout(p), "c64 g1 c75"),
+          "rolls: the gap's end left (the clip after has nothing before it): %s", layout(p));
+    CHECK(re_project_roll(p, 0, 60) == 1 && !strcmp(layout(p), "c60 g5 c75"), "rolls: into the gap: %s", layout(p));
+    CHECK(re_project_roll(p, 1, 67) == 1 && !strcmp(layout(p), "c60 g7 c73") && (re_project_item(p, 2, &y), y.in == 2),
+          "rolls: the gap's end right: %s, in %d", layout(p), y.in);
+    CHECK(re_project_roll(p, 1, 60) == 1 && !strcmp(layout(p), "c60 g5 c75"),
+          "rolls: the gap's end left, as far as the clip after has frames: %s", layout(p));
+    re_project_roll(p, 1, 67);
+    CHECK(re_project_roll(p, 0, 70) == 1 && !strcmp(layout(p), "c66 g1 c73"), "rolls: the gap keeps a frame: %s",
+          layout(p));
+    /* a clip at its file's end: not further */
+    re_project_close(p);
+    p = re_project_new();
+    re_project_add(p, numbered, -1);
+    re_project_add(p, b, -1);
+    CHECK(re_project_roll(p, 0, 100) == 0 && !strcmp(layout(p), "c75 c75"), "rolls: past the file's end: %s",
+          layout(p));
+    /* not a dissolve */
+    re_project_close(p);
+    p = re_project_new();
+    re_project_add(p, numbered, -1);
+    re_project_split(p, 30);
+    int mix = re_project_dissolve(p, 0, 10, 1);
+    CHECK(mix == 1 && re_project_roll(p, 0, 25) == 0 && re_project_roll(p, 1, 25) == 0,
+          "rolls: a dissolve rolled (%s)", layout(p));
+    re_project_close(p);
+}
+
+/* ---- copy and paste --------------------------------------------------------- */
+static void copy_paste(const char *a, const char *snd, const char *pic)
+{
+    re_project *p = re_project_new();
+    re_item it;
+    re_project_add(p, a, -1);
+    re_project_add(p, snd, -1);
+    re_project_set_in_out(p, 1, 5, 64); /* numbered-snd's 5-64 */
+    re_project_fade(p, 1, 0, 10);
+    re_project_sound_fade(p, 1, 1, 6);
+    re_project_volume(p, 1, -6);
+    re_project_mute(p, 1, 1);
+    re_copy *c = re_project_copy(p, RE_COPY_CLIP, 0, 1);
+    CHECK(c && re_copy_kind(c) == RE_COPY_CLIP && re_copy_length(c) == 60, "copy: a clip: %d",
+          c ? re_copy_length(c) : -1);
+    CHECK(!re_project_copy(p, RE_COPY_CLIP, 0, 7) && !re_project_copy(p, RE_COPY_OVERLAY, 0, 0)
+              && !re_project_copy(p, RE_COPY_SOUND, 0, 0),
+          "copy: something that isn't there");
+    /* the original deleted: still pasted */
+    re_project_remove(p, 1, 1);
+    CHECK(!strcmp(layout(p), "c75"), "copy: set up: %s", layout(p));
+    CHECK(re_project_paste(p, c, 30, NULL) == 1 && !strcmp(layout(p), "c30 c60 c45"), "paste: a clip at 30: %s",
+          layout(p));
+    re_project_item(p, 1, &it);
+    CHECK(it.in == 5 && it.out == 64 && it.fade_in == 10 && it.sound_fade_in == 10 && it.fade_out == 0
+              && it.sound_fade_out == 6 && it.volume == -6 && it.muted,
+          "paste: the clip's in %d out %d, fades %d %d %d %d, %d dB", it.in, it.out, it.fade_in, it.sound_fade_in,
+          it.fade_out, it.sound_fade_out, it.volume);
+    CHECK(re_project_undo(p) && !strcmp(layout(p), "c75"), "paste: one undo: %s", layout(p));
+    CHECK(re_project_undo(p) && !strcmp(layout(p), "c75 c60"), "paste: undone, then the delete before it: %s",
+          layout(p));
+    re_project_redo(p);
+    re_project_redo(p);
+    CHECK(re_project_paste(p, c, 1000, NULL) == 3 && !strcmp(layout(p), "c30 c60 c45 c60"), "paste: at the end: %s",
+          layout(p));
+    /* not into a dissolve: nothing done, no undo point */
+    int mix = re_project_dissolve(p, 0, 10, 1);
+    unsigned ch = re_project_changes(p);
+    int len = re_project_length(p);
+    re_item m;
+    re_project_item(p, mix, &m);
+    CHECK(mix >= 0 && re_project_paste(p, c, m.start + 2, NULL) < 0 && re_project_changes(p) == ch
+              && re_project_length(p) == len,
+          "paste: into a dissolve");
+    re_copy_free(c);
+
+    /* overlays: a picture, a title */
+    int ov = re_project_overlay_add(p, pic, 0, 25);
+    re_project_overlay_set(p, ov, RE_PLACE_TOP_LEFT, 30, 60);
+    re_project_overlay_fade(p, ov, 1, 5);
+    c = re_project_copy(p, RE_COPY_OVERLAY, 0, ov);
+    int at = re_project_paste(p, c, 100, NULL);
+    re_overlay o, q;
+    CHECK(at == 1 && !re_project_overlay(p, 1, &o) && o.start == 100 && o.length == 25 && o.place == RE_PLACE_TOP_LEFT
+              && o.size == 30 && o.opacity == 60 && o.fade_out == 5 && o.fade_in == 0,
+          "paste: a picture: %d, at %d, %d long, place %d size %d opacity %d, fades %d %d", at, o.start, o.length,
+          o.place, o.size, o.opacity, o.fade_in, o.fade_out);
+    re_copy_free(c);
+    re_title t, t2;
+    re_title_default(&t);
+    snprintf(t.text, sizeof(t.text), "Copied");
+    int ti = re_project_title_add(p, &t, 40, 20);
+    c = re_project_copy(p, RE_COPY_OVERLAY, 0, ti);
+    at = re_project_paste(p, c, 150, NULL);
+    snprintf(t2.text, sizeof(t2.text), "x");
+    CHECK(at >= 0 && !re_project_title(p, at, &t2) && !strcmp(t2.text, "Copied"), "paste: a title: %d", at);
+    snprintf(t2.text, sizeof(t2.text), "Changed");
+    re_project_title_set(p, at, &t2);
+    CHECK(!re_project_title(p, ti, &t) && !strcmp(t.text, "Copied") && !re_project_overlay(p, at, &q)
+              && !strcmp(q.name, "Changed"),
+          "paste: the copy's title changed the original's: %s", t.text);
+    re_copy_free(c);
+
+    /* sounds: stacked, trimmed */
+    int k, i;
+    re_project_audio_add(p, "tone880.wav", 10, 0, &k, &i);
+    re_project_audio_span(p, 0, 0, 15, 45); /* (its start trimmed: in 5) */
+    re_project_audio_volume(p, 0, 0, -12);
+    re_project_audio_fade(p, 0, 0, 0, 7);
+    c = re_project_copy(p, RE_COPY_SOUND, 0, 0);
+    int tr = -1;
+    at = re_project_paste(p, c, 20, &tr);
+    re_audio s1;
+    CHECK(at == 0 && tr == 1 && !re_project_audio(p, 1, 0, &s1) && s1.start == 20 && s1.length == 45 && s1.in == 5
+              && s1.volume == -12 && s1.fade_in == 7 && !s1.muted,
+          "paste: a sound: %d on A%d at %d, %d long, in %d, %d dB, fade %d", at, tr + 1, s1.start, s1.length, s1.in,
+          s1.volume, s1.fade_in);
+    re_copy_free(c);
+    re_project_close(p);
+}
+
 /* ---- media: thumbnails and waveforms, made a step at a time ---------------- */
 
 /* Steps until there's nothing to do: how many (or -1, too many) */
@@ -1605,6 +1767,8 @@ int main(int argc, char **argv)
     audio_tracks(a, argv[9], argv[11], out);
     source_editing(a, b, n, out);
     media(n, argv[9], argv[12], a);
+    rolls(n, b);
+    copy_paste(a, argv[9], argv[11]);
     overlays(a, b, argv[9], out, argv[10], argv[11], argv[12]);
     video_overlays(a, b, argv[9], n, argv[5], out);
     char dir[512];

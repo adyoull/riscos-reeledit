@@ -342,7 +342,7 @@ void rp_fit_overlays(re_project *p)
 /* A picture, a video or a title (pic: ours from here) put on V2 from a
    frame, so long, where there's room, at a place and size. Its index, or
    -1. */
-static int put(re_project *p, mlt_producer pic, int frame, int length, int place, int size)
+int rp_overlay_put(re_project *p, mlt_producer pic, int in, int frame, int length, int place, int size)
 {
     if (frame < 0)
         frame = 0;
@@ -364,7 +364,7 @@ static int put(re_project *p, mlt_producer pic, int frame, int length, int place
         mlt_producer_close(pic);
         return -1;
     }
-    mlt_producer cut = mlt_producer_cut(pic, 0, length - 1);
+    mlt_producer cut = mlt_producer_cut(pic, in, in + length - 1);
     mlt_producer_close(pic);
     mlt_properties cp = MLT_PRODUCER_PROPERTIES(cut);
     mlt_properties_set(cp, "shotcut:reeledit_place", PLACES[place]);
@@ -373,7 +373,7 @@ static int put(re_project *p, mlt_producer pic, int frame, int length, int place
     s[n].cut = cut;
     s[n].start = frame;
     s[n].length = length;
-    s[n].in = 0;
+    s[n].in = in;
     rp_track_sort(s, n + 1);
     rp_track_write(p->v2, s, n + 1);
     rp_changed(p);
@@ -408,7 +408,7 @@ int re_project_overlay_add(re_project *p, const char *file, int frame, int lengt
             length = re_project_frames(p, 5.0);
     }
     int big = !video && (pw * 2 >= p->profile->width || ph * 2 >= p->profile->height);
-    return put(p, pic, frame, length, video ? RE_PLACE_BOTTOM_RIGHT : big ? RE_PLACE_FULL : RE_PLACE_TOP_RIGHT,
+    return rp_overlay_put(p, pic, 0, frame, length, video ? RE_PLACE_BOTTOM_RIGHT : big ? RE_PLACE_FULL : RE_PLACE_TOP_RIGHT,
                video ? 33 : big ? 100 : 20);
 }
 
@@ -555,7 +555,7 @@ int re_project_title_add(re_project *p, const re_title *t, int frame, int length
         return -1;
     if (length <= 0)
         length = re_project_frames(p, 5.0);
-    return put(p, pic, frame, length, RE_PLACE_LOWER_THIRD, 100);
+    return rp_overlay_put(p, pic, 0, frame, length, RE_PLACE_LOWER_THIRD, 100);
 }
 
 int re_project_title(re_project *p, int i, re_title *t)
