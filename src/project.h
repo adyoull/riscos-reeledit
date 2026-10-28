@@ -229,5 +229,7 @@ int re_project_info(re_project *p, char *buf, int size);
 
 /* Saves as MLT XML. 0, or -1. Saved: not modified. */
 int re_project_save(re_project *p, const char *file);
+/* The same, a copy (to export from): modified as it was */
+int re_project_save_copy(re_project *p, const char *file);
 
 #endif

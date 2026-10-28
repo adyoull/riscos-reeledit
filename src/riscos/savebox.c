@@ -5,6 +5,7 @@
  * to wherever it was dropped; the Filer replies with Message_DataSaveAck
  * and the full name; saved there, and Message_DataLoad sent back.
  * Typed: a full name (with a '.' or ':') saves there at once.
+ * The Export window's file icon is dragged the same way (sb_drag_file).
  *
  * Part of riscos-reeledit. GPL version 2 or later.
  */
@@ -30,12 +31,20 @@ static struct
     char sprite[16];
     int dragging;
     int my_ref;      /* our Message_DataSave */
+    /* the file icon being dragged (this box's, or the Export window's: sb_drag_file) */
+    int from;        /* its window */
+    char leaf[64];
+    int filetype;
+    int (*saved)(const char *path, int safe);
 } B;
 
 int sb_window(void)
 {
     return B.win;
 }
+
+static const char *leaf_of(const char *path);
+static int saved_project(const char *path, int safe);
 
 static int create(void)
 {
@@ -168,20 +177,32 @@ void sb_click(int *b)
             snprintf(B.name, sizeof(B.name), "%s", typed);
         }
     } else if (b[4] == S_FILE && (b[2] & (0x40 | 0x10))) {
-        /* a drag of the file icon: a box the icon's size, anywhere on the screen */
-        int st[9], d[10];
+        int st[9];
         st[0] = B.win;
         r.r[1] = (intptr_t) st;
         ro_swi(Wimp_GetWindowState, &r);
         int ox = st[1] - st[5], oy = st[4] - st[6];
-        d[0] = B.win;
-        d[1] = 5; /* drag a fixed size box */
-        d[2] = ox + 196; d[3] = oy - 124; d[4] = ox + 324; d[5] = oy - 20;
-        d[6] = -0x10000; d[7] = -0x10000; d[8] = 0x10000; d[9] = 0x10000;
-        r.r[1] = (intptr_t) d;
-        if (!ro_swi(Wimp_DragBox, &r))
-            B.dragging = 1;
+        sb_drag_file(B.win, ox + 196, oy - 124, ox + 324, oy - 20, leaf_of(B.name), FILETYPE_MLT, saved_project);
     }
+}
+
+void sb_drag_file(int win, int x0, int y0, int x1, int y1, const char *leaf, int filetype,
+                  int (*saved)(const char *path, int safe))
+{
+    _kernel_swi_regs r;
+    int d[10];
+    d[0] = win;
+    d[1] = 5; /* drag a fixed size box */
+    d[2] = x0; d[3] = y0; d[4] = x1; d[5] = y1;
+    d[6] = -0x10000; d[7] = -0x10000; d[8] = 0x10000; d[9] = 0x10000;
+    r.r[1] = (intptr_t) d;
+    if (ro_swi(Wimp_DragBox, &r))
+        return;
+    B.dragging = 1;
+    B.from = win;
+    snprintf(B.leaf, sizeof(B.leaf), "%s", leaf);
+    B.filetype = filetype;
+    B.saved = saved;
 }
 
 void sb_key(int *b)
@@ -214,16 +235,16 @@ void sb_drag_end(int *b)
     r.r[1] = (intptr_t) p;
     if (ro_swi(Wimp_GetPointerInfo, &r))
         return;
-    if (p[3] == B.win || p[3] == tl_window()) /* dropped back on the box, or the Timeline: nothing */
+    if (p[3] == B.from || p[3] == tl_window()) /* dropped back on its window, or the Timeline: nothing */
         return;
     /* Message_DataSave to the window it was dropped on */
     memset(m, 0, sizeof(m));
-    const char *leaf = leaf_of(B.name);
+    const char *leaf = B.leaf;
     m[3] = 0;
     m[4] = MSG_DATASAVE;
     m[5] = p[3]; m[6] = p[4]; m[7] = p[0]; m[8] = p[1];
     m[9] = 4096;           /* estimated size */
-    m[10] = FILETYPE_MLT;
+    m[10] = B.filetype;
     snprintf((char *) &m[11], 212, "%.211s", leaf);
     m[0] = (44 + (int) strlen((char *) &m[11]) + 1 + 3) & ~3;
     r.r[0] = 17;
@@ -251,8 +272,10 @@ int sb_message(int *b)
     char path[256];
     snprintf(path, sizeof(path), "%s", (const char *) &b[11]);
     int safe = b[9] != -1; /* (-1: a scrap file, another program's: not where it lives) */
-    if (save_to(path, safe))
+    if (!B.saved || B.saved(path, safe))
         return 1;
+    if (B.from != B.win)
+        return 1; /* (an export: made in the background, the file isn't there yet) */
     /* Message_DataLoad back: the receiver loads it */
     b[3] = b[2];
     b[4] = MSG_DATALOAD;
@@ -260,8 +283,14 @@ int sb_message(int *b)
     r.r[1] = (intptr_t) b;
     r.r[2] = b[1];
     ro_swi(Wimp_SendMessage, &r);
-    close_box();
+    if (B.from == B.win)
+        close_box();
     return 1;
+}
+
+static int saved_project(const char *path, int safe)
+{
+    return save_to(path, safe);
 }
 
 #ifdef RE_TEST

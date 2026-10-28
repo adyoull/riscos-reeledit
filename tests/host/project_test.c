@@ -14,6 +14,8 @@
  * Part of riscos-reeledit. GPL version 2 or later.
  */
 #include "engine.h"
+#include "export.h"
+#include <libavformat/avformat.h>
 #include "project.h"
 #include "measure.h"
 #include "sprites.h"
@@ -993,6 +995,79 @@ static void titles(const char *a, const char *out)
     re_project_close(p);
 }
 
+/* ---- export: a project (a clip faded in, a title over it, a sound clip
+   after it) made into an MP4 at a smaller size: every frame, the picture's
+   size, the length, sound; told each frame; stopped part way (no file
+   left); bit rates by quality */
+static int counted, stop_at;
+static void count_progress(void *ctx, int done, int total)
+{
+    (void) ctx;
+    (void) total;
+    counted = done;
+}
+static int stop_when(void *ctx)
+{
+    (void) ctx;
+    return stop_at > 0 && counted >= stop_at;
+}
+
+static void export(const char *a, const char *snd, const char *proj, const char *out)
+{
+    re_project *p = re_project_new();
+    re_project_add(p, a, -1);
+    re_project_add(p, snd, -1);
+    re_project_fade(p, 0, 0, 10);
+    re_title t;
+    re_title_default(&t);
+    snprintf(t.text, sizeof(t.text), "Export");
+    re_project_title_add(p, &t, 5, 20);
+    int len = re_project_length(p);
+    CHECK(re_project_save(p, proj) == 0, "export: the project not saved");
+    re_project_close(p);
+    re_export_settings s = {90, RE_EXPORT_NORMAL, 0, "mpeg4"};
+    char err[200];
+    counted = 0;
+    stop_at = 0;
+    int r = re_export(proj, out, &s, count_progress, stop_when, NULL, err, sizeof(err));
+    CHECK(r == 0 && counted == len, "export: %d (%s), told %d of %d frames", r, err, counted, len);
+    AVFormatContext *fc = NULL;
+    int w = 0, h = 0, audio = 0;
+    double secs = 0;
+    if (avformat_open_input(&fc, out, NULL, NULL) == 0 && avformat_find_stream_info(fc, NULL) >= 0) {
+        for (unsigned i = 0; i < fc->nb_streams; i++) {
+            AVCodecParameters *cp = fc->streams[i]->codecpar;
+            if (cp->codec_type == AVMEDIA_TYPE_VIDEO) {
+                w = cp->width;
+                h = cp->height;
+            } else if (cp->codec_type == AVMEDIA_TYPE_AUDIO && cp->codec_id == AV_CODEC_ID_AAC) {
+                audio = 1;
+            }
+        }
+        secs = fc->duration / (double) AV_TIME_BASE;
+    }
+    if (fc)
+        avformat_close_input(&fc);
+    CHECK(w == 160 && h == 90 && audio && secs > (len - 2) / 25.0 && secs < (len + 3) / 25.0,
+          "export: %dx%d, sound %d, %.2f s (%d frames)", w, h, audio, secs, len);
+    /* stopped part way */
+    counted = 0;
+    stop_at = 20;
+    r = re_export(proj, out, &s, count_progress, stop_when, NULL, err, sizeof(err));
+    FILE *f = fopen(out, "rb");
+    CHECK(r == 1 && counted < len && !f, "export: stopped: %d, at %d, file left %d", r, counted, f != NULL);
+    if (f)
+        fclose(f);
+    /* not a project */
+    r = re_export("no-such.mlt", out, &s, NULL, NULL, NULL, err, sizeof(err));
+    CHECK(r == -1 && err[0], "export: no project: %d \"%s\"", r, err);
+    CHECK(re_export_bitrate(1920, 1080, 25, RE_EXPORT_NORMAL) == 5200000
+              && re_export_bitrate(640, 360, 25, RE_EXPORT_SMALL) == 400000
+              && re_export_bitrate(160, 90, 25, RE_EXPORT_HIGH) == 300000,
+          "export: bit rates %d %d %d", re_export_bitrate(1920, 1080, 25, RE_EXPORT_NORMAL),
+          re_export_bitrate(640, 360, 25, RE_EXPORT_SMALL), re_export_bitrate(160, 90, 25, RE_EXPORT_HIGH));
+}
+
 int main(int argc, char **argv)
 {
     if (argc != 13) {
@@ -1248,6 +1323,7 @@ int main(int argc, char **argv)
     clip_sound(a, argv[9], out);
     stills(argv[10]);
     titles(a, out);
+    export(a, argv[9], out, "export-test.mp4");
     overlays(a, b, argv[9], out, argv[10], argv[11], argv[12]);
     video_overlays(a, b, argv[9], n, argv[5], out);
     char dir[512];

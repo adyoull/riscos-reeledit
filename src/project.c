@@ -798,7 +798,19 @@ int re_project_info(re_project *p, char *buf, int size)
     return n;
 }
 
+static int save(re_project *p, const char *file, int as_saved);
+
 int re_project_save(re_project *p, const char *file)
+{
+    return save(p, file, 1);
+}
+
+int re_project_save_copy(re_project *p, const char *file)
+{
+    return save(p, file, 0);
+}
+
+static int save(re_project *p, const char *file, int as_saved)
 {
     if (!p->tractor)
         return -1;
@@ -839,6 +851,7 @@ int re_project_save(re_project *p, const char *file)
         remove(tmp);
         return -1;
     }
-    p->saved_state = p->state;
+    if (as_saved)
+        p->saved_state = p->state;
     return 0;
 }

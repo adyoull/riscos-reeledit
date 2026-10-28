@@ -25,6 +25,7 @@
  *
  * Part of riscos-reeledit. GPL version 2 or later.
  */
+#include "../export.h"
 #include "app.h"
 #include "menu.h"
 #include "../measure.h"
@@ -1022,8 +1023,9 @@ static void save(int x, int y)
 /* ---- the menu ------------------------------------------------------------------------------------ */
 
 
-static MENU(3) m_file = {"File", 7, 2, 7, 0, 280, 44, 0,
-                         {{0, -1, IT("New")}, {0, -1, IT("Save          F3")}, {0x80, -1, IT("Save as...")}}};
+static MENU(4) m_file = {"File", 7, 2, 7, 0, 300, 44, 0,
+                         {{0, -1, IT("New")}, {0, -1, IT("Save           F3")}, {2, -1, IT("Save as...")},
+                          {0x80, -1, IT("Export...      ^E")}}};
 static MENU(14) m_edit = {"Edit", 7, 2, 7, 0, 520, 44, 0,
                          {{0, -1, IT("Undo                     F8")}, {2, -1, IT("Redo                     F9")},
                           {0, -1, IT("Split at the playhead     S")}, {0, -1, IT("Trim the start to it      Q")},
@@ -1050,7 +1052,7 @@ static MENU(5) m_main = {"Reel Edit", 7, 2, 7, 0, 340, 44, 0,
 static MENU(2) m_bar = {"Reel Edit", 7, 2, 7, 0, 160, 44, 0,
                         {{0, -1, IT("Info")}, {0x80, -1, IT("Quit")}}};
 static int menu_is; /* 0 none, 1 the icon bar's, 2 the editor's, 3 the Timeline's context menu (effects.c), 4 overlays.c's,
-                       5 titles.c's */
+                       5 titles.c's, 6 exportbox.c's */
 static int menu_x, menu_y;
 
 void app_menu(int x, int y)
@@ -1063,6 +1065,7 @@ void app_menu(int x, int y)
     int has = A.proj && re_project_length(A.proj) > 0;
     menu_shade(&m_file.item[1].iflags, !has);
     menu_shade(&m_file.item[2].iflags, !has);
+    menu_shade(&m_file.item[3].iflags, !has);
     menu_shade(&m_edit.item[0].iflags, !A.proj || !re_project_can_undo(A.proj));
     menu_shade(&m_edit.item[1].iflags, !A.proj || !re_project_can_redo(A.proj));
     for (int i = 2; i <= 4; i++)
@@ -1128,6 +1131,12 @@ void app_titles_menu_opened(void)
     re_display_check_covered();
 }
 
+void app_export_menu_opened(void)
+{
+    menu_is = 6;
+    re_display_check_covered();
+}
+
 static void menu_select(int *b)
 {
     _kernel_swi_regs r;
@@ -1142,6 +1151,10 @@ static void menu_select(int *b)
     }
     if (menu_is == 5) {
         ti_menu_select(b);
+        return;
+    }
+    if (menu_is == 6) {
+        ex_menu_select(b);
         return;
     }
     if (menu_is == 1) {
@@ -1164,6 +1177,8 @@ static void menu_select(int *b)
             save(menu_x, menu_y);
         } else if (b[1] == 2) {
             sb_open(menu_x, menu_y);
+        } else if (b[1] == 3) {
+            ex_open();
         }
         break;
     case 1: /* Edit */
@@ -1265,6 +1280,7 @@ int app_key(int k)
     case 'w': case 'W': trim(1); return 1;
     case 'n': case 'N': snap_toggle(); return 1;
     case 't': case 'T': ti_open(-1); return 1;
+    case 5: ex_open(); return 1;                  /* Ctrl-E: Export... */
     case 'Z': case '\\': tl_zoom(-1); return 1;    /* Shift-Z, \\: the whole project */
     case 0x183: {                                  /* F3: save */
         int p[5];
@@ -1287,6 +1303,10 @@ static void key(int *b)
     }
     if (ti_window() && b[0] == ti_window()) {
         ti_key(b);
+        return;
+    }
+    if (ex_window() && b[0] == ex_window()) {
+        ex_key(b);
         return;
     }
     if ((b[0] == V.win || b[0] == tl_window()) && app_key(b[6]))
@@ -1337,6 +1357,10 @@ static void click(int *b)
     }
     if (ti_window() && w == ti_window()) {
         ti_click(b);
+        return;
+    }
+    if (ex_window() && w == ex_window()) {
+        ex_click(b);
         return;
     }
     if (w == tl_window()) {
@@ -1407,6 +1431,8 @@ static const char *help_for(int win, int icon, int y)
         return "This window shows the clip's and the project's video information.";
     if (ti_window() && win == ti_window())
         return ti_help(icon);
+    if (ex_window() && win == ex_window())
+        return ex_help(icon);
     if (win != V.win)
         return NULL;
     switch (icon) {
@@ -1429,7 +1455,7 @@ static const char *help_for(int win, int icon, int y)
 static void message(int *b, int event)
 {
     _kernel_swi_regs r;
-    if (sb_message(b))
+    if (sb_message(b) || ex_message(b))
         return;
     switch (b[4]) {
     case MSG_QUIT:
@@ -1611,10 +1637,16 @@ const char *re_test_title(void) { return V.title; }
 
 int reeledit_main(int argc, char **argv)
 {
-    static const int messages[] = {MSG_DATASAVEACK, MSG_DATALOAD, MSG_PREQUIT, MSG_MODECHANGE, MSG_HELPREQUEST, 0};
+    static const int messages[] = {MSG_DATASAVEACK, MSG_DATALOAD, MSG_PREQUIT, MSG_MODECHANGE, MSG_HELPREQUEST,
+                                   0x808C1, 0x808C2, 0x808C3, 0}; /* (TaskWindow's Output, Ego, Morio: exports) */
     int block[64];
     _kernel_swi_regs r;
-    (void) argc;
+    if (argc > 1 && !strcmp(argv[1], "-export")) { /* (an export, in a TaskWindow: exportbox.c) */
+#ifdef __riscos__
+        re_title_set_font(fm_line); /* (titles drawn as the editor draws them) */
+#endif
+        return re_export_main(argc, argv);
+    }
     (void) argv;
 
     memset(&V, 0, sizeof(V));

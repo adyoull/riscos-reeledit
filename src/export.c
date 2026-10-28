@@ -1,0 +1,225 @@
+/* export.c - a project made into a video file (export.h).
+ *
+ * The project file is opened as the editor opens it (re_project_open: its
+ * pictures, titles, fades and dissolves as they play), and played through
+ * MLT's avformat consumer, which with MLT_NO_THREADS makes every frame on
+ * this thread and returns at the end (mlt_consumer_start). The size is
+ * the consumer's (MLT scales); the frame rate the project's.
+ *
+ * Video: H.264 by the VideoCore (h264_encvchiq: about three times real time
+ * at 1080p on a Pi 4) when asked and FFmpeg has it, at a bit rate from the
+ * picture's size (bits a pixel: 0.07, 0.10, 0.15, as !FFmpeg's Convert
+ * window); else libx264 (veryfast, rate factor 28, 23, 19); else mpeg4. If
+ * a codec makes no video (MLT writes the sound alone when the video codec
+ * won't open: the VideoCore's without VCHIQ), the next is tried. Sound:
+ * AAC, 48 kHz stereo. MP4, its index at the start (faststart).
+ *
+ * Part of riscos-reeledit. GPL version 2 or later.
+ */
+#include "export.h"
+#include "engine.h"
+#include "project.h"
+
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+int re_export_bitrate(int width, int height, double fps, int quality)
+{
+    static const double BPP[3] = {0.07, 0.10, 0.15};
+    double b = BPP[quality < 0 ? 0 : quality > 2 ? 2 : quality] * width * height * (fps > 0 ? fps : 25);
+    int k = (int) (b / 50000 + 0.5) * 50000;
+    return k < 300000 ? 300000 : k > 20000000 ? 20000000 : k;
+}
+
+typedef struct
+{
+    mlt_producer producer;
+    int done, total, stopped;
+    void (*progress)(void *ctx, int done, int total);
+    int (*stop)(void *ctx);
+    void *ctx;
+} run;
+
+static void on_show(mlt_properties owner, run *r, mlt_event_data data)
+{
+    (void) owner;
+    (void) data;
+    r->done++;
+    if (r->progress)
+        r->progress(r->ctx, r->done, r->total);
+    if (!r->stopped && r->stop && r->stop(r->ctx)) {
+        r->stopped = 1;
+        mlt_producer_set_speed(r->producer, 0); /* (terminate_on_pause: the consumer ends) */
+    }
+}
+
+static int has_encoder(const char *name)
+{
+    return avcodec_find_encoder_by_name(name) != NULL;
+}
+
+/* One try with a video codec: frames made (or -1) */
+static int encode(re_project *p, const char *out, const re_export_settings *s, const char *vcodec, run *r)
+{
+    mlt_profile profile = re_project_profile(p);
+    mlt_producer prod = re_project_producer(p);
+    mlt_consumer c = mlt_factory_consumer(profile, "avformat", out);
+    if (!c || !prod)
+        return -1;
+    mlt_properties cp = MLT_CONSUMER_PROPERTIES(c);
+    int h = s->height > 0 && s->height < profile->height ? s->height : profile->height;
+    int w = (int) ((double) profile->width * h / profile->height + 0.5);
+    double dar = (double) profile->display_aspect_num / (profile->display_aspect_den ? profile->display_aspect_den : 1);
+    if (dar > 0)
+        w = (int) (h * dar + 0.5);
+    w &= ~1;
+    h &= ~1;
+    double fps = (double) profile->frame_rate_num / (profile->frame_rate_den ? profile->frame_rate_den : 1);
+    char v[32];
+    mlt_properties_set_int(cp, "width", w);
+    mlt_properties_set_int(cp, "height", h);
+    mlt_properties_set(cp, "f", "mp4");
+    mlt_properties_set(cp, "movflags", "+faststart");
+    mlt_properties_set(cp, "vcodec", vcodec);
+    mlt_properties_set(cp, "pix_fmt", "yuv420p");
+    mlt_properties_set_int(cp, "g", (int) (fps * 2 + 0.5));
+    if (!strcmp(vcodec, "libx264")) {
+        static const int CRF[3] = {28, 23, 19};
+        mlt_properties_set(cp, "vpreset", "veryfast");
+        mlt_properties_set_int(cp, "crf", CRF[s->quality < 0 ? 0 : s->quality > 2 ? 2 : s->quality]);
+    } else {
+        snprintf(v, sizeof(v), "%dk", re_export_bitrate(w, h, fps, s->quality) / 1000);
+        mlt_properties_set(cp, "vb", v);
+        if (!strcmp(vcodec, "h264_encvchiq"))
+            mlt_properties_set(cp, "vprofile", s->quality == RE_EXPORT_SMALL ? "77" : "100");
+    }
+    mlt_properties_set(cp, "acodec", "aac");
+    mlt_properties_set(cp, "ab", s->quality == RE_EXPORT_HIGH ? "192k" : "160k");
+    mlt_properties_set_int(cp, "frequency", 48000);
+    mlt_properties_set_int(cp, "channels", 2);
+    mlt_properties_set(cp, "rescale", "bilinear");
+    mlt_properties_set_int(cp, "progressive", 1);
+    mlt_properties_set_int(cp, "terminate_on_pause", 1);
+    mlt_properties_set_int(cp, "real_time", -1);
+    mlt_consumer_connect(c, MLT_PRODUCER_SERVICE(prod));
+    mlt_producer_seek(prod, 0);
+    mlt_producer_set_speed(prod, 1);
+    r->producer = prod;
+    r->done = 0;
+    r->total = re_project_length(p);
+    mlt_events_listen(cp, r, "consumer-frame-show", (mlt_listener) on_show); /* (closed with the consumer) */
+    mlt_consumer_start(c); /* (no threads: returns at the end) */
+    mlt_consumer_stop(c);
+    mlt_consumer_close(c);
+    mlt_producer_set_speed(prod, 0);
+    return r->done;
+}
+
+/* The file has a video stream (MLT leaves out a video codec that won't
+   open, and writes the sound alone) */
+static int has_video(const char *file)
+{
+    AVFormatContext *fc = NULL;
+    int v = 0;
+    if (avformat_open_input(&fc, file, NULL, NULL) == 0) {
+        if (avformat_find_stream_info(fc, NULL) >= 0)
+            for (unsigned i = 0; i < fc->nb_streams; i++)
+                v |= fc->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO;
+        avformat_close_input(&fc);
+    }
+    return v;
+}
+
+static long size_of(const char *file)
+{
+    FILE *f = fopen(file, "rb");
+    if (!f)
+        return -1;
+    long n = fseek(f, 0, SEEK_END) ? -1 : ftell(f);
+    fclose(f);
+    return n;
+}
+
+int re_export(const char *project, const char *out, const re_export_settings *s,
+              void (*progress)(void *ctx, int done, int total), int (*stop)(void *ctx), void *ctx, char *err,
+              int errsize)
+{
+    snprintf(err, errsize, "%s", "");
+    re_project *p = re_project_open(project, 1);
+    if (!p || re_project_length(p) <= 0) {
+        snprintf(err, errsize, "the project couldn't be read");
+        if (p)
+            re_project_close(p);
+        return -1;
+    }
+    run r = {NULL, 0, 0, 0, progress, stop, ctx};
+    const char *codecs[3];
+    int n = 0;
+    if (s->vcodec) {
+        codecs[n++] = s->vcodec;
+    } else {
+        if (s->hardware && has_encoder("h264_encvchiq"))
+            codecs[n++] = "h264_encvchiq";
+        if (has_encoder("libx264"))
+            codecs[n++] = "libx264";
+        codecs[n++] = "mpeg4";
+    }
+    int made = -1, total = re_project_length(p);
+    const char *used = codecs[0];
+    for (int i = 0; i < n && !r.stopped; i++) {
+        used = codecs[i];
+        remove(out);
+        made = encode(p, out, s, used, &r);
+        if (r.stopped || (made > 0 && size_of(out) > 0 && has_video(out)))
+            break; /* (made: done, or stopped) */
+    }
+    re_project_close(p);
+    if (r.stopped) {
+        remove(out);
+        return 1;
+    }
+    if (made < total || size_of(out) <= 0 || !has_video(out)) {
+        snprintf(err, errsize, "the video couldn't be made (%s: %d of %d frames)", used, made < 0 ? 0 : made, total);
+        remove(out);
+        return -1;
+    }
+    return 0;
+}
+
+/* ---- the program -------------------------------------------------------------------------- */
+
+static void say_progress(void *ctx, int done, int total)
+{
+    clock_t *last = ctx, now = clock();
+    if (done == total || now - *last >= CLOCKS_PER_SEC / 4) {
+        *last = now;
+        printf("progress %d %d\n", done, total);
+        fflush(stdout);
+    }
+}
+
+int re_export_main(int argc, char **argv)
+{
+    if (argc < 4) {
+        printf("failed: usage: -export project out [height [quality [hardware]]]\n");
+        return 2;
+    }
+    re_export_settings s = {argc > 4 ? atoi(argv[4]) : 0, argc > 5 ? atoi(argv[5]) : RE_EXPORT_NORMAL,
+                            argc > 6 ? atoi(argv[6]) : 0, NULL};
+    if (re_mlt_start() < 0) {
+        printf("failed: MLT couldn't start\n");
+        return 2;
+    }
+    char err[200];
+    clock_t last = 0;
+    printf("progress 0 0\n");
+    fflush(stdout);
+    int r = re_export(argv[2], argv[3], &s, say_progress, NULL, &last, err, sizeof(err));
+    printf(r == 0 ? "done\n" : r == 1 ? "stopped\n" : "failed: %s\n", err);
+    fflush(stdout);
+    return r < 0 ? 2 : r;
+}

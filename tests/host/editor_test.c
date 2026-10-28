@@ -62,6 +62,8 @@ int re_test_busy(void);
 const char *re_test_title(void);
 char *re_test_savebox_name(void);
 char *re_test_title_line(int n);
+char *re_test_export_name(void);
+const char *re_test_export_status(void);
 
 static int fails;
 static int phase, phase_cs;
@@ -85,6 +87,7 @@ static char typed_path[300], dragged_path[300];
 #define INFO   0x1200 /* (made before the save box in this script) */
 #define SAVEB  0x1300
 #define TITLEW 0x1400 /* (the Title window: drawn by the Wimp) */
+#define EXPW   0x1500 /* (the Export window: drawn by the Wimp) */
 #define COVER  0x2000
 #define FILER  0x3000 /* a directory display */
 #define TASK   0x4321
@@ -99,12 +102,12 @@ typedef struct
 {
     int open, box[4], scroll_x, behind, redraw, extent_w;
 } fwin;
-static fwin W[5]; /* VIEWER, TL, INFO, SAVEB, TITLEW */
+static fwin W[6]; /* VIEWER, TL, INFO, SAVEB, TITLEW, EXPW */
 static int windows_made;
 static fwin *win(int h)
 {
     int i = (h - VIEWER) / 0x100;
-    return h >= VIEWER && i < 5 && (h - VIEWER) % 0x100 == 0 ? &W[i] : NULL;
+    return h >= VIEWER && i < 6 && (h - VIEWER) % 0x100 == 0 ? &W[i] : NULL;
 }
 
 static unsigned fake_cs = 1000;
@@ -113,6 +116,8 @@ static int polls, idle_polls, null_events, last_mask;
 static int covered, shift_key, ctrl_key;
 static char help_text[256], drag_name0[64];
 static int whole_redraws;
+static int starts, morites, exports_typed, mark2_reports;
+static char start_cmd[1500];
 static int plots, reports, questions, answer = 3, closedown, acks, menus, savebox_opens, drags;
 static int filetypes_set, dataloads_sent, plots_tl, prequit_acks, key_sent;
 static char last_text[128], filetype_path[300], all_text[16384];
@@ -237,6 +242,10 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
             r->r[1] = ((r->r[1] & 0x7F) == 0 ? shift_key : (r->r[1] & 0x7F) == 1 ? ctrl_key : 0) ? 0xFF : 0;
         break;
     case 0x08: /* OS_File 18: a filetype set */
+        if (r->r[0] == 18 && r->r[2] == 0xBF6) { /* (an export made) */
+            exports_typed++;
+            break;
+        }
         if (r->r[0] == 18) {
             filetypes_set++;
             CHECK(r->r[2] == 0xF80, "filetype &%X set, not &F80", (int) r->r[2]);
@@ -299,12 +308,17 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
     case 0x57288: r->r[0] = ssb_added; r->r[1] = ssb_heard(); break;
     case 0x400C0: r->r[0] = 380; r->r[1] = TASK; break;
     case 0x400C1:                                                   /* CreateWindow */
-        if (windows_made >= 5)
-            fail_quit("more than five windows made");
+        if (windows_made >= 6)
+            fail_quit("more than six windows made");
         scr_create_window(windows_made, (const void *) r->r[1]);
         r->r[0] = VIEWER + 0x100 * windows_made++;
         break;
     case 0x400C2: r->r[0] = BAR_ICON; break;
+    case 0x400E9: break; /* Wimp_SpriteOp 24: the sprite is there */
+    case 0x400DE: /* StartTask: an export's TaskWindow (the script plays its part) */
+        starts++;
+        snprintf(start_cmd, sizeof(start_cmd), "%s", (const char *) r->r[0]);
+        break;
     case 0x400C5: {                                                 /* OpenWindow */
         int *b = (int *) r->r[1];
         fwin *w = win(b[0]);
@@ -330,8 +344,8 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
         last_mask = (int) r->r[0];
         if (++polls > 40000)
             fail_quit("too many polls: the script is stuck");
-        for (int i = 0; i < 5; i++)
-            if (W[i].redraw && W[i].open && i != 3 && i != 4) { /* (the save box is drawn by the Wimp) */
+        for (int i = 0; i < 6; i++)
+            if (W[i].redraw && W[i].open && i != 3 && i != 4 && i != 5) { /* (the save box is drawn by the Wimp) */
                 W[i].redraw = 0;
                 b[0] = VIEWER + 0x100 * i;
                 r->r[0] = 1;
@@ -461,6 +475,8 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
             snprintf(help_text, sizeof(help_text), "%s", (char *) &b[5]);
         else if (b[4] == 4)
             acks++;
+        else if (b[4] == 0x808C4)
+            morites++;
         else if (b[4] == 1) {
             datasave_ref = b[2];
             snprintf(datasave_leaf, sizeof(datasave_leaf), "%s", (char *) &b[11]);
@@ -505,9 +521,9 @@ static int shot_box(int i, int b[5])
 }
 static void shot(const char *name)
 {
-    static const int order[5] = {0, 1, 2, 3, 4};
+    static const int order[6] = {0, 1, 2, 3, 4, 5};
     int pitch = (ov_w + 31) & ~31;
-    snap(name, order, 5, shot_box, ov_shown_bank >= 0 ? ov_buf[ov_shown_bank] : NULL, ov_w, ov_h, pitch);
+    snap(name, order, 6, shot_box, ov_shown_bank >= 0 ? ov_buf[ov_shown_bank] : NULL, ov_w, ov_h, pitch);
 }
 
 static int grey(int frame)
@@ -2066,9 +2082,99 @@ static int script(int *b, int mask)
         int i = re_project_overlays(re_test_project()) - 1;
         CHECK(!re_project_overlay(re_test_project(), i, &o) && !strcmp(o.name, "Bye") && i == mark && !W[4].open,
               "Edit title... changed: \"%s\", %d overlays, open %d", o.name, i + 1, W[4].open);
-        next(45);
+        next(250);
         return key_to(b, TL, 0x18D); /* (Right: a frame on) */
     }
+    /* ---- export: Ctrl-E, Size > 720 lines, a full name, Export: the TaskWindow started with
+       -export; its output (progress, done) and its end shown; again, and stopped ---- */
+    case 250:
+        if (nulls)
+            return 0;
+        mark2_reports = reports;
+        next(251);
+        return key_to(b, TL, 5);
+    case 251: {
+        if (nulls)
+            return 0;
+        const char *nm = re_test_export_name();
+        CHECK(windows_made == 6 && W[5].open && strlen(nm) > 4 && !strcmp(nm + strlen(nm) - 4, "/mp4")
+                  && strstr(re_test_export_status(), "Drag"),
+              "Ctrl-E: %d windows, open %d, \"%s\", \"%s\"", windows_made, W[5].open, nm, re_test_export_status());
+        mark = menus;
+        next(252);
+        b[0] = W[5].box[0] + 200; b[1] = W[5].box[3] - 226; b[2] = 4; b[3] = EXPW; b[4] = 3; /* Size: its menu */
+        return 6;
+    }
+    case 252:
+        CHECK(menus == mark + 1, "the export's Size button gave no menu");
+        next(253);
+        b[0] = 2; b[1] = -1; /* 720 lines */
+        return 9;
+    case 253:
+        shot("25-export");
+        snprintf(re_test_export_name(), 256, "ADFS::Disc.$.Video/mp4");
+        next(254);
+        b[0] = W[5].box[2] - 50; b[1] = W[5].box[1] + 40; b[2] = 4; b[3] = EXPW; b[4] = 8; /* Export */
+        return 6;
+    case 254:
+        CHECK(starts == 1 && strstr(start_cmd, "TaskWindow") && strstr(start_cmd, "-export")
+                  && strstr(start_cmd, " ADFS::Disc.$.Video/mp4 720 1 0\"") && re_project_modified(re_test_project()),
+              "Export: %d tasks started, \"%s\", modified %d", starts, start_cmd,
+              re_project_modified(re_test_project()));
+        next(255);
+        memset(b, 0, 24);
+        b[0] = 24; b[1] = 0x777; b[2] = 70; b[4] = 0x808C2; b[5] = 0x52454558; /* TaskWindow_Ego */
+        return 17;
+    case 255:
+        next(256);
+        memset(b, 0, 64);
+        b[1] = 0x777; b[2] = 71; b[4] = 0x808C1;
+        b[5] = (int) strlen("progress 5 10\nprog");
+        memcpy(&b[6], "progress 5 10\nprog", b[5]);
+        b[0] = 24 + ((b[5] + 3) & ~3);
+        return 17;
+    case 256:
+        CHECK(strstr(re_test_export_status(), "50%") != NULL, "the export's progress: \"%s\"", re_test_export_status());
+        next(257);
+        memset(b, 0, 64);
+        b[1] = 0x777; b[2] = 72; b[4] = 0x808C1;
+        b[5] = (int) strlen("ress 10 10\ndone\n");
+        memcpy(&b[6], "ress 10 10\ndone\n", b[5]);
+        b[0] = 24 + ((b[5] + 3) & ~3);
+        return 17;
+    case 257:
+        next(258);
+        memset(b, 0, 24);
+        b[0] = 20; b[1] = 0x777; b[2] = 73; b[4] = 0x808C3; /* TaskWindow_Morio */
+        return 17;
+    case 258:
+        CHECK(exports_typed == 1 && !strcmp(re_test_export_status(), "Exported: Video/mp4") && W[5].open,
+              "the export done: typed %d, \"%s\"", exports_typed, re_test_export_status());
+        next(259);
+        b[0] = W[5].box[2] - 50; b[1] = W[5].box[1] + 40; b[2] = 4; b[3] = EXPW; b[4] = 8; /* Export again */
+        return 6;
+    case 259:
+        CHECK(starts == 2, "Export again: %d tasks started", starts);
+        next(260);
+        memset(b, 0, 24);
+        b[0] = 24; b[1] = 0x778; b[2] = 74; b[4] = 0x808C2; b[5] = 0x52454558;
+        return 17;
+    case 260:
+        next(261);
+        b[0] = W[5].box[2] - 50; b[1] = W[5].box[1] + 40; b[2] = 4; b[3] = EXPW; b[4] = 8; /* Stop */
+        return 6;
+    case 261:
+        CHECK(morites == 1 && strstr(re_test_export_status(), "Stopping"), "Stop: %d killed, \"%s\"", morites,
+              re_test_export_status());
+        next(262);
+        memset(b, 0, 24);
+        b[0] = 20; b[1] = 0x778; b[2] = 75; b[4] = 0x808C3;
+        return 17;
+    case 262:
+        CHECK(!strcmp(re_test_export_status(), "Stopped.") && exports_typed == 1 && reports == mark2_reports,
+              "stopped: \"%s\", typed %d, reports %d", re_test_export_status(), exports_typed, reports - mark2_reports);
+        next(45);
+        return key_to(b, TL, 0x18D);
     case 45: /* the desktop shutting down: asked, Discard; the shutdown started again; quit */
         if (nulls)
             return 0;

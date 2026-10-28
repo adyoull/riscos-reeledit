@@ -40,7 +40,7 @@ typedef struct
     scr_mitem item[];
 } scr_menu;
 
-#define SCR_WINS 5
+#define SCR_WINS 6
 #define SCR_ICONS 32
 #define SCR_OPS 6000
 

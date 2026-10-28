@@ -10,6 +10,7 @@
  *   marks.c     the in and out marks: play them, take them out
  *   overlays.c  pictures and videos over the video (V2): dropped, their menu; sprites
  *               made PNGs
+ *   exportbox.c the Export window: the project made into a video, in a TaskWindow
  *   titles.c    the Title window: text over the video
  *   fonts.c     titles' text drawn by the Font Manager
  *   info.c      the Video information window
@@ -138,6 +139,17 @@ void ov_menu_select(int *block);
 int ov_fade_toggle(int ov, int end); /* a second's fade, or taken away. 1 changed */
 void ov_delete(int ov);
 
+/* ---- exportbox.c: the Export window ---- */
+int ex_window(void);
+int ex_running(void);          /* an export is being made */
+void ex_open(void);            /* File > Export... */
+void ex_click(int *block);
+void ex_key(int *block);
+void ex_menu_select(int *block);
+int ex_message(int *block);    /* 1: it was the export's (TaskWindow's) */
+const char *ex_help(int icon);
+void app_export_menu_opened(void); /* a menu of exportbox.c's open */
+
 /* ---- titles.c: the Title window ---- */
 int ti_window(void);
 void ti_open(int ov);          /* a new title (ov -1: at the playhead), or the title ov changed */
@@ -165,6 +177,11 @@ int sb_window(void);
 void sb_click(int *block);
 void sb_key(int *block);
 void sb_drag_end(int *block);
+/* A file icon (screen box x0..y1) dragged out of a window: when it's
+   dropped, where it was is found (Message_DataSave) and saved(path, safe)
+   called (safe 0: a scrap file, another program's) */
+void sb_drag_file(int win, int x0, int y0, int x1, int y1, const char *leaf, int filetype,
+                  int (*saved)(const char *path, int safe));
 int sb_message(int *block);    /* 1: it was for the save box */
 void sb_forget(void);          /* the editor closed: no save to finish */
 
