@@ -1,13 +1,20 @@
-Reel Edit 0.3 (test 14)
+Reel Edit 0.3 (test 28)
 =======================
 
-Reel Edit is a video editor for RISC OS that is being written, on the MLT
-multimedia framework (the engine of Shotcut and Kdenlive), with the
-Raspberry Pi's video hardware through riscos-reelhwaccel. This test build
-has the Viewer and a Timeline: a video track (V1) with cutting, trimming,
-moving, fades, dissolves, marks, undo and saving, and above it a track of
-pictures and videos over the video (V2: logos, picture in picture). Titles, more tracks and
-export come next.
+Reel Edit is a video editor for RISC OS, on the MLT multimedia framework
+(the engine of Shotcut and Kdenlive), with the Raspberry Pi's video
+hardware through riscos-reelhwaccel: a Viewer and a Timeline with a video
+track (V1), an overlay track (V2: logos, titles, picture in picture) and
+audio tracks; cutting, trimming, rolls, copy and paste, fades, dissolves,
+marks, speed, a Clips window, render previews, proxies, undo, saving,
+autosave and export to MP4.
+
+The User Guide
+--------------
+!ReelEdit.Guide.index/html is the full illustrated guide: double-click it
+(it opens in NetSurf or any browser), or Shift-double-click !ReelEdit and
+open Guide. It explains everything below with examples, for beginners and
+for advanced users. This file is the short version.
 
 It needs RISC OS 5 on ARMv7 with VFP (Raspberry Pi 2, 3, 4), with
 SharedUnixLibrary and ARMEABISupport (!Run checks). H.264 is decoded on
@@ -130,7 +137,9 @@ The menu (Menu over the Viewer or the Timeline):
   Play  Play/Stop, Start, End, Mark in, Mark out, Play in to out,
         Clear the marks
   View  Zoom the Timeline in, out, the whole project; Attach the
-        Timeline; Snapping
+        Timeline; Snapping; Viewer size; Clips...; Use proxies
+  (and File > Export..., Edit > New title..., Cut, Copy, Paste, Roll,
+  Play > Render previews, Stop rendering: see the Guide)
   Video information...  the selected clip (or the one at the playhead):
         its file, length, codecs, size, frame rate, sound, and whether
         the VideoCore is decoding it; and the project's size and length
@@ -156,6 +165,13 @@ Keys (with the Viewer or the Timeline in front, clicked on):
   +  -         zoom the Timeline in, out
   Shift-Z  \   the whole project in the Timeline
   Ctrl-Z       clear the selection
+  E            roll the cut nearest the playhead to it (Ctrl-drag an edge:
+               the same)
+  Ctrl-X C V   cut, copy, paste at the playhead
+  T            a new title
+  Ctrl-B       the Clips window (a source: I, O, then , insert . overwrite)
+  Ctrl-R       render previews (the bar under the ruler: red, amber, green)
+  Ctrl-E       export
   F3           save
   Escape       stop
 

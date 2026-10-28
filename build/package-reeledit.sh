@@ -15,6 +15,7 @@ python3 "$RCD_DIR/package/png2sprite.py" "$A/!Sprites,ff9" '!reeledit='"$TOP/app
   'sm!reeledit='"$TOP/app/icons/sm-reeledit.png" > /dev/null
 mkdir -p "$A/share"
 cp -r "$OUT/riscos/stage/share/mlt-7" "$A/share/"
+mkdir -p "$A/Guide" && cp -r "$TOP/docs/guide/index.html" "$TOP/docs/guide/images" "$A/Guide/"
 python3 "$RCD_DIR/package/rozip.py" "$OUT/ReelEdit-$RE_VERSION.zip" -C "$P" '!ReelEdit'
 STRS=$(strings -a "$A/!RunImage,ff8")
 if grep -iqE 'cl[a]ude|anthr[o]pic' <<< "$STRS"; then
