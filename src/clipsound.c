@@ -2,13 +2,15 @@
  * out without its picture. For a picture in the picture whose sound isn't
  * wanted, or a clip's sound brought in under its picture.
  *
+ * Its level: a volume filter in dB (Shotcut's Gain/Volume, "shotcut:filter"
+ * audioGain, its level), 0 dB none.
  * Muted: a volume filter on the clip's cut, its gain 0, named
  * "shotcut:filter" reeleditMute (Shotcut has no mute of a clip's own: not
  * tried there). A sound fade alone is the volume filter of a clip's fade
  * (fade.c) without its brightness one.
  *
  * A dissolve's two clips' ends are cuts of their own (MLT's mix: a tractor
- * of them); rp_fit_sound mutes each as its clip is, after every edit and
+ * of them); rp_fit_sound mutes each (and sets its level) as its clip is, after every edit and
  * when a project is read, so a muted clip stays silent through its
  * dissolves. V2's videos' (overlay.c) are kept on their cuts too.
  *
@@ -21,6 +23,7 @@
 #include <string.h>
 
 #define MUTE "reeleditMute"
+#define GAIN "audioGain" /* (Shotcut's Gain / Volume filter: volume, its level in dB) */
 
 int rp_cut_has_sound(mlt_producer cut)
 {
@@ -52,6 +55,31 @@ void rp_cut_mute(re_project *p, mlt_producer cut, int on)
     mlt_filter_close(f);
 }
 
+int rp_cut_volume(mlt_producer cut)
+{
+    mlt_filter f = cut ? rp_cut_filter(cut, GAIN) : NULL;
+    return f ? mlt_properties_get_int(MLT_FILTER_PROPERTIES(f), "level") : 0;
+}
+
+void rp_cut_set_volume(re_project *p, mlt_producer cut, int db)
+{
+    mlt_filter f = rp_cut_filter(cut, GAIN);
+    if (!db) {
+        if (f)
+            mlt_service_detach(MLT_PRODUCER_SERVICE(cut), f);
+        return;
+    }
+    if (!f) {
+        f = mlt_factory_filter(re_project_profile(p), "volume", NULL);
+        if (!f)
+            return;
+        mlt_properties_set(MLT_FILTER_PROPERTIES(f), "shotcut:filter", GAIN);
+        mlt_service_attach(MLT_PRODUCER_SERVICE(cut), f);
+        mlt_filter_close(f);
+    }
+    mlt_properties_set_int(MLT_FILTER_PROPERTIES(f), "level", db);
+}
+
 void rp_fit_sound(re_project *p)
 {
     int n = p->v1 ? mlt_playlist_count(p->v1) : 0;
@@ -65,8 +93,12 @@ void rp_fit_sound(re_project *p)
             mlt_producer end = mlt_multitrack_track(mt, k);
             /* (only a cut of its own: never the file's producer, which every
                clip of that file shares) */
-            if (end && mlt_producer_is_cut(end))
-                rp_cut_mute(p, end, rp_is_clip(p, clip) && rp_cut_muted(mlt_playlist_get_clip(p->v1, clip)));
+            if (end && mlt_producer_is_cut(end)) {
+                mlt_producer c = rp_is_clip(p, clip) ? mlt_playlist_get_clip(p->v1, clip) : NULL;
+                rp_cut_mute(p, end, c && rp_cut_muted(c));
+                if (rp_cut_volume(end) != rp_cut_volume(c))
+                    rp_cut_set_volume(p, end, rp_cut_volume(c));
+            }
         }
     }
 }
@@ -92,4 +124,19 @@ int re_project_sound_fade(re_project *p, int item, int end, int length)
     if (!rp_is_clip(p, item) || !rp_cut_has_sound(mlt_playlist_get_clip(p->v1, item)))
         return 0;
     return rp_fade(p, item, RP_SOUND, end, length);
+}
+
+int re_project_volume(re_project *p, int item, int db)
+{
+    if (!rp_is_clip(p, item))
+        return 0;
+    mlt_producer cut = mlt_playlist_get_clip(p->v1, item);
+    db = db < -60 ? -60 : db > 12 ? 12 : db;
+    if (!rp_cut_has_sound(cut) || rp_cut_volume(cut) == db)
+        return 0;
+    if (!p->in_edit)
+        rp_checkpoint(p);
+    rp_cut_set_volume(p, cut, db);
+    rp_changed(p);
+    return 1;
 }

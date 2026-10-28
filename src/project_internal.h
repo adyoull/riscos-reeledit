@@ -71,6 +71,8 @@ void rp_fit_fades(re_project *p);
 int rp_cut_has_sound(mlt_producer cut);
 int rp_cut_muted(mlt_producer cut);
 void rp_cut_mute(re_project *p, mlt_producer cut, int on);
+int rp_cut_volume(mlt_producer cut);                          /* dB (0: as it is) */
+void rp_cut_set_volume(re_project *p, mlt_producer cut, int db);
 void rp_fit_sound(re_project *p);
 
 /* overlay.c: the composite transitions putting V2's pictures over V1 made

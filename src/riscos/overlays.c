@@ -20,7 +20,7 @@
  *   Opacity    100%, 75%, 50%, 25%
  *   Fade in, Fade out    a second; ticked when it has one, chosen again it
  *              goes (a video's sound fades with it)
- *   Sound      a video's: Mute; Fade in, Fade out (the sound alone)
+ *   Sound      a video's: Mute; Fade in, Fade out (the sound alone); Volume
  *   Edit title...   a title's: the Title window (titles.c)
  *   Delete
  * Adjust keeps the menu open, to try another.
@@ -276,7 +276,7 @@ void ov_menu_open(int x, int y, int ov)
     menu_shade(&m_overlay.item[O_TITLE].iflags, !o.title);
     menu_tick(&m_overlay.item[O_FADE_IN].flags, o.fade_in > 0);
     menu_tick(&m_overlay.item[O_FADE_OUT].flags, o.fade_out > 0);
-    m_overlay.item[O_SOUND].sub = fx_sound_menu(o.muted, o.sound_fade_in, o.sound_fade_out, 0, 0);
+    m_overlay.item[O_SOUND].sub = fx_sound_menu(o.muted, o.sound_fade_in, o.sound_fade_out, 0, 0, o.volume);
     menu_shade(&m_overlay.item[O_SOUND].iflags, !o.sound);
     r.r[1] = (intptr_t) &m_overlay;
     r.r[2] = x - 64;
@@ -325,6 +325,8 @@ void ov_menu_select(int *b)
         again = b[1] == S_MUTE ? re_project_overlay_mute(A.proj, i, !o.muted)
                 : b[1] == S_FADE_IN || b[1] == S_FADE_OUT
                     ? re_project_overlay_sound_fade(A.proj, i, b[1] == S_FADE_OUT, has ? 0 : len)
+                : b[1] == S_VOLUME && b[2] >= 0 && b[2] < FX_N_LEVELS
+                    ? re_project_overlay_volume(A.proj, i, FX_LEVELS[b[2]])
                     : 0;
         if (again) {
             app_log("overlay %d: sound %s", i, b[1] == S_MUTE ? (o.muted ? "back" : "muted") : "fade toggled");

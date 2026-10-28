@@ -6,8 +6,8 @@
  * The context menu, over a clip ("Clip"):
  *   Fade in, Fade out        ticked when it has one; chosen again, it goes
  *   Sound >  Mute; Fade in, Fade out (the sound alone, a second): each
- *            ticked when it's so, chosen again it goes; shaded for a clip
- *            without sound
+ *            ticked when it's so, chosen again it goes; Volume > +12 dB
+ *            to -36 dB (the level ticked); shaded for a clip without sound
  *   Dissolve from the clip before, Dissolve into the clip after
  *                            a second long, from the clips' frames beyond
  *                            the cut where they have them; shaded with no
@@ -54,6 +54,15 @@ int fx_mute_toggle(int item)
     return 1;
 }
 
+int fx_volume(int item, int db)
+{
+    if (!A.proj || !re_project_volume(A.proj, item, db))
+        return 0;
+    app_log("item %d: volume %d dB", item, db);
+    app_edited();
+    return 1;
+}
+
 int fx_sound_fade_toggle(int item, int end)
 {
     re_item it;
@@ -88,20 +97,30 @@ int fx_dissolve_at_cut(void)
 /* ---- the context menu ------------------------------------------------------------------------ */
 
 enum { C_FADE_IN, C_FADE_OUT, C_SOUND, C_FROM, C_INTO, C_DELETE, C_INFO };
-static MENU(3) m_sound = {"Sound", 7, 2, 7, 0, 200, 44, 0,
-                          {{2, -1, IT("Mute")}, {0, -1, IT("Fade in")}, {0x80, -1, IT("Fade out")}}};
+static MENU(4) m_sound = {"Sound", 7, 2, 7, 0, 200, 44, 0,
+                          {{2, -1, IT("Mute")}, {0, -1, IT("Fade in")}, {2, -1, IT("Fade out")},
+                           {0x80, 0, IT("Volume")}}};
+const int FX_LEVELS[FX_N_LEVELS] = {12, 6, 3, 0, -3, -6, -12, -18, -24, -36};
+static MENU(FX_N_LEVELS) m_volume = {"Volume", 7, 2, 7, 0, 200, 44, 0,
+                                     {{0, -1, IT("+12 dB")}, {0, -1, IT("+6 dB")}, {0, -1, IT("+3 dB")},
+                                      {0, -1, IT("0 dB")}, {0, -1, IT("-3 dB")}, {0, -1, IT("-6 dB")},
+                                      {0, -1, IT("-12 dB")}, {0, -1, IT("-18 dB")}, {0, -1, IT("-24 dB")},
+                                      {0x80, -1, IT("-36 dB")}}};
 static MENU(7) m_clip = {"Clip", 7, 2, 7, 0, 440, 44, 0,
                          {{0, -1, IT("Fade in")}, {0, -1, IT("Fade out")}, {2, 0, IT("Sound")},
                           {0, -1, IT("Dissolve from the clip before")}, {2, -1, IT("Dissolve into the clip after")},
                           {0, -1, IT("Delete")}, {0x80, -1, IT("Video information...")}}};
 
-intptr_t fx_sound_menu(int muted, int fade_in, int fade_out, int in_off, int out_off)
+intptr_t fx_sound_menu(int muted, int fade_in, int fade_out, int in_off, int out_off, int volume)
 {
     menu_tick(&m_sound.item[S_MUTE].flags, muted);
     menu_tick(&m_sound.item[S_FADE_IN].flags, fade_in > 0);
     menu_tick(&m_sound.item[S_FADE_OUT].flags, fade_out > 0);
     menu_shade(&m_sound.item[S_FADE_IN].iflags, in_off);
     menu_shade(&m_sound.item[S_FADE_OUT].iflags, out_off);
+    m_sound.item[S_VOLUME].sub = (intptr_t) &m_volume;
+    for (int k = 0; k < FX_N_LEVELS; k++)
+        menu_tick(&m_volume.item[k].flags, FX_LEVELS[k] == volume);
     return (intptr_t) &m_sound;
 }
 static MENU(1) m_mix = {"Dissolve", 7, 2, 7, 0, 200, 44, 0, {{0x80, -1, IT("Delete")}}};
@@ -140,7 +159,8 @@ void fx_menu_open(int x, int y, int item)
         int in_dissolved = item > 0 && !re_project_item(A.proj, item - 1, &n) && n.mix;
         int out_dissolved = !re_project_item(A.proj, item + 1, &n) && n.mix;
         menu_shade(&m_clip.item[C_FADE_OUT].iflags, out_dissolved);
-        m_clip.item[C_SOUND].sub = fx_sound_menu(it.muted, it.sound_fade_in, it.sound_fade_out, in_dissolved, out_dissolved);
+        m_clip.item[C_SOUND].sub =
+            fx_sound_menu(it.muted, it.sound_fade_in, it.sound_fade_out, in_dissolved, out_dissolved, it.volume);
         menu_shade(&m_clip.item[C_SOUND].iflags, !it.sound);
         menu_shade(&m_clip.item[C_FROM].iflags, !can_dissolve(item - 1));
         menu_shade(&m_clip.item[C_INTO].iflags, !can_dissolve(item));
@@ -167,7 +187,9 @@ void fx_menu_select(int *b)
     case C_FADE_OUT: again = fx_fade_toggle(i, 1); break;
     case C_SOUND:
         again = b[1] == S_MUTE ? fx_mute_toggle(i) : b[1] == S_FADE_IN ? fx_sound_fade_toggle(i, 0)
-                : b[1] == S_FADE_OUT ? fx_sound_fade_toggle(i, 1) : 0;
+                : b[1] == S_FADE_OUT ? fx_sound_fade_toggle(i, 1)
+                : b[1] == S_VOLUME && b[2] >= 0 && b[2] < FX_N_LEVELS ? fx_volume(i, FX_LEVELS[b[2]])
+                : 0;
         break;
     case C_FROM: fx_dissolve(i - 1); break;
     case C_INTO: fx_dissolve(i); break;

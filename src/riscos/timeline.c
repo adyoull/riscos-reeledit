@@ -491,10 +491,16 @@ static void draw_sound(int start, int length, int fade_in, int fade_out, int mut
     }
 }
 
-/* A clip's name, " (muted)" after it if it is */
-static const char *label(char *buf, int size, const char *name, int muted)
+/* A clip's name, " (muted)" after it if it is, or its sound's level if
+   it's been changed (" (-6 dB)") */
+static const char *label(char *buf, int size, const char *name, int muted, int volume)
 {
-    snprintf(buf, size, muted ? "%s (muted)" : "%s", name);
+    if (muted)
+        snprintf(buf, size, "%s (muted)", name);
+    else if (volume)
+        snprintf(buf, size, "%s (%+d dB)", name, volume);
+    else
+        snprintf(buf, size, "%s", name);
     return buf;
 }
 
@@ -576,7 +582,7 @@ static void draw_overlays(int ox, int y0, int y1, int f0, int f1, int cx0, int c
             char shown[64];
             clip(c0, r0, c1, r1);
             char name[80];
-            fit_text(shown, sizeof(shown), label(name, sizeof(name), o.name, o.muted), x1 - x0 - 24);
+            fit_text(shown, sizeof(shown), label(name, sizeof(name), o.name, o.muted, o.volume), x1 - x0 - 24);
             text(shown, x0 + 10, y0 + 12, 0xFFFFFF00, fill);
             clip(cx0, cy0, cx1, cy1);
         }
@@ -681,7 +687,7 @@ static void draw(int *b)
                     if (nx < c1 && nx + 1000 > c0) {
                         char shown[64];
                         char name[80];
-                        fit_text(shown, sizeof(shown), label(name, sizeof(name), it.name, it.muted),
+                        fit_text(shown, sizeof(shown), label(name, sizeof(name), it.name, it.muted, it.volume),
                                  (x1 - nx < 1000 ? x1 - nx : 1000) - 12);
                         text(shown, nx, track_y1 - CORNER - 28, 0xFFFFFF00, fill); /* (below the fade handles) */
                     }

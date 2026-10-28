@@ -45,6 +45,7 @@ typedef struct
     int sound_fade_in, sound_fade_out; /* its sound's fades from and to silence (with the picture's, or alone) */
     int sound;           /* 1: its file has sound (a picture or a silent video hasn't) */
     int muted;           /* 1: its sound muted */
+    int volume;          /* its sound's level: dB (0: as it is) */
     int source_length;   /* the clip's file's length (frames of the project): out is below it */
     char name[64];       /* the clip's file's leaf name */
 } re_item;
@@ -137,6 +138,9 @@ int re_project_fade(re_project *p, int item, int end, int length);
    part is muted too and has the fade out. */
 int re_project_mute(re_project *p, int item, int on);
 int re_project_sound_fade(re_project *p, int item, int end, int length);
+/* A clip's sound's level, dB (-60 to +12; 0: as it is): kept as its mute is.
+   1 changed, 0 not. */
+int re_project_volume(re_project *p, int item, int db);
 
 /* Overlays: pictures (logos, titles) and videos (a picture in the
    picture) over the video, on V2, the track above V1 (overlay.c). Each is
@@ -161,6 +165,7 @@ typedef struct
     int source_length;     /* a video's file's length (frames; a picture's: 0) */
     int sound;             /* 1: a video with sound */
     int muted;             /* a video's sound muted */
+    int volume;            /* a video's sound's level, dB */
     int sound_fade_in, sound_fade_out; /* a video's sound's fades (frames; 0: none) */
     char name[64];         /* the file's leaf name (a picture's without .png or .jpg) */
 } re_overlay;
@@ -193,6 +198,7 @@ int re_project_overlay_fade(re_project *p, int i, int end, int length);
    alone (re_project_overlay_fade fades a video's sound with its picture).
    Not for a picture, nor a video without sound. 1 changed, 0 not. */
 int re_project_overlay_mute(re_project *p, int i, int on);
+int re_project_overlay_volume(re_project *p, int i, int db);
 int re_project_overlay_sound_fade(re_project *p, int i, int end, int length);
 /* Taken away. 1 done, 0 not. */
 int re_project_overlay_remove(re_project *p, int i);

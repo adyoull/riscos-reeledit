@@ -109,9 +109,12 @@ int fx_fade_toggle(int item, int end);   /* a clip's fade (end 0 in, 1 out), a s
 int fx_mute_toggle(int item);            /* a clip's sound muted, or back. 1 changed */
 int fx_sound_fade_toggle(int item, int end); /* a clip's sound faded alone, a second; or taken away. 1 changed */
 /* The Sound submenu (clips' and V2 videos'): ticked and shaded so; its
-   items S_MUTE, S_FADE_IN, S_FADE_OUT */
-enum { S_MUTE, S_FADE_IN, S_FADE_OUT };
-intptr_t fx_sound_menu(int muted, int fade_in, int fade_out, int in_off, int out_off);
+   items S_MUTE, S_FADE_IN, S_FADE_OUT, S_VOLUME (a submenu of FX_LEVELS, dB) */
+enum { S_MUTE, S_FADE_IN, S_FADE_OUT, S_VOLUME };
+#define FX_N_LEVELS 10
+extern const int FX_LEVELS[FX_N_LEVELS];
+intptr_t fx_sound_menu(int muted, int fade_in, int fade_out, int in_off, int out_off, int volume);
+int fx_volume(int item, int db);         /* a clip's sound's level. 1 changed */
 int fx_dissolve(int before);             /* a second's dissolve at the cut after item `before`: its index, or -1 */
 int fx_dissolve_at_cut(void);            /* D: at the cut nearest the playhead */
 void fx_menu_open(int x, int y, int item);

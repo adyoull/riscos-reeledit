@@ -363,6 +363,31 @@ static void clip_sound(const char *silent, const char *snd, const char *out)
           it.sound_fade_in, peak_at(p, 0));
     re_project_close(p);
 
+    /* a level: -12 dB (a quarter); kept split; through a dissolve; undone; saved */
+    p = re_project_new();
+    re_project_add(p, snd, -1);
+    re_project_add(p, snd, -1);
+    CHECK(re_project_volume(p, 0, -12) == 1 && re_project_volume(p, 0, -12) == 0, "volume: set (once)");
+    re_project_item(p, 0, &it);
+    int quarter = peak_at(p, 40);
+    CHECK(it.volume == -12 && quarter > loud / 5 && quarter < loud / 3 && peak_at(p, 110) > loud * 9 / 10,
+          "volume: -12 dB: %d, %d (%d at full), the next %d", it.volume, quarter, loud, peak_at(p, 110));
+    CHECK(re_project_split(p, 30) == 1, "volume: split");
+    re_project_item(p, 1, &it);
+    CHECK(it.volume == -12 && peak_at(p, 50) < loud / 3, "volume: split: %d, %d", it.volume, peak_at(p, 50));
+    re_project_undo(p);
+    CHECK(re_project_volume(p, 1, -12) == 1 && re_project_dissolve(p, 0, 20, 1) == 1, "volume: dissolve");
+    CHECK(peak_at(p, 65) < loud / 3 + 200 && peak_at(p, 65) > loud / 6, "volume: in the dissolve: %d", peak_at(p, 65));
+    CHECK(re_project_undo(p) && re_project_undo(p) && re_project_volume(p, 0, 0) == 1 && peak_at(p, 40) > loud * 9 / 10,
+          "volume: back to 0 dB: %d", peak_at(p, 40));
+    re_project_volume(p, 0, 6);
+    CHECK(re_project_save(p, out) == 0, "volume: not saved");
+    re_project_close(p);
+    p = re_project_open(out, 1);
+    re_project_item(p, 0, &it);
+    CHECK(p && it.volume == 6 && peak_at(p, 40) > loud * 3 / 2, "volume: opened: %d, %d", it.volume, peak_at(p, 40));
+    re_project_close(p);
+
     /* without sound: nothing to mute */
     p = re_project_new();
     re_project_add(p, silent, -1);
@@ -376,6 +401,11 @@ static void clip_sound(const char *silent, const char *snd, const char *out)
     re_project_overlay(p, 0, &o);
     CHECK(o.sound && !o.muted && peak_at(p, 40) > 1000, "sound: V2's video heard: %d %d, %d", o.sound, o.muted,
           peak_at(p, 40));
+    CHECK(re_project_overlay_volume(p, 0, -12) == 1, "sound: V2's video's level");
+    re_project_overlay(p, 0, &o);
+    CHECK(o.volume == -12 && peak_at(p, 40) < loud / 3, "sound: V2's video at -12 dB: %d, %d", o.volume,
+          peak_at(p, 40));
+    re_project_overlay_volume(p, 0, 0);
     CHECK(re_project_overlay_mute(p, 0, 1) == 1, "sound: V2's video muted");
     re_project_overlay(p, 0, &o);
     CHECK(o.muted && peak_at(p, 40) < 30, "sound: V2's video muted: %d, %d", o.muted, peak_at(p, 40));

@@ -1443,6 +1443,19 @@ static int script(int *b, int mask)
         re_project_item(re_test_project(), 1, &it);
         CHECK(!it.muted, "Sound > Mute again: muted %d", it.muted);
         shot("22-sound-fade");
+        next(238);
+        return click_tl(b, 60, 0, 2);
+    }
+    case 238:
+        next(239);
+        b[0] = 2; b[1] = 3; b[2] = 5; b[3] = -1; /* Sound > Volume > -6 dB */
+        return 9;
+    case 239: {
+        if (nulls)
+            return 0;
+        re_item it;
+        re_project_item(re_test_project(), 1, &it);
+        CHECK(it.volume == -6, "Sound > Volume > -6 dB: %d", it.volume);
         next(144);
         return click_tl(b, 15, 0, 2);
     }

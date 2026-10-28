@@ -398,6 +398,7 @@ int re_project_item(re_project *p, int i, re_item *item)
         item->sound_fade_out = rp_fade_of(p, i, RP_SOUND, 1);
         item->sound = rp_cut_has_sound(cut);
         item->muted = rp_cut_muted(cut);
+        item->volume = rp_cut_volume(cut);
     }
     if (!item->gap && !item->mix && info.resource) {
         const char *leaf = info.resource;
@@ -479,6 +480,7 @@ static int split_at(re_project *p, int frame)
         return 0;
     int fade_out = rp_fade_of(p, i, RP_PICTURE, 1), sound_out = rp_fade_of(p, i, RP_SOUND, 1);
     int muted = rp_cut_muted(mlt_playlist_get_clip(p->v1, i));
+    int volume = rp_cut_volume(mlt_playlist_get_clip(p->v1, i));
     /* (the first part: its in to the frame before; the second, a new cut,
        is given the fades out and the mute) */
     if (mlt_playlist_split(p->v1, i, frame - it.start - 1))
@@ -488,6 +490,8 @@ static int split_at(re_project *p, int frame)
     rp_set_fade(p, i + 1, RP_SOUND, 1, sound_out);
     if (muted)
         rp_cut_mute(p, mlt_playlist_get_clip(p->v1, i + 1), 1);
+    if (volume)
+        rp_cut_set_volume(p, mlt_playlist_get_clip(p->v1, i + 1), volume);
     return 1;
 }
 

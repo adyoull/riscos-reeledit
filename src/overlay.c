@@ -104,6 +104,7 @@ int re_project_overlay(re_project *p, int i, re_overlay *o)
     o->fade_out = mlt_properties_get_int(cp, "shotcut:reeledit_fade_out");
     o->sound = o->video && rp_cut_has_sound(info.cut);
     o->muted = o->video && rp_cut_muted(info.cut);
+    o->volume = o->video ? rp_cut_volume(info.cut) : 0;
     o->sound_fade_in = o->video ? rp_cut_fade(info.cut, RP_SOUND, 0) : 0;
     o->sound_fade_out = o->video ? rp_cut_fade(info.cut, RP_SOUND, 1) : 0;
     /* (its leaf name, a picture's without its .png or .jpg: MLT's names are Unix ones) */
@@ -716,5 +717,20 @@ int re_project_title_set(re_project *p, int i, const re_title *t)
         rp_checkpoint(p);
     re_title_put(info.cut, t);
     rp_changed(p); /* (its composite's box made again: its new size) */
+    return 1;
+}
+
+int re_project_overlay_volume(re_project *p, int i, int db)
+{
+    mlt_playlist_clip_info info;
+    int e = entry(p, i);
+    db = db < -60 ? -60 : db > 12 ? 12 : db;
+    if (e < 0 || mlt_playlist_get_clip_info(p->v2, &info, e) || !rp_cut_has_sound(info.cut)
+        || rp_cut_volume(info.cut) == db)
+        return 0;
+    if (!p->in_edit)
+        rp_checkpoint(p);
+    rp_cut_set_volume(p, info.cut, db);
+    rp_changed(p);
     return 1;
 }
