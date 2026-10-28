@@ -5,6 +5,9 @@
  *
  * The context menu, over a clip ("Clip"):
  *   Fade in, Fade out        ticked when it has one; chosen again, it goes
+ *   Sound >  Mute; Fade in, Fade out (the sound alone, a second): each
+ *            ticked when it's so, chosen again it goes; shaded for a clip
+ *            without sound
  *   Dissolve from the clip before, Dissolve into the clip after
  *                            a second long, from the clips' frames beyond
  *                            the cut where they have them; shaded with no
@@ -40,6 +43,30 @@ int fx_fade_toggle(int item, int end)
     return 1;
 }
 
+int fx_mute_toggle(int item)
+{
+    re_item it;
+    if (!A.proj || item < 0 || re_project_item(A.proj, item, &it) || it.gap || it.mix
+        || !re_project_mute(A.proj, item, !it.muted))
+        return 0;
+    app_log("item %d: sound %s", item, it.muted ? "back" : "muted");
+    app_edited();
+    return 1;
+}
+
+int fx_sound_fade_toggle(int item, int end)
+{
+    re_item it;
+    if (!A.proj || item < 0 || re_project_item(A.proj, item, &it) || it.gap || it.mix)
+        return 0;
+    int has = end ? it.sound_fade_out : it.sound_fade_in;
+    if (!re_project_sound_fade(A.proj, item, end, has ? 0 : re_project_frames(A.proj, 1.0)))
+        return 0;
+    app_log("sound fade %s on item %d: %s", end ? "out" : "in", item, has ? "taken away" : "made");
+    app_edited();
+    return 1;
+}
+
 int fx_dissolve(int before)
 {
     int m = A.proj && before >= 0 ? re_project_dissolve(A.proj, before, re_project_frames(A.proj, 1.0), 0) : -1;
@@ -60,11 +87,23 @@ int fx_dissolve_at_cut(void)
 
 /* ---- the context menu ------------------------------------------------------------------------ */
 
-enum { C_FADE_IN, C_FADE_OUT, C_FROM, C_INTO, C_DELETE, C_INFO };
-static MENU(6) m_clip = {"Clip", 7, 2, 7, 0, 440, 44, 0,
-                         {{0, -1, IT("Fade in")}, {2, -1, IT("Fade out")},
+enum { C_FADE_IN, C_FADE_OUT, C_SOUND, C_FROM, C_INTO, C_DELETE, C_INFO };
+static MENU(3) m_sound = {"Sound", 7, 2, 7, 0, 200, 44, 0,
+                          {{2, -1, IT("Mute")}, {0, -1, IT("Fade in")}, {0x80, -1, IT("Fade out")}}};
+static MENU(7) m_clip = {"Clip", 7, 2, 7, 0, 440, 44, 0,
+                         {{0, -1, IT("Fade in")}, {0, -1, IT("Fade out")}, {2, 0, IT("Sound")},
                           {0, -1, IT("Dissolve from the clip before")}, {2, -1, IT("Dissolve into the clip after")},
                           {0, -1, IT("Delete")}, {0x80, -1, IT("Video information...")}}};
+
+intptr_t fx_sound_menu(int muted, int fade_in, int fade_out, int in_off, int out_off)
+{
+    menu_tick(&m_sound.item[S_MUTE].flags, muted);
+    menu_tick(&m_sound.item[S_FADE_IN].flags, fade_in > 0);
+    menu_tick(&m_sound.item[S_FADE_OUT].flags, fade_out > 0);
+    menu_shade(&m_sound.item[S_FADE_IN].iflags, in_off);
+    menu_shade(&m_sound.item[S_FADE_OUT].iflags, out_off);
+    return (intptr_t) &m_sound;
+}
 static MENU(1) m_mix = {"Dissolve", 7, 2, 7, 0, 200, 44, 0, {{0x80, -1, IT("Delete")}}};
 
 static struct
@@ -98,7 +137,11 @@ void fx_menu_open(int x, int y, int item)
         /* (an end in a dissolve has no fade) */
         re_item n;
         menu_shade(&m_clip.item[C_FADE_IN].iflags, item > 0 && !re_project_item(A.proj, item - 1, &n) && n.mix);
-        menu_shade(&m_clip.item[C_FADE_OUT].iflags, !re_project_item(A.proj, item + 1, &n) && n.mix);
+        int in_dissolved = item > 0 && !re_project_item(A.proj, item - 1, &n) && n.mix;
+        int out_dissolved = !re_project_item(A.proj, item + 1, &n) && n.mix;
+        menu_shade(&m_clip.item[C_FADE_OUT].iflags, out_dissolved);
+        m_clip.item[C_SOUND].sub = fx_sound_menu(it.muted, it.sound_fade_in, it.sound_fade_out, in_dissolved, out_dissolved);
+        menu_shade(&m_clip.item[C_SOUND].iflags, !it.sound);
         menu_shade(&m_clip.item[C_FROM].iflags, !can_dissolve(item - 1));
         menu_shade(&m_clip.item[C_INTO].iflags, !can_dissolve(item));
         r.r[1] = (intptr_t) &m_clip;
@@ -122,6 +165,10 @@ void fx_menu_select(int *b)
     switch (b[0]) {
     case C_FADE_IN: again = fx_fade_toggle(i, 0); break;
     case C_FADE_OUT: again = fx_fade_toggle(i, 1); break;
+    case C_SOUND:
+        again = b[1] == S_MUTE ? fx_mute_toggle(i) : b[1] == S_FADE_IN ? fx_sound_fade_toggle(i, 0)
+                : b[1] == S_FADE_OUT ? fx_sound_fade_toggle(i, 1) : 0;
+        break;
     case C_FROM: fx_dissolve(i - 1); break;
     case C_INTO: fx_dissolve(i); break;
     case C_DELETE: app_delete(i, 1); break;

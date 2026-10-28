@@ -299,6 +299,104 @@ static void fades(const char *a, const char *b, const char *snd, const char *out
     re_project_close(p);
 }
 
+/* ---- a clip's sound alone: muted (kept through undo, saving, splitting,
+   its dissolves; another clip of the same file not muted); faded without
+   the picture; a fade of both, the sound's then taken away alone; a video
+   on V2 muted and faded, with its picture or alone; not for clips without
+   sound */
+static void clip_sound(const char *silent, const char *snd, const char *out)
+{
+    re_project *p = re_project_new();
+    re_project_add(p, snd, -1);
+    re_project_add(p, snd, -1);
+    re_item it, it2;
+    int loud = peak_at(p, 40);
+    re_project_item(p, 0, &it);
+    CHECK(loud > 1000 && it.sound && !it.muted, "sound: %d unmuted, sound %d, muted %d", loud, it.sound, it.muted);
+    CHECK(re_project_mute(p, 0, 1) == 1 && re_project_mute(p, 0, 1) == 0, "sound: muted (once)");
+    re_project_item(p, 0, &it);
+    CHECK(it.muted && peak_at(p, 40) < 30 && peak_at(p, 110) > 1000, "sound: muted: %d, %d at 40, %d in the next clip",
+          it.muted, peak_at(p, 40), peak_at(p, 110));
+    CHECK(re_project_undo(p) && peak_at(p, 40) > 1000 && re_project_redo(p) && peak_at(p, 40) < 30,
+          "sound: undo, redo: %d", peak_at(p, 40));
+    CHECK(re_project_save(p, out) == 0, "sound: not saved");
+    re_project_close(p);
+    p = re_project_open(out, 1);
+    CHECK(p && peak_at(p, 40) < 30 && peak_at(p, 110) > 1000, "sound: opened: %d, %d", peak_at(p, 40), peak_at(p, 110));
+    /* split: both parts muted */
+    CHECK(re_project_sound_fade(p, 0, 1, 10) == 1 && re_project_split(p, 30) == 1, "sound: split");
+    re_project_item(p, 0, &it2);
+    re_project_item(p, 1, &it);
+    CHECK(it.muted && peak_at(p, 20) < 30 && peak_at(p, 50) < 30 && it.sound_fade_out == 10 && it2.sound_fade_out == 0,
+          "sound: split: muted %d, %d, %d; sound fades out %d, %d", it.muted, peak_at(p, 20), peak_at(p, 50),
+          it2.sound_fade_out, it.sound_fade_out);
+    re_project_undo(p);
+    /* a dissolve between two muted clips: silent through it; one unmuted: heard */
+    CHECK(re_project_mute(p, 1, 1) == 1 && re_project_dissolve(p, 0, 20, 1) == 1, "sound: dissolve: %s", layout(p));
+    CHECK(peak_at(p, 65) < 30, "sound: a dissolve between muted clips: %d", peak_at(p, 65));
+    CHECK(re_project_mute(p, 0, 0) == 1 && peak_at(p, 57) > 500, "sound: the first unmuted: %d in the dissolve",
+          peak_at(p, 57));
+    re_project_close(p);
+
+    /* faded alone; both; the sound's taken away alone; trimmed */
+    p = re_project_new();
+    re_project_add(p, snd, -1);
+    CHECK(re_project_sound_fade(p, 0, 0, 25) == 1 && re_project_sound_fade(p, 0, 0, 25) == 0, "sound: faded in");
+    re_project_item(p, 0, &it);
+    int quiet = peak_at(p, 0), half = peak_at(p, 12);
+    CHECK(it.sound_fade_in == 25 && it.fade_in == 0 && quiet < loud / 50 && half > quiet && half < loud,
+          "sound: faded in alone: %d (picture %d): %d, %d", it.sound_fade_in, it.fade_in, quiet, half);
+    CHECK(re_project_fade(p, 0, 1, 20) == 1, "sound: a fade out of both");
+    re_project_item(p, 0, &it);
+    CHECK(it.fade_out == 20 && it.sound_fade_out == 20 && peak_at(p, 74) < loud / 10,
+          "sound: both faded out: %d, %d, %d", it.fade_out, it.sound_fade_out, peak_at(p, 74));
+    CHECK(re_project_sound_fade(p, 0, 1, 0) == 1, "sound: its fade out taken away");
+    re_project_item(p, 0, &it);
+    CHECK(it.fade_out == 20 && it.sound_fade_out == 0 && peak_at(p, 74) > 1000,
+          "sound: the picture's fade out kept, the sound's gone: %d, %d, %d", it.fade_out, it.sound_fade_out,
+          peak_at(p, 74));
+    CHECK(re_project_set_in_out(p, 0, 10, 74) == 1, "sound: trimmed");
+    re_project_item(p, 0, &it);
+    CHECK(it.sound_fade_in == 25 && peak_at(p, 0) < loud / 50, "sound: trimmed: fade %d, %d at the start",
+          it.sound_fade_in, peak_at(p, 0));
+    re_project_close(p);
+
+    /* without sound: nothing to mute */
+    p = re_project_new();
+    re_project_add(p, silent, -1);
+    re_project_item(p, 0, &it);
+    CHECK(!it.sound && re_project_mute(p, 0, 1) == 0 && re_project_sound_fade(p, 0, 0, 10) == 0,
+          "sound: a silent clip: sound %d", it.sound);
+
+    /* a video on V2: muted; faded with its picture, and alone */
+    re_overlay o;
+    CHECK(re_project_overlay_add(p, snd, 0, 0) == 0, "sound: the video on V2");
+    re_project_overlay(p, 0, &o);
+    CHECK(o.sound && !o.muted && peak_at(p, 40) > 1000, "sound: V2's video heard: %d %d, %d", o.sound, o.muted,
+          peak_at(p, 40));
+    CHECK(re_project_overlay_mute(p, 0, 1) == 1, "sound: V2's video muted");
+    re_project_overlay(p, 0, &o);
+    CHECK(o.muted && peak_at(p, 40) < 30, "sound: V2's video muted: %d, %d", o.muted, peak_at(p, 40));
+    re_project_overlay_mute(p, 0, 0);
+    CHECK(re_project_overlay_fade(p, 0, 0, 25) == 1, "sound: V2's video faded in");
+    re_project_overlay(p, 0, &o);
+    CHECK(o.fade_in == 25 && o.sound_fade_in == 25 && peak_at(p, 0) < loud / 50, "sound: V2's fade in: %d, %d, %d",
+          o.fade_in, o.sound_fade_in, peak_at(p, 0));
+    CHECK(re_project_overlay_sound_fade(p, 0, 0, 0) == 1, "sound: V2's sound fade taken away");
+    re_project_overlay(p, 0, &o);
+    CHECK(o.fade_in == 25 && o.sound_fade_in == 0 && peak_at(p, 0) > 500, "sound: V2's sound fade gone: %d, %d, %d",
+          o.fade_in, o.sound_fade_in, peak_at(p, 0));
+    CHECK(re_project_overlay_sound_fade(p, 0, 1, 25) == 1 && re_project_overlay_span(p, 0, 0, 60) == 1,
+          "sound: V2's fade out, its end trimmed");
+    re_project_overlay(p, 0, &o);
+    CHECK(o.length == 60 && o.sound_fade_out == 25 && o.fade_out == 0 && peak_at(p, 52) < loud / 10
+              && peak_at(p, 30) > 1000,
+          "sound: V2's fade out alone, kept at its end: %d long, %d, %d, %d at 52, %d at 30", o.length,
+          o.sound_fade_out, o.fade_out, peak_at(p, 52), peak_at(p, 30));
+    re_project_close(p);
+    (void) it2;
+}
+
 /* ---- a range taken out (I/O marks: Extract, Lift): clips split at both
    ends; what follows moves up or a gap is left; fades kept at the ends
    left; not across a dissolve */
@@ -1031,6 +1129,7 @@ int main(int argc, char **argv)
     dissolves(a, b, argv[6], out);
     fades(a, b, argv[9], out);
     ranges(a, b);
+    clip_sound(a, argv[9], out);
     stills(argv[10]);
     overlays(a, b, argv[9], out, argv[10], argv[11], argv[12]);
     video_overlays(a, b, argv[9], n, argv[5], out);

@@ -55,6 +55,8 @@
 #define MARKED_COLOUR 0xF8D8B000u /* (176, 216, 248): the ruler between the I/O marks */
 #define MARK_COLOUR   0xB0601800u /* (24, 96, 176): the marks' lines */
 #define OVERLAY_COLOUR 0x80A03000u /* (48, 160, 128): V2's pictures */
+#define SOUND_COLOUR 0x50B05000u /* (80, 176, 80): a clip's sound fades, wedges along its bottom */
+#define MUTED_COLOUR 0x2828B000u /* (176, 40, 40): a muted clip's bottom edge */
 #define CORNER  32   /* OS units: the track's top (fade handles) and bottom (dissolve marks) strips */
 #define V2_H    64   /* V2's row: the overlays (pictures over the video), above V1 */
 #define V2_TOP (-RULER_H - 8) /* the rows' tops and bottoms (work area) */
@@ -468,6 +470,34 @@ static void draw_fades(const re_item *it, int ox, int x0, int x1, int y1, int cx
     }
 }
 
+/* A clip's sound, along its bottom (x0..x1, from y0, h high): muted, a red
+   line; its fades, a green wedge each (silence to full, or back) */
+static void draw_sound(int start, int length, int fade_in, int fade_out, int muted, int ox, int x0, int x1, int y0,
+                       int h)
+{
+    if (muted) {
+        colour(MUTED_COLOUR);
+        rect(x0, y0, x1, y0 + 8);
+        return; /* (no sound to fade) */
+    }
+    colour(SOUND_COLOUR);
+    if (fade_in > 0) {
+        int e = ox + x_of(start + fade_in);
+        triangle(x0, y0, e, y0, e, y0 + h);
+    }
+    if (fade_out > 0) {
+        int e = ox + x_of(start + length - fade_out);
+        triangle(e, y0 + h, e, y0, x1, y0);
+    }
+}
+
+/* A clip's name, " (muted)" after it if it is */
+static const char *label(char *buf, int size, const char *name, int muted)
+{
+    snprintf(buf, size, muted ? "%s (muted)" : "%s", name);
+    return buf;
+}
+
 /* A dissolve: a box laid over the two clips where they overlap (the clips
    are drawn on through it), the first clip's colour giving way to a
    lighter one along a diagonal, a white (selected: amber) border; its name
@@ -532,6 +562,9 @@ static void draw_overlays(int ox, int y0, int y1, int f0, int f1, int cx0, int c
             rect(x0 + inset, y1 - inset - 12, ox + x_of(o.start + o.fade_in), y1 - inset);
         if (o.fade_out > 0)
             rect(ox + x_of(o.start + o.length - o.fade_out), y1 - inset - 12, x1 - inset, y1 - inset);
+        if (o.video)
+            draw_sound(o.start, o.length, o.sound_fade_in, o.sound_fade_out, o.muted, ox, x0 + inset, x1 - inset,
+                       y0 + inset, 9);
         if (sel && x1 - x0 > 4 * inset) {
             colour(0x2080F000);
             rect(x0, y0 + 12, x0 + inset + 4, y1 - 12);
@@ -542,7 +575,8 @@ static void draw_overlays(int ox, int y0, int y1, int f0, int f1, int cx0, int c
         if (c1 > c0 && r1 > r0) {
             char shown[64];
             clip(c0, r0, c1, r1);
-            fit_text(shown, sizeof(shown), o.name, x1 - x0 - 24);
+            char name[80];
+            fit_text(shown, sizeof(shown), label(name, sizeof(name), o.name, o.muted), x1 - x0 - 24);
             text(shown, x0 + 10, y0 + 12, 0xFFFFFF00, fill);
             clip(cx0, cy0, cx1, cy1);
         }
@@ -634,6 +668,8 @@ static void draw(int *b)
                 rect(x1 - inset - 4, track_y0 + CORNER, x1, track_y1 - CORNER);
             }
             draw_fades(&it, ox, x0, x1, track_y1, cx0, cy0, cx1, cy1);
+            draw_sound(it.start, it.length, it.sound_fade_in, it.sound_fade_out, it.muted, ox, x0 + inset, x1 - inset,
+                       track_y0 + inset, 24);
             /* the name, clipped to the clip */
             int c0 = x0 + 2 > cx0 ? x0 + 2 : cx0, c1 = x1 - 2 < cx1 ? x1 - 2 : cx1;
             int r0 = track_y0 > cy0 ? track_y0 : cy0, r1 = track_y1 < cy1 ? track_y1 : cy1;
@@ -644,7 +680,9 @@ static void draw(int *b)
                 for (int nx = name_x; nx == name_x || nx < x1 - 200; nx += 1000)
                     if (nx < c1 && nx + 1000 > c0) {
                         char shown[64];
-                        fit_text(shown, sizeof(shown), it.name, (x1 - nx < 1000 ? x1 - nx : 1000) - 12);
+                        char name[80];
+                        fit_text(shown, sizeof(shown), label(name, sizeof(name), it.name, it.muted),
+                                 (x1 - nx < 1000 ? x1 - nx : 1000) - 12);
                         text(shown, nx, track_y1 - CORNER - 28, 0xFFFFFF00, fill); /* (below the fade handles) */
                     }
                 clip(cx0, cy0, cx1, cy1);
@@ -1208,9 +1246,9 @@ const char *tl_help(int screen_y)
                "I and O mark a stretch on it; Return plays the stretch, ' takes it out.";
     if (wy > V2_BOTTOM - 4)
         return "This is V2: pictures and videos over the video.|MDrop a PNG, JPEG, sprite or video here; "
-               "drag one to move it, its ends to trim it; Menu over it to place it, size it, fade it.";
+               "drag one to move it, its ends to trim it; Menu over it to place it, size it, fade it, mute it.";
     return "This is V1: the clips.|MClick a clip to select it; drag its edge to trim it, its middle to move it.|M"
-           "Menu over a clip gives its effects (fades, dissolves).|MCtrl and the wheel zoom.";
+           "Menu over a clip gives its effects (fades, sound, dissolves).|MCtrl and the wheel zoom.";
 }
 
 int tl_scrubbing(void)

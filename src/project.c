@@ -35,6 +35,7 @@ void rp_changed(re_project *p)
 {
     rp_relink(p);
     rp_fit_fades(p);
+    rp_fit_sound(p);
     rp_fit_overlays(p);
     fit_tractor(p);
     p->state = ++p->next_state;
@@ -276,6 +277,7 @@ static int adopt(re_project *p, mlt_producer prod)
         return -1;
     }
     rp_relink(p);
+    rp_fit_sound(p);
     rp_fit_overlays(p);
     return 0;
 }
@@ -389,8 +391,13 @@ int re_project_item(re_project *p, int i, re_item *item)
         item->out = item->length - 1;
         snprintf(item->name, sizeof(item->name), "Dissolve");
     } else if (!item->gap) {
-        item->fade_in = rp_fade_of(p, i, 0);
-        item->fade_out = rp_fade_of(p, i, 1);
+        mlt_producer cut = mlt_playlist_get_clip(p->v1, i);
+        item->fade_in = rp_fade_of(p, i, RP_PICTURE, 0);
+        item->fade_out = rp_fade_of(p, i, RP_PICTURE, 1);
+        item->sound_fade_in = rp_fade_of(p, i, RP_SOUND, 0);
+        item->sound_fade_out = rp_fade_of(p, i, RP_SOUND, 1);
+        item->sound = rp_cut_has_sound(cut);
+        item->muted = rp_cut_muted(cut);
     }
     if (!item->gap && !item->mix && info.resource) {
         const char *leaf = info.resource;
@@ -470,14 +477,17 @@ static int split_at(re_project *p, int frame)
     re_item it;
     if (i < 0 || re_project_item(p, i, &it) || it.mix || frame <= it.start || frame >= it.start + it.length)
         return 0;
-    int fade_out = rp_fade_of(p, i, 1);
-    /* (the first part: its in to the frame before) */
+    int fade_out = rp_fade_of(p, i, RP_PICTURE, 1), sound_out = rp_fade_of(p, i, RP_SOUND, 1);
+    int muted = rp_cut_muted(mlt_playlist_get_clip(p->v1, i));
+    /* (the first part: its in to the frame before; the second, a new cut,
+       is given the fades out and the mute) */
     if (mlt_playlist_split(p->v1, i, frame - it.start - 1))
         return 0;
-    if (fade_out) {
-        rp_set_fade(p, i, 1, 0);
-        rp_set_fade(p, i + 1, 1, fade_out);
-    }
+    rp_set_fade(p, i, RP_PICTURE | RP_SOUND, 1, 0);
+    rp_set_fade(p, i + 1, RP_PICTURE, 1, fade_out);
+    rp_set_fade(p, i + 1, RP_SOUND, 1, sound_out);
+    if (muted)
+        rp_cut_mute(p, mlt_playlist_get_clip(p->v1, i + 1), 1);
     return 1;
 }
 

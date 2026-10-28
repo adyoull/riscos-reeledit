@@ -103,6 +103,12 @@ void tl_scroll(int *block);
 
 /* ---- effects.c: fades and dissolves, from the menus ---- */
 int fx_fade_toggle(int item, int end);   /* a clip's fade (end 0 in, 1 out), a second; or taken away. 1 changed */
+int fx_mute_toggle(int item);            /* a clip's sound muted, or back. 1 changed */
+int fx_sound_fade_toggle(int item, int end); /* a clip's sound faded alone, a second; or taken away. 1 changed */
+/* The Sound submenu (clips' and V2 videos'): ticked and shaded so; its
+   items S_MUTE, S_FADE_IN, S_FADE_OUT */
+enum { S_MUTE, S_FADE_IN, S_FADE_OUT };
+intptr_t fx_sound_menu(int muted, int fade_in, int fade_out, int in_off, int out_off);
 int fx_dissolve(int before);             /* a second's dissolve at the cut after item `before`: its index, or -1 */
 int fx_dissolve_at_cut(void);            /* D: at the cut nearest the playhead */
 void fx_menu_open(int x, int y, int item);

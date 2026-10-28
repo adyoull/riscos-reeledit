@@ -1368,12 +1368,69 @@ static int script(int *b, int mask)
         re_item it;
         re_project_item(re_test_project(), 0, &it);
         CHECK(it.fade_in == 0, "the context menu's Fade in again: %d (not taken away)", it.fade_in);
+        next(230);
+        return click_tl(b, 60, 0, 2); /* (the second clip: numbered-snd, faded out by Edit > Fade out) */
+    }
+    /* ---- the context menu's Sound, on the second clip: Mute; its sound's
+       fade out taken away alone, then back; Mute again ---- */
+    case 230:
+        next(231);
+        b[0] = 2; b[1] = 0; b[2] = -1; /* Sound > Mute */
+        return 9;
+    case 231: {
+        if (nulls)
+            return 0;
+        re_item it;
+        re_project_item(re_test_project(), 1, &it);
+        CHECK(it.sound && it.muted, "Sound > Mute: sound %d, muted %d", it.sound, it.muted);
+        shot("21-muted");
+        next(232);
+        return click_tl(b, 60, 0, 2);
+    }
+    case 232:
+        next(233);
+        b[0] = 2; b[1] = 2; b[2] = -1; /* Sound > Fade out: the sound's taken away */
+        return 9;
+    case 233: {
+        if (nulls)
+            return 0;
+        re_item it;
+        re_project_item(re_test_project(), 1, &it);
+        CHECK(it.sound_fade_out == 0 && it.fade_out == 25, "Sound > Fade out: the sound's %d, the picture's %d",
+              it.sound_fade_out, it.fade_out);
+        next(234);
+        return click_tl(b, 60, 0, 2);
+    }
+    case 234:
+        next(235);
+        b[0] = 2; b[1] = 2; b[2] = -1; /* Sound > Fade out: back */
+        return 9;
+    case 235: {
+        if (nulls)
+            return 0;
+        re_item it;
+        re_project_item(re_test_project(), 1, &it);
+        CHECK(it.sound_fade_out == 25, "Sound > Fade out again: %d", it.sound_fade_out);
+        next(236);
+        return click_tl(b, 60, 0, 2);
+    }
+    case 236:
+        next(237);
+        b[0] = 2; b[1] = 0; b[2] = -1; /* Sound > Mute again: heard */
+        return 9;
+    case 237: {
+        if (nulls)
+            return 0;
+        re_item it;
+        re_project_item(re_test_project(), 1, &it);
+        CHECK(!it.muted, "Sound > Mute again: muted %d", it.muted);
+        shot("22-sound-fade");
         next(144);
         return click_tl(b, 15, 0, 2);
     }
     case 144:
         next(145);
-        b[0] = 3; b[1] = -1; /* Dissolve into the clip after */
+        b[0] = 4; b[1] = -1; /* Dissolve into the clip after */
         return 9;
     case 145:
         if (nulls)

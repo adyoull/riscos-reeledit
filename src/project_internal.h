@@ -49,12 +49,29 @@ void rp_relink(re_project *p);
    an edit of its own: within one). 0, or -1. */
 int rp_unmix(re_project *p, int mix);
 
-/* fade.c: a clip's fade at its start (end 0) or its end (end 1): its
-   length (0: none); set (0: taken away; not an edit of its own); and every
-   fade kept to its clip's ends and length (after every edit) */
-int rp_fade_of(re_project *p, int item, int end);
-void rp_set_fade(re_project *p, int item, int end, int length);
+/* fade.c: fades of a clip's picture and its sound (kinds: RP_PICTURE,
+   RP_SOUND, or both), at its start (end 0) or its end (end 1). On a cut
+   (in, out: its frames of its file): the filter named so; a fade's length
+   (0: none); set (0: taken away); kept to the cut's ends. On V1's item:
+   the same; a fade made as an edit (rp_fade: 1 changed, 0 not); every
+   fade (V1's and V2's) kept to its clip (after every edit). */
+enum { RP_PICTURE = 1, RP_SOUND = 2 };
+mlt_filter rp_cut_filter(mlt_producer cut, const char *name);
+int rp_cut_fade(mlt_producer cut, int kind, int end);
+void rp_cut_set_fade(re_project *p, mlt_producer cut, int kinds, int end, int length, int in, int out);
+void rp_cut_fit_fades(re_project *p, mlt_producer cut, int in, int out);
+int rp_fade_of(re_project *p, int item, int kind, int end);
+void rp_set_fade(re_project *p, int item, int kinds, int end, int length);
+int rp_fade(re_project *p, int item, int kinds, int end, int length);
 void rp_fit_fades(re_project *p);
+
+/* clipsound.c: a cut's sound: whether it has any (a picture, or a video
+   without, hasn't), muted or not, muting it (not an edit of its own); the
+   dissolves' clips' ends muted as their clips are (after every edit) */
+int rp_cut_has_sound(mlt_producer cut);
+int rp_cut_muted(mlt_producer cut);
+void rp_cut_mute(re_project *p, mlt_producer cut, int on);
+void rp_fit_sound(re_project *p);
 
 /* overlay.c: the composite transitions putting V2's pictures over V1 made
    again from their settings (after every edit, and a project read) */

@@ -41,6 +41,9 @@ typedef struct
     int gap;             /* 1: a gap (blank), not a clip */
     int mix;             /* 1: a dissolve, the clips either side mixed (its in and out: 0, length - 1) */
     int fade_in, fade_out; /* a clip's fades from and to black (frames; 0: none) */
+    int sound_fade_in, sound_fade_out; /* its sound's fades from and to silence (with the picture's, or alone) */
+    int sound;           /* 1: its file has sound (a picture or a silent video hasn't) */
+    int muted;           /* 1: its sound muted */
     int source_length;   /* the clip's file's length (frames of the project): out is below it */
     char name[64];       /* the clip's file's leaf name */
 } re_item;
@@ -125,6 +128,15 @@ int re_project_dissolve_cut(re_project *p, int frame);
    the fades away). 1 changed, 0 not. Between begin and end too. */
 int re_project_fade(re_project *p, int item, int end, int length);
 
+/* A clip's sound on its own (clipsound.c): muted (on 1) or not (0); faded in
+   (end 0) or out (end 1) without the picture, length 0 taking the fade
+   away (a clip's fade above sets both: this changes the sound's alone).
+   Not for a clip without sound; a fade not at an end in a dissolve. 1
+   changed, 0 not. Kept as a clip's fades and mute are: split, the second
+   part is muted too and has the fade out. */
+int re_project_mute(re_project *p, int item, int on);
+int re_project_sound_fade(re_project *p, int item, int end, int length);
+
 /* Overlays: pictures (logos, titles) and videos (a picture in the
    picture) over the video, on V2, the track above V1 (overlay.c). Each is
    a still picture (PNG, with its alpha, or JPEG: still.h) or a video, shown
@@ -145,6 +157,9 @@ typedef struct
     int video;             /* 1: a video (else a picture) */
     int in;                /* a video's first frame in its file (a picture's: 0) */
     int source_length;     /* a video's file's length (frames; a picture's: 0) */
+    int sound;             /* 1: a video with sound */
+    int muted;             /* a video's sound muted */
+    int sound_fade_in, sound_fade_out; /* a video's sound's fades (frames; 0: none) */
     char name[64];         /* the file's leaf name (a picture's without .png or .jpg) */
 } re_overlay;
 /* Their number, and each (in order, from 0). 0, or -1. */
@@ -172,6 +187,11 @@ int re_project_overlay_set(re_project *p, int i, int place, int size, int opacit
 /* Its fade in (end 0) or out (end 1), frames (0: none). 1 changed, 0 not.
    Between begin and end too. */
 int re_project_overlay_fade(re_project *p, int i, int end, int length);
+/* A video's sound: muted (on 1) or not; faded in (end 0) or out (end 1)
+   alone (re_project_overlay_fade fades a video's sound with its picture).
+   Not for a picture, nor a video without sound. 1 changed, 0 not. */
+int re_project_overlay_mute(re_project *p, int i, int on);
+int re_project_overlay_sound_fade(re_project *p, int i, int end, int length);
 /* Taken away. 1 done, 0 not. */
 int re_project_overlay_remove(re_project *p, int i);
 

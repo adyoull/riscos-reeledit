@@ -138,8 +138,8 @@ int re_project_dissolve(re_project *p, int item, int length, int overlap)
         mlt_transition_close(mix);
     }
     fit_mix(t, mlt_producer_get_playtime(MLT_TRACTOR_PRODUCER(t)));
-    rp_set_fade(p, item, 1, 0); /* (no fades at the ends dissolved) */
-    rp_set_fade(p, item + 2, 0, 0);
+    rp_set_fade(p, item, RP_PICTURE | RP_SOUND, 1, 0); /* (no fades at the ends dissolved) */
+    rp_set_fade(p, item + 2, RP_PICTURE | RP_SOUND, 0, 0);
     rp_changed(p);
     return item + 1;
 }

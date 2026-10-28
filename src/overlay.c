@@ -12,6 +12,8 @@
  *                              frame's width and height
  *   shotcut:reeledit_opacity   %
  *   shotcut:reeledit_fade_in, _fade_out   frames
+ * A video's sound is faded with it (its fades' volume filters on the cut,
+ * as V1's: fade.c) or on its own, or muted (clipsound.c).
  * The transitions are made again from these after every edit
  * (rp_fit_overlays, from rp_changed, and for a project read), marked
  * shotcut:reeledit_overlay; the picture is fitted in its box keeping its
@@ -98,6 +100,10 @@ int re_project_overlay(re_project *p, int i, re_overlay *o)
                                                                      : 100;
     o->fade_in = mlt_properties_get_int(cp, "shotcut:reeledit_fade_in");
     o->fade_out = mlt_properties_get_int(cp, "shotcut:reeledit_fade_out");
+    o->sound = o->video && rp_cut_has_sound(info.cut);
+    o->muted = o->video && rp_cut_muted(info.cut);
+    o->sound_fade_in = o->video ? rp_cut_fade(info.cut, RP_SOUND, 0) : 0;
+    o->sound_fade_out = o->video ? rp_cut_fade(info.cut, RP_SOUND, 1) : 0;
     /* (its leaf name, a picture's without its .png or .jpg: MLT's names are Unix ones) */
     char name[256];
     snprintf(name, sizeof(name), "%s", info.resource ? info.resource : "");
@@ -532,6 +538,26 @@ int re_project_overlay_set(re_project *p, int i, int place, int size, int opacit
     return done;
 }
 
+/* A video's sound faded at an end, so long (0: none). 1 changed, 0 not. */
+static int sound_fade(re_project *p, int i, int end, int length)
+{
+    mlt_playlist_clip_info info;
+    int e = entry(p, i);
+    if (e < 0 || mlt_playlist_get_clip_info(p->v2, &info, e) || !rp_cut_has_sound(info.cut))
+        return 0;
+    if (length < 0)
+        length = 0;
+    if (length > info.frame_count)
+        length = info.frame_count;
+    if (rp_cut_fade(info.cut, RP_SOUND, end) == length)
+        return 0;
+    if (!p->in_edit)
+        rp_checkpoint(p);
+    rp_cut_set_fade(p, info.cut, RP_SOUND, end, length, info.frame_in, info.frame_out);
+    rp_changed(p);
+    return 1;
+}
+
 int re_project_overlay_fade(re_project *p, int i, int end, int length)
 {
     re_overlay o;
@@ -542,7 +568,38 @@ int re_project_overlay_fade(re_project *p, int i, int end, int length)
     int other = end ? o.fade_in : o.fade_out;
     if (length > o.length - other)
         length = o.length - other;
-    return set_prop(p, i, end ? "shotcut:reeledit_fade_out" : "shotcut:reeledit_fade_in", NULL, length);
+    /* (a video's sound fades with it) */
+    int edit = !p->in_edit;
+    if (edit)
+        re_project_begin(p);
+    int done = set_prop(p, i, end ? "shotcut:reeledit_fade_out" : "shotcut:reeledit_fade_in", NULL, length);
+    if (o.sound)
+        done |= sound_fade(p, i, end, length);
+    if (edit)
+        re_project_end(p);
+    return done;
+}
+
+int re_project_overlay_sound_fade(re_project *p, int i, int end, int length)
+{
+    re_overlay o;
+    if (re_project_overlay(p, i, &o) || !o.sound)
+        return 0;
+    return sound_fade(p, i, end, length);
+}
+
+int re_project_overlay_mute(re_project *p, int i, int on)
+{
+    mlt_playlist_clip_info info;
+    int e = entry(p, i);
+    if (e < 0 || mlt_playlist_get_clip_info(p->v2, &info, e) || !rp_cut_has_sound(info.cut)
+        || rp_cut_muted(info.cut) == !!on)
+        return 0;
+    if (!p->in_edit)
+        rp_checkpoint(p);
+    rp_cut_mute(p, info.cut, on);
+    rp_changed(p);
+    return 1;
 }
 
 int re_project_overlay_remove(re_project *p, int i)
