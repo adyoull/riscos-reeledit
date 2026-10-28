@@ -1166,6 +1166,67 @@ static void audio_tracks(const char *a, const char *snd, const char *pic, const 
     re_project_close(p);
 }
 
+/* ---- three-point editing: a source's marked frames inserted (what's
+   there split, what follows moving on) and overwritten (what's there
+   taken away for its length), past the end, never into a dissolve; the
+   clips list: added once, removed, saved and opened */
+static void source_editing(const char *a, const char *b, const char *numbered, const char *out)
+{
+    re_engine_io io = {show, NULL, clk, NULL, 48000, 2, NULL};
+    re_project *p = re_project_new();
+    re_project_add(p, a, -1);
+    re_project_add(p, b, -1);
+    re_engine *e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    int red = luma_at(e, 50), blue = luma_at(e, 100);
+    CHECK(re_project_insert(p, numbered, 10, 19, 30) == 1 && !strcmp(layout(p), "c30 c10 c45 c75")
+              && re_project_length(p) == 160,
+          "source: inserted: %s, %d", layout(p), re_project_length(p));
+    re_engine_close(e);
+    e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    CHECK(abs(luma_at(e, 30) - (16 + 2 * 10)) <= 3 && abs(luma_at(e, 39) - (16 + 2 * 19)) <= 3
+              && abs(luma_at(e, 40) - red) <= 3 && abs(luma_at(e, 29) - red) <= 3,
+          "source: inserted frames: %d %d (frames 10, 19), %d %d either side (red %d)", luma_at(e, 30),
+          luma_at(e, 39), luma_at(e, 29), luma_at(e, 40), red);
+    CHECK(re_project_undo(p) && !strcmp(layout(p), "c75 c75"), "source: insert undone: %s", layout(p));
+    CHECK(re_project_overwrite(p, numbered, 0, 9, 70) == 1 && !strcmp(layout(p), "c70 c10 c70")
+              && re_project_length(p) == 150,
+          "source: overwritten: %s, %d", layout(p), re_project_length(p));
+    re_engine_close(e);
+    e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    CHECK(abs(luma_at(e, 70) - 16) <= 3 && abs(luma_at(e, 79) - (16 + 18)) <= 3 && abs(luma_at(e, 80) - blue) <= 3
+              && abs(luma_at(e, 69) - red) <= 3,
+          "source: overwritten frames: %d %d, %d after (blue %d), %d before (red %d)", luma_at(e, 70),
+          luma_at(e, 79), luma_at(e, 80), blue, luma_at(e, 69), red);
+    re_engine_close(e);
+    CHECK(re_project_overwrite(p, numbered, 0, 9, 160) == 4 && !strcmp(layout(p), "c70 c10 c70 g10 c10"),
+          "source: past the end: %s", layout(p));
+    CHECK(re_project_insert(p, numbered, 0, 4, 0) == 0 && re_project_length(p) == 175, "source: at the start: %s",
+          layout(p));
+    CHECK(re_project_insert(p, numbered, 5, 4, 10) == -1 && re_project_overwrite(p, numbered, 0, 500, 10) == -1,
+          "source: in after out, out past the file");
+    re_project_close(p);
+    p = re_project_new();
+    re_project_add(p, a, -1);
+    re_project_add(p, b, -1);
+    re_project_dissolve(p, 0, 20, 1);
+    CHECK(re_project_insert(p, numbered, 0, 9, 70) == -1 && re_project_overwrite(p, numbered, 0, 9, 60) == -1,
+          "source: into a dissolve: %s", layout(p));
+    /* the clips list */
+    re_project_save(p, out);
+    CHECK(!re_project_modified(p) && re_project_clip_add(p, a) == 0 && re_project_clip_add(p, b) == 1
+              && re_project_clip_add(p, a) == 0 && re_project_clips(p) == 2 && re_project_modified(p),
+          "clips: added: %d, modified %d", re_project_clips(p), re_project_modified(p));
+    re_project_clip_add(p, numbered);
+    CHECK(re_project_clip_remove(p, 1) == 1 && re_project_clips(p) == 2 && !strcmp(re_project_clip(p, 1), numbered),
+          "clips: removed: %d", re_project_clips(p));
+    CHECK(re_project_save(p, out) == 0, "clips: not saved");
+    re_project_close(p);
+    p = re_project_open(out, 1);
+    CHECK(p && re_project_clips(p) == 2 && !strcmp(re_project_clip(p, 0), a) && !strcmp(re_project_clip(p, 1), numbered),
+          "clips: opened: %d", p ? re_project_clips(p) : -1);
+    re_project_close(p);
+}
+
 int main(int argc, char **argv)
 {
     if (argc != 13) {
@@ -1423,6 +1484,7 @@ int main(int argc, char **argv)
     titles(a, out);
     export(a, argv[9], out, "export-test.mp4");
     audio_tracks(a, argv[9], argv[11], out);
+    source_editing(a, b, n, out);
     overlays(a, b, argv[9], out, argv[10], argv[11], argv[12]);
     video_overlays(a, b, argv[9], n, argv[5], out);
     char dir[512];

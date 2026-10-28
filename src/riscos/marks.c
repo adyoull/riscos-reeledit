@@ -10,7 +10,8 @@
  *   Play > Clear the marks
  * Also in the Play and Edit menus. The marks aren't part of the project
  * (not saved, not undone); after an edit they're kept within it.
- * The Timeline draws the stretch on its ruler (timeline.c).
+ * The Timeline draws the stretch on its ruler (timeline.c). With a source
+ * clip in the Viewer, I and O mark the source instead (viewer.c).
  *
  * Part of riscos-reeledit. GPL version 2 or later.
  */
@@ -23,6 +24,10 @@ static void changed(void)
 
 void mk_set(int out)
 {
+    if (app_source_mode()) { /* (a source in the Viewer: its marks) */
+        app_source_mark(out);
+        return;
+    }
     if (!A.proj || re_project_length(A.proj) <= 0)
         return;
     int f = app_position();

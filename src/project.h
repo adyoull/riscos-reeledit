@@ -252,6 +252,23 @@ int re_project_audio_mute(re_project *p, int track, int i, int on);
 int re_project_audio_volume(re_project *p, int track, int i, int db);
 int re_project_audio_fade(re_project *p, int track, int i, int end, int length);
 
+/* The clips list (the Clips window's: source.c): files the project can
+   draw on (MLT names), each once, in the order they came; saved with it.
+   Changing it marks the project changed (not an edit to undo). add: its
+   index (there already: that one), or -1. */
+int re_project_clips(re_project *p);
+const char *re_project_clip(re_project *p, int i);
+int re_project_clip_add(re_project *p, const char *name);
+int re_project_clip_remove(re_project *p, int i);
+
+/* Three-point editing: a source's frames in..out (of its file) put at a
+   frame of V1 (past the end: there, a gap before it). Insert: what's at
+   the frame split there, what follows moving on. Overwrite: over what's
+   there for its length (split at both ends, taken away). Not into a
+   dissolve. Its item's index, or -1. */
+int re_project_insert(re_project *p, const char *file, int in, int out, int frame);
+int re_project_overwrite(re_project *p, const char *file, int in, int out, int frame);
+
 /* Undo and redo (up to 100 edits): the project as it was before the last
    edit, and back. 1 done, 0 nothing to do. The producer changes: an
    engine playing it must be opened again. */

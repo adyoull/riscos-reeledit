@@ -1296,6 +1296,8 @@ void tl_click(int *b)
         return;
     int f = frame_of(wx);
     int drag = buttons & (0x40 | 0x10);
+    if (wy > -RULER_H && app_source_mode()) /* (the ruler: the project in the Viewer again) */
+        app_project_view();
     if (wy > -RULER_H) {
         /* the ruler: the only place the playhead is moved from. A click puts
            it there; a drag (on it or anywhere on the ruler) scrubs. (The

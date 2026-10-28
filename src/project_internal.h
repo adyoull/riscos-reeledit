@@ -32,7 +32,24 @@ struct re_project
        the state before it */
     int in_edit;
     unsigned edit_state;
+    /* the Clips window's list (source.c): MLT names */
+    char **bin;
+    int n_bin;
 };
+
+/* project.c: V1 (and the tractor) made if the project is empty: 0, or -1;
+   a file opened as a clip (at the project's profile, the first's own); the
+   item at a frame split there (not at its start, not a dissolve): 1 split,
+   0 not, no undo point of its own */
+int rp_make_tracks(re_project *p);
+mlt_producer rp_open_clip(re_project *p, const char *file);
+int rp_split_at(re_project *p, int frame);
+
+/* source.c: the Clips window's list read from the tractor (a project
+   opened), written to it (before saving), given up */
+void rp_bin_read(re_project *p);
+void rp_bin_write(re_project *p);
+void rp_bin_free(re_project *p);
 
 
 void rp_checkpoint(re_project *p); /* before an edit: the project as it is, to undo to */

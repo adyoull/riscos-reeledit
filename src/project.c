@@ -196,7 +196,7 @@ re_project *re_project_new(void)
 
 /* The tractor and V1, made when the first clip is added (the profile
    known) */
-static int make_tracks(re_project *p)
+int rp_make_tracks(re_project *p)
 {
     if (p->tractor)
         return 0;
@@ -223,7 +223,7 @@ static int make_tracks(re_project *p)
 }
 
 /* A clip, opened at the project's profile; the first sets the profile */
-static mlt_producer open_clip(re_project *p, const char *file)
+mlt_producer rp_open_clip(re_project *p, const char *file)
 {
     mlt_producer clip = mlt_factory_producer(p->profile, NULL, file);
     if (clip && !p->tractor && !p->profile->is_explicit) {
@@ -309,6 +309,7 @@ re_project *re_project_open(const char *file, int is_xml)
             return NULL;
         }
         fit_tractor(p);
+        rp_bin_read(p);
         return p;
     }
     /* a clip: a project of it, at its profile */
@@ -337,6 +338,7 @@ void re_project_close(re_project *p)
     drop_snaps(p->redo, &p->n_redo);
     free(p->undo);
     free(p->redo);
+    rp_bin_free(p);
     free(p);
 }
 
@@ -436,7 +438,7 @@ int re_project_frames(re_project *p, double seconds)
 
 int re_project_add_length(re_project *p, const char *file, int frame, int length)
 {
-    mlt_producer clip = open_clip(p, file);
+    mlt_producer clip = rp_open_clip(p, file);
     if (!clip)
         return -1;
     mlt_properties cp = MLT_PRODUCER_PROPERTIES(clip);
@@ -454,7 +456,7 @@ int re_project_add_length(re_project *p, const char *file, int frame, int length
         return RE_ADD_MEASURE;
     }
     rp_checkpoint(p);
-    if (make_tracks(p) < 0) {
+    if (rp_make_tracks(p) < 0) {
         rp_no_edit(p);
         mlt_producer_close(clip);
         return -1;
@@ -479,7 +481,7 @@ int re_project_add_length(re_project *p, const char *file, int frame, int length
 /* The item at a frame split there (not at its start, not a dissolve): 1
    split, 0 not (nothing to split there). The fade out goes with the second
    part, where the end is. No undo point of its own. */
-static int split_at(re_project *p, int frame)
+int rp_split_at(re_project *p, int frame)
 {
     int i = re_project_item_at(p, frame);
     re_item it;
@@ -505,7 +507,7 @@ static int split_at(re_project *p, int frame)
 int re_project_split(re_project *p, int frame)
 {
     rp_checkpoint(p);
-    if (!split_at(p, frame)) {
+    if (!rp_split_at(p, frame)) {
         rp_no_edit(p);
         return 0;
     }
@@ -526,8 +528,8 @@ int re_project_remove_range(re_project *p, int in, int out, int ripple)
             return 0;
     }
     rp_checkpoint(p);
-    split_at(p, out + 1); /* (the end first: the item at the start keeps its index) */
-    split_at(p, in);
+    rp_split_at(p, out + 1); /* (the end first: the item at the start keeps its index) */
+    rp_split_at(p, in);
     for (int i = re_project_items(p) - 1; i >= 0; i--) {
         re_item it;
         if (re_project_item(p, i, &it) || it.start < in || it.start + it.length - 1 > out)
@@ -831,6 +833,7 @@ static int save(re_project *p, const char *file, int as_saved)
     /* (the xml consumer writes a name with no '.' in it to a property, not a file) */
     snprintf(tmp, sizeof(tmp), "%s.new", file);
     remove(tmp);
+    rp_bin_write(p); /* (the Clips window's list: a property of the tractor's) */
     mlt_consumer c = mlt_factory_consumer(p->profile, "xml", tmp);
     if (!c)
         return -1;

@@ -47,6 +47,7 @@
 
 #include "project.h"
 #include "fake/screens.h"
+int app_position(void); /* (viewer.c's) */
 
 int reeledit_main(int argc, char **argv);
 int re_test_position(void);
@@ -65,6 +66,7 @@ void re_test_crash(void);
 char *re_test_savebox_name(void);
 char *re_test_title_line(int n);
 char *re_test_export_name(void);
+int re_test_clips_selected(void);
 int re_test_audio_selected(int *track);
 static int au_track_sel(void) { int t; re_test_audio_selected(&t); return t; }
 static int au_sel(void) { int t; return re_test_audio_selected(&t); }
@@ -93,6 +95,7 @@ static char typed_path[300], dragged_path[300];
 #define SAVEB  0x1300
 #define TITLEW 0x1400 /* (the Title window: drawn by the Wimp) */
 #define EXPW   0x1500 /* (the Export window: drawn by the Wimp) */
+#define CLIPW  0x1600 /* (the Clips window) */
 #define COVER  0x2000
 #define FILER  0x3000 /* a directory display */
 #define TASK   0x4321
@@ -107,12 +110,12 @@ typedef struct
 {
     int open, box[4], scroll_x, behind, redraw, extent_w;
 } fwin;
-static fwin W[6]; /* VIEWER, TL, INFO, SAVEB, TITLEW, EXPW */
+static fwin W[7]; /* VIEWER, TL, INFO, SAVEB, TITLEW, EXPW, CLIPW */
 static int windows_made;
 static fwin *win(int h)
 {
     int i = (h - VIEWER) / 0x100;
-    return h >= VIEWER && i < 6 && (h - VIEWER) % 0x100 == 0 ? &W[i] : NULL;
+    return h >= VIEWER && i < 7 && (h - VIEWER) % 0x100 == 0 ? &W[i] : NULL;
 }
 
 static unsigned fake_cs = 1000;
@@ -314,8 +317,8 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
     case 0x57288: r->r[0] = ssb_added; r->r[1] = ssb_heard(); break;
     case 0x400C0: r->r[0] = 380; r->r[1] = TASK; break;
     case 0x400C1:                                                   /* CreateWindow */
-        if (windows_made >= 6)
-            fail_quit("more than six windows made");
+        if (windows_made >= 7)
+            fail_quit("more than seven windows made");
         scr_create_window(windows_made, (const void *) r->r[1]);
         r->r[0] = VIEWER + 0x100 * windows_made++;
         break;
@@ -350,7 +353,7 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
         last_mask = (int) r->r[0];
         if (++polls > 40000)
             fail_quit("too many polls: the script is stuck");
-        for (int i = 0; i < 6; i++)
+        for (int i = 0; i < 7; i++)
             if (W[i].redraw && W[i].open && i != 3 && i != 4 && i != 5) { /* (the save box is drawn by the Wimp) */
                 W[i].redraw = 0;
                 b[0] = VIEWER + 0x100 * i;
@@ -527,9 +530,9 @@ static int shot_box(int i, int b[5])
 }
 static void shot(const char *name)
 {
-    static const int order[6] = {0, 1, 2, 3, 4, 5};
+    static const int order[7] = {0, 1, 2, 3, 4, 5, 6};
     int pitch = (ov_w + 31) & ~31;
-    snap(name, order, 6, shot_box, ov_shown_bank >= 0 ? ov_buf[ov_shown_bank] : NULL, ov_w, ov_h, pitch);
+    snap(name, order, 7, shot_box, ov_shown_bank >= 0 ? ov_buf[ov_shown_bank] : NULL, ov_w, ov_h, pitch);
 }
 
 static int grey(int frame)
@@ -651,7 +654,7 @@ static void next(int p)
 
 static char saved_layout[256];
 static int menus_mark;
-static int plots_mark, ovd_mark, ssb_mark, closes_mark, pos_mark, pos_min = 1000, mark, scroll_mark;
+static int plots_mark, ovd_mark, ssb_mark, closes_mark, pos_mark, pos_min = 1000, mark, scroll_mark, rec;
 
 static int script(int *b, int mask)
 {
@@ -2341,6 +2344,97 @@ static int script(int *b, int mask)
               "recovered: %d questions, open %d, \"%s\" (\"%s\"), modified %d, title \"%s\" (\"%s\")",
               questions - mark, W[0].open, layout(), saved_layout,
               re_test_project() ? re_project_modified(re_test_project()) : -1, re_test_title(), saved_title);
+        next(310);
+        return key_to(b, TL, 0x18D);
+    /* ---- the Clips window (Ctrl-B): a clip double-clicked, shown as a source; I, Shift-Right, O;
+       , inserts it at the playhead; . overwrites; Escape: the project; a row dragged to the
+       Timeline; Delete takes one off the list ---- */
+    case 310:
+        if (nulls)
+            return 0;
+        next(311);
+        return key_to(b, TL, 2);
+    case 311:
+        if (nulls)
+            return 0;
+        CHECK(windows_made == 7 && W[6].open && re_project_clips(re_test_project()) >= 2,
+              "Ctrl-B: %d windows, open %d, %d clips", windows_made, W[6].open, re_project_clips(re_test_project()));
+        shot("29-clips");
+        next(312);
+        b[0] = W[6].box[0] + 100; b[1] = W[6].box[3] - 56 - 20; b[2] = 0x400; b[3] = CLIPW; b[4] = -1;
+        return 6;
+    case 312:
+        CHECK(re_test_clips_selected() == 0, "a click on the first clip: selected %d", re_test_clips_selected());
+        mark = re_project_length(re_test_project());
+        next(313);
+        b[0] = W[6].box[0] + 100; b[1] = W[6].box[3] - 56 - 20; b[2] = 4; b[3] = CLIPW; b[4] = -1; /* double */
+        return 6;
+    case 313:
+        if (nulls)
+            return 0;
+        CHECK(!strncmp(re_test_title(), "Source: ", 8), "double-clicked: the Viewer's title \"%s\"", re_test_title());
+        next(314);
+        return key_to(b, TL, 'i');
+    case 314:
+        if (nulls)
+            return 0;
+        next(315);
+        return key_to(b, TL, 0x19D); /* Shift-Right: a second on, in the source */
+    case 315:
+        if (nulls)
+            return 0;
+        next(316);
+        return key_to(b, TL, 'o');
+    case 316:
+        if (nulls)
+            return 0;
+        rec = app_position();
+        next(317);
+        return key_to(b, TL, ','); /* insert */
+    case 317:
+        if (nulls)
+            return 0;
+        CHECK(re_project_length(re_test_project()) == mark + 26 && !strncmp(re_test_title(), "Source: ", 8),
+              ", (insert): the project %d frames (%d before), title \"%.20s\"", re_project_length(re_test_project()), mark,
+              re_test_title());
+        CHECK(app_position() == rec + 26, ", (insert): the playhead at %d (%d before): after the clip", app_position(), rec);
+        mark = re_project_length(re_test_project());
+        next(322);
+        return key_to(b, TL, '.'); /* overwrite, after it */
+    case 322:
+        if (nulls)
+            return 0;
+        CHECK(re_project_length(re_test_project()) == mark, ". (overwrite): the project %d frames (%d before)",
+              re_project_length(re_test_project()), mark);
+        mark = re_project_items(re_test_project());
+        next(318);
+        return key_to(b, TL, 27); /* Escape: the project again */
+    case 318:
+        if (nulls)
+            return 0;
+        CHECK(strncmp(re_test_title(), "Source: ", 8) != 0, "Escape: the Viewer's title \"%s\"", re_test_title());
+        shot("30-inserted");
+        next(319);
+        b[0] = W[6].box[0] + 100; b[1] = W[6].box[3] - 56 - 20; b[2] = 0x40; b[3] = CLIPW; b[4] = -1; /* a drag */
+        return 6;
+    case 319:
+        /* dropped on the Timeline's V1, at frame 0 */
+        ptr[0] = W[1].box[0] - W[1].scroll_x + 16; ptr[1] = W[1].box[3] - TL_V1_TOP - 48; ptr[3] = TL; ptr[4] = -1;
+        next(320);
+        return 7;
+    case 320:
+        if (nulls)
+            return 0;
+        CHECK(re_project_items(re_test_project()) == mark + 1, "a clip dragged to the Timeline: %d items (%d)",
+              re_project_items(re_test_project()), mark);
+        mark = re_project_clips(re_test_project());
+        next(321);
+        return key_to(b, CLIPW, 0x7F); /* Delete: off the list */
+    case 321:
+        if (nulls)
+            return 0;
+        CHECK(re_project_clips(re_test_project()) == mark - 1, "Delete in the Clips window: %d clips (%d)",
+              re_project_clips(re_test_project()), mark);
         next(45);
         return key_to(b, TL, 0x18D);
     case 45: /* the desktop shutting down: asked, Discard; the shutdown started again; quit */

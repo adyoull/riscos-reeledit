@@ -12,6 +12,7 @@
  *               made PNGs
  *   audiotracks.c  sounds on the audio tracks (below V1): dropped, their menu
  *   autosave.c  a copy of the project kept while it's edited; recovery
+ *   clips.c     the Clips window: the project's clips, shown as sources
  *   exportbox.c the Export window: the project made into a video, in a TaskWindow
  *   titles.c    the Title window: text over the video
  *   fonts.c     titles' text drawn by the Font Manager
@@ -162,6 +163,27 @@ void app_audio_menu_opened(void);  /* a menu of audiotracks.c's open */
 void as_edited(void);  /* after an edit: a copy, if half a minute since the last (or none) */
 void as_forget(void);  /* saved, closed, quit: the copy taken away */
 int as_offer(void);    /* a copy there (Reel Edit stopped): recover it? 1: A.proj (and A.path) set */
+
+/* ---- clips.c: the Clips window (the project's clips list) ---- */
+int cl_window(void);
+void cl_open(void);            /* View > Clips... (Ctrl-B) */
+void cl_close(void);
+void cl_edited(void);          /* the list changed */
+void cl_redraw(int *block);
+void cl_click(int *block);
+void cl_key(int *block);
+void cl_load(const char *path); /* a file dropped on it: on the list */
+int cl_dragging(void);
+void cl_drag_end(int *block);
+const char *cl_help(void);
+/* (viewer.c) A clip shown in the Viewer as a source (three-point editing):
+   I and O mark it, , and . put its marked frames at the project's playhead
+   (insert, overwrite); app_project_view (Escape) shows the project again */
+void app_source(const char *mlt_name);
+void app_project_view(void);
+int app_source_mode(void);
+void app_source_mark(int out);
+void app_source_put(int overwrite);
 
 /* ---- exportbox.c: the Export window ---- */
 int ex_window(void);

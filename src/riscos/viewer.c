@@ -33,6 +33,7 @@
 #include "sound.h"
 
 #include <libavutil/cpu.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #ifdef __riscos__
@@ -103,6 +104,13 @@ static struct
 {
     int bar_icon, win, quit;
     int viewer_size;  /* View > Viewer size: 0 small, 1 medium, 2 large (its share of the screen's width) */
+    /* the Viewer showing a source clip (from the Clips window) instead of
+       the project: its producer, MLT name, marks (-1: none), and the
+       project's playhead meanwhile */
+    int source;
+    mlt_producer src_prod;
+    char src_name[512];
+    int src_in, src_out, record_pos;
     re_sound *snd;
     char title[300], time_text[64], play_text[8], snap_text[16];
     int vis_w, vis_h;
@@ -409,8 +417,19 @@ static void update_title(void)
 {
     char t[sizeof(V.title)];
     _kernel_swi_regs r;
-    snprintf(t, sizeof(t), "%s%s", A.path[0] ? A.path : "<Untitled>",
-             A.proj && re_project_modified(A.proj) ? " *" : "");
+    if (V.source) {
+        const char *l = strrchr(V.src_name, '/');
+        char in[24] = "start", out[24] = "end";
+        if (V.src_in >= 0)
+            app_timecode(in, sizeof(in), V.src_in);
+        if (V.src_out >= 0)
+            app_timecode(out, sizeof(out), V.src_out);
+        snprintf(t, sizeof(t), "Source: %.60s, %s to %s (, insert  . overwrite  Escape)",
+                 l ? l + 1 : V.src_name, in, out);
+    } else {
+        snprintf(t, sizeof(t), "%s%s", A.path[0] ? A.path : "<Untitled>",
+                 A.proj && re_project_modified(A.proj) ? " *" : "");
+    }
     if (!strcmp(t, V.title) || !V.win)
         return;
     snprintf(V.title, sizeof(V.title), "%s", t);
@@ -460,7 +479,7 @@ static void update_controls(int force)
         resize_icon(I_FILL, tx0, y0 + 16, fill, y1 - 16);
         force_redraw((old < fill ? old : fill) - 4, y0, (old > fill ? old : fill) + 4, y1);
     }
-    tl_playhead(p);
+    tl_playhead(app_position());
 }
 
 #define Wimp_GetWindowOutline 0x400E0
@@ -601,6 +620,8 @@ static void sound(void *ctx, const int16_t *samples, int frames)
 
 int app_position(void)
 {
+    if (V.source)
+        return V.record_pos; /* (the project's playhead, while a source is shown) */
     return A.e ? re_engine_position(A.e) : 0;
 }
 
@@ -663,7 +684,14 @@ static void engine_close(void)
 }
 
 /* The engine on the project, made once it has something in it */
+static void engine_open_on(mlt_producer prod);
+
 static void engine_open(void)
+{
+    engine_open_on(re_project_producer(A.proj));
+}
+
+static void engine_open_on(mlt_producer prod)
 {
     static re_engine_io io;
     char why[100];
@@ -679,7 +707,7 @@ static void engine_open(void)
     io.sound_rate = SOUND_RATE;
     io.sound_channels = 2;
     double s = preview_scale(pr->width, pr->height);
-    A.e = re_engine_open_producer(pr, re_project_producer(A.proj), s, &io);
+    A.e = re_engine_open_producer(pr, prod, s, &io);
     if (!A.e) {
         re_sound_close(V.snd);
         V.snd = NULL;
@@ -700,7 +728,9 @@ static void edited(int picture)
     if (!A.proj)
         return;
     V.changes = re_project_changes(A.proj);
-    if (re_project_length(A.proj) <= 0) {
+    if (V.source) {
+        /* (the source's engine stays: the project's is made again when it's shown) */
+    } else if (re_project_length(A.proj) <= 0) {
         engine_close();
     } else if (!A.e) {
         engine_open();
@@ -720,6 +750,102 @@ static void edited(int picture)
     info_edited();
     update_title();
     update_controls(1);
+}
+
+/* ---- a source clip in the Viewer (three-point editing) ------------------------------------- */
+
+static void open_editor(void);
+
+int app_source_mode(void)
+{
+    return V.source;
+}
+
+void app_source(const char *name)
+{
+    if (!A.proj || re_project_length(A.proj) < 0)
+        return;
+    if (!V.win)
+        open_editor();
+    mlt_producer prod = mlt_factory_producer(re_project_profile(A.proj), NULL, name);
+    if (!prod || mlt_producer_get_length(prod) >= INT_MAX / 2) {
+        if (prod)
+            mlt_producer_close(prod);
+        app_report("Reel Edit can't show that clip.");
+        return;
+    }
+    if (!V.source)
+        V.record_pos = app_position();
+    engine_close();
+    if (V.src_prod)
+        mlt_producer_close(V.src_prod);
+    V.src_prod = prod;
+    V.source = 1;
+    snprintf(V.src_name, sizeof(V.src_name), "%s", name);
+    V.src_in = V.src_out = -1;
+    engine_open_on(prod);
+    app_log("source: %s (%d frames)", name, mlt_producer_get_length(prod));
+    if (A.e)
+        re_engine_seek(A.e, 0);
+    update_title();
+    update_controls(1);
+}
+
+void app_project_view(void)
+{
+    if (!V.source)
+        return;
+    engine_close();
+    if (V.src_prod)
+        mlt_producer_close(V.src_prod);
+    V.src_prod = NULL;
+    V.source = 0;
+    app_log("source: back to the project at %d", V.record_pos);
+    if (A.proj && re_project_length(A.proj) > 0)
+        engine_open();
+    if (A.e)
+        app_seek(V.record_pos);
+    update_title();
+    update_controls(1);
+    tl_edited();
+}
+
+void app_source_mark(int out)
+{
+    int f = A.e ? re_engine_position(A.e) : 0;
+    if (out) {
+        V.src_out = f;
+        if (V.src_in > f)
+            V.src_in = -1;
+    } else {
+        V.src_in = f;
+        if (V.src_out >= 0 && V.src_out < f)
+            V.src_out = -1;
+    }
+    app_log("source: mark %s at %d", out ? "out" : "in", f);
+    update_title();
+}
+
+void app_source_put(int overwrite)
+{
+    if (!V.source || !A.proj || !V.src_prod)
+        return;
+    int len = mlt_producer_get_length(V.src_prod);
+    int in = V.src_in >= 0 ? V.src_in : 0, out = V.src_out >= 0 ? V.src_out : len - 1;
+    int at = V.record_pos;
+    int i = overwrite ? re_project_overwrite(A.proj, V.src_name, in, out, at)
+                      : re_project_insert(A.proj, V.src_name, in, out, at);
+    app_log("source: %s frames %d-%d at %d: item %d", overwrite ? "overwritten" : "inserted", in, out, at, i);
+    if (i < 0) {
+        app_report("The clip can't go there: not into a dissolve (take it out first).");
+        return;
+    }
+    re_project_clip_add(A.proj, V.src_name);
+    V.record_pos = at + (out - in + 1); /* (the playhead after it, for the next) */
+    A.sel = i;
+    A.ov_sel = A.au_sel = -1;
+    app_edited();
+    cl_edited();
 }
 
 void app_edited(void)
@@ -804,6 +930,11 @@ static int close_editor(void)
     }
     measure_cancel();
     engine_close();
+    if (V.src_prod)
+        mlt_producer_close(V.src_prod);
+    V.src_prod = NULL;
+    V.source = 0;
+    cl_close();
     as_forget(); /* (kept or discarded: closed as asked) */
     if (V.win) {
         _kernel_swi_regs r;
@@ -934,6 +1065,8 @@ int app_add(const char *path, const char *name, int frame)
     if (!A.proj)
         return 0;
     app_log("adding %s (%s) at %d", path, name, frame);
+    re_project_clip_add(A.proj, name); /* (in the Clips window too) */
+    cl_edited();
     int at = re_project_add(A.proj, name, frame);
     if (at == RE_ADD_MEASURE) { /* (raw MPEG-2 and the like: read through for the length) */
         V.ms = re_measure_open(name);
@@ -1079,10 +1212,11 @@ static MENU(7) m_play = {"Play", 7, 2, 7, 0, 420, 44, 0,
                           {0, -1, IT("Play in to out Return")}, {0x80, -1, IT("Clear the marks")}}};
 static MENU(3) m_viewer_size = {"Viewer size", 7, 2, 7, 0, 200, 44, 0,
                                 {{0, -1, IT("Small")}, {0, -1, IT("Medium")}, {0x80, -1, IT("Large")}}};
-static MENU(6) m_view = {"View", 7, 2, 7, 0, 520, 44, 0,
+static MENU(7) m_view = {"View", 7, 2, 7, 0, 520, 44, 0,
                          {{0, -1, IT("Zoom the Timeline in       +")}, {0, -1, IT("Zoom the Timeline out      -")},
                           {2, -1, IT("The whole project     \x8bZ")}, {0, -1, IT("Attach the Timeline")},
-                          {0, -1, IT("Snapping                   N")}, {0x80, 0, IT("Viewer size")}}};
+                          {0, -1, IT("Snapping                   N")}, {0, 0, IT("Viewer size")},
+                          {0x80, -1, IT("Clips...                  ^B")}}};
 static MENU(5) m_main = {"Reel Edit", 7, 2, 7, 0, 340, 44, 0,
                          {{0, 0, IT("File")}, {0, 0, IT("Edit")}, {0, 0, IT("Play")}, {0, 0, IT("View")},
                           {0x80, -1, IT("Video information...")}}};
@@ -1297,6 +1431,8 @@ static void menu_select(int *b)
             snap_toggle();
         } else if (b[1] == 5 && b[2] >= 0 && b[2] < 3) {
             viewer_size(b[2]);
+        } else if (b[1] == 6) {
+            cl_open();
         }
         break;
     case 4: /* Video information */
@@ -1315,14 +1451,21 @@ int app_key(int k)
 {
     if (!A.proj)
         return 0;
-    int pos = app_position(), fps1 = (int) (re_project_fps(A.proj) + 0.5);
+    /* (the Viewer's position: the project's, or a source's, for moving along) */
+    int pos = A.e ? re_engine_position(A.e) : 0, fps1 = (int) (re_project_fps(A.proj) + 0.5);
     double sp = A.e ? re_engine_speed(A.e) : 0;
     switch (k) {
     case ' ': app_set_speed(sp != 0 ? 0 : 1); return 1;
-    case 27: /* Escape: stop (and stop measuring) */
+    case 27: /* Escape: stop (and stop measuring); a source shown: the project again */
         if (V.ms)
             measure_cancel();
         app_set_speed(0);
+        if (V.source)
+            app_project_view();
+        return 1;
+    case ',': case '.': /* a source's marked frames inserted, or overwritten, at the project's playhead */
+        if (V.source)
+            app_source_put(k == '.');
         return 1;
     case 'k': case 'K': app_set_speed(0); return 1;
     case 'l': case 'L':
@@ -1362,6 +1505,7 @@ int app_key(int k)
     case 'n': case 'N': snap_toggle(); return 1;
     case 't': case 'T': ti_open(-1); return 1;
     case 5: ex_open(); return 1;                  /* Ctrl-E: Export... */
+    case 2: cl_open(); return 1;                  /* Ctrl-B: the Clips window (Premiere's bin) */
     case 'Z': case '\\': tl_zoom(-1); return 1;    /* Shift-Z, \\: the whole project */
     case 0x183: {                                  /* F3: save */
         int p[5];
@@ -1390,6 +1534,10 @@ static void key(int *b)
         ex_key(b);
         return;
     }
+    if (cl_window() && b[0] == cl_window()) {
+        cl_key(b);
+        return;
+    }
     if ((b[0] == V.win || b[0] == tl_window()) && app_key(b[6]))
         return;
     r.r[0] = b[6];
@@ -1407,6 +1555,10 @@ static void redraw(int *b)
     }
     if (info_window() && b[0] == info_window()) {
         info_redraw(b);
+        return;
+    }
+    if (cl_window() && b[0] == cl_window()) {
+        cl_redraw(b);
         return;
     }
     r.r[1] = (intptr_t) b;
@@ -1444,6 +1596,10 @@ static void click(int *b)
         ex_click(b);
         return;
     }
+    if (cl_window() && w == cl_window()) {
+        cl_click(b);
+        return;
+    }
     if (w == tl_window()) {
         tl_click(b);
         return;
@@ -1455,7 +1611,7 @@ static void click(int *b)
         return;
     }
     set_caret(V.win);
-    int pos = app_position(), fps1 = A.proj ? (int) (re_project_fps(A.proj) + 0.5) : 25;
+    int pos = A.e ? re_engine_position(A.e) : 0, fps1 = A.proj ? (int) (re_project_fps(A.proj) + 0.5) : 25;
     switch (i) {
     case I_START: app_seek(0); break;
     case I_BACK: app_seek(pos - ((buttons & 1) ? fps1 : 1)); break; /* Adjust: a second */
@@ -1514,6 +1670,8 @@ static const char *help_for(int win, int icon, int y)
         return ti_help(icon);
     if (ex_window() && win == ex_window())
         return ex_help(icon);
+    if (cl_window() && win == cl_window())
+        return cl_help();
     if (win != V.win)
         return NULL;
     switch (icon) {
@@ -1592,7 +1750,9 @@ static void message(int *b, int event)
            the playhead): over the video */
         int over = tl ? tl_on_overlays(b[8]) && !is_project(file, type)
                       : w == V.win && A.proj && re_project_length(A.proj) > 0 && ov_is_picture(file, type);
-        if (tl && tl_on_audio(b[8]) >= 0 && !is_project(file, type))
+        if (cl_window() && w == cl_window() && !is_project(file, type))
+            cl_load(file);
+        else if (tl && tl_on_audio(b[8]) >= 0 && !is_project(file, type))
             au_load(file, frame);
         else if (over)
             ov_load(file, type, tl ? frame : app_position(), 1);
@@ -1819,6 +1979,8 @@ int reeledit_main(int argc, char **argv)
         case 7:
             if (tl_scrubbing())
                 tl_drag_end(block);
+            else if (cl_dragging())
+                cl_drag_end(block);
             else
                 sb_drag_end(block);
             break;
