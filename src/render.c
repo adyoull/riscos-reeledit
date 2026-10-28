@@ -134,9 +134,11 @@ uint64_t re_render_signature(re_project *p, int start, int length)
         re_title t;
         if (re_project_overlay(p, i, &o) || o.start >= end || o.start + o.length <= start)
             continue;
-        h = fnv(h, "V2 %d %d %d %d %d %d %d %d %d %d %d %d %d %s|", o.start - start, o.length, o.in, o.place, o.size,
-                o.opacity, o.fade_in, o.fade_out, o.video, o.muted, o.volume, o.sound_fade_in, o.sound_fade_out,
-                resource(p, p->v2, rp_track_entry(p->v2, i)));
+        mlt_playlist pl;
+        int e = rp_overlay_entry(p, i, &pl);
+        h = fnv(h, "V%d %d %d %d %d %d %d %d %d %d %d %d %d %d %s|", o.track, o.start - start, o.length, o.in, o.place,
+                o.size, o.opacity, o.fade_in, o.fade_out, o.video, o.muted, o.volume, o.sound_fade_in, o.sound_fade_out,
+                resource(p, pl, e));
         if (o.title && !re_project_title(p, i, &t))
             h = fnv(h, "T %s %s %d %06X %d %d|", t.text, t.font, t.size, (unsigned) t.colour, t.style, t.align);
     }

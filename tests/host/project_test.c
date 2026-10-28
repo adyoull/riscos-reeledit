@@ -940,7 +940,8 @@ static void overlays(const char *a, const char *b, const char *snd, const char *
 /* ---- titles: text over the video (blocks for letters here: no Font
    Manager); its picture made by style; put on V2 at the lower third, its
    own size; changed (made again, its box with it); placed; kept through
-   undo, saving and opening */
+   undo, saving and opening; on their own track, over a picture on V2 at
+   the same time */
 static int bright(int x0, int y0, int x1, int y1) /* (pixels of the shown picture brighter than 200) */
 {
     int n = 0;
@@ -950,7 +951,7 @@ static int bright(int x0, int y0, int x1, int y1) /* (pixels of the shown pictur
     return n;
 }
 
-static void titles(const char *a, const char *out)
+static void titles(const char *a, const char *full, const char *out)
 {
     /* the pictures */
     re_title t;
@@ -1049,6 +1050,43 @@ static void titles(const char *a, const char *out)
     e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
     luma_xy(e, 20, 0, 0);
     CHECK(bright(0, 0, 160, 90) > 100, "titles: opened, shown: %d", bright(0, 0, 160, 90));
+    re_engine_close(e);
+    CHECK(count(out, "shotcut:reeledit_titles") == 1 && o.track == 3 && re_project_track_overlays(p, 3) == 1
+              && re_project_track_overlays(p, 2) == 0,
+          "titles: on their own track: marked %d, track %d, %d there, %d on V2", count(out, "shotcut:reeledit_titles"),
+          o.track, re_project_track_overlays(p, 3), re_project_track_overlays(p, 2));
+
+    /* with a picture on V2 over the same frames: the picture (white, its
+       right half) added where the title is; a black title, top right, over
+       it (planted after V2's: on top); each found on its own track */
+    CHECK(re_project_overlay_add(p, full, 0, 0) == 0, "titles: a picture on V2 under the title (V2's first: 0)");
+    re_overlay pic;
+    CHECK(!re_project_overlay(p, 0, &pic) && pic.track == 2 && !pic.title && pic.start == 0
+              && !re_project_overlay(p, 1, &o) && o.track == 3 && o.title,
+          "titles: V2's first (track %d, title %d at %d), then the title (track %d, title %d)", pic.track, pic.title,
+          pic.start, o.track, o.title);
+    CHECK(re_project_overlay_at_track(p, 2, 20) == 0 && re_project_overlay_at_track(p, 3, 20) == 1
+              && re_project_overlay_at_track(p, 3, 5) == -1,
+          "titles: at frame 20: V2's %d, the titles' %d; at 5, the titles' %d", re_project_overlay_at_track(p, 2, 20),
+          re_project_overlay_at_track(p, 3, 20), re_project_overlay_at_track(p, 3, 5));
+    re_project_title(p, 1, &g);
+    g.colour = 0x000000;
+    re_project_title_set(p, 1, &g);
+    re_project_overlay_set(p, 1, RE_PLACE_TOP_RIGHT, -1, -1);
+    e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    luma_xy(e, 20, 0, 0);
+    int black = 0, white = bright(160, 0, 320, 180);
+    for (int y = 0; y < 90; y++)
+        for (int x = 160; x < 320; x++)
+            black += shown_luma[y * 320 + x] < 60;
+    CHECK(black > 100 && white > 5000, "titles: over V2's picture: %d black (the title), %d white (the picture)",
+          black, white);
+    /* another title where one is: refused (the titles' track has no room
+       there); one after it: on the titles' track too */
+    CHECK(re_project_title_add(p, &g, 20, 0) < 0, "titles: a title over a title");
+    CHECK(re_project_undo(p) && re_project_track_overlays(p, 2) == 1 && re_project_track_overlays(p, 3) == 1,
+          "titles: undone (the place): %d on V2, %d titles", re_project_track_overlays(p, 2),
+          re_project_track_overlays(p, 3));
     re_engine_close(e);
     re_project_close(p);
 }
@@ -2062,7 +2100,7 @@ int main(int argc, char **argv)
     ranges(a, b);
     clip_sound(a, argv[9], out);
     stills(argv[10]);
-    titles(a, out);
+    titles(a, argv[10], out);
     export(a, argv[9], out, "export-test.mp4");
     audio_tracks(a, argv[9], argv[11], out);
     source_editing(a, b, n, out);

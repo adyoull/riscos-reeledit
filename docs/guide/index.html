@@ -186,7 +186,8 @@ a { color:#1f5fa8; }
 <p>The lower window is the <b>Timeline</b>. Your film runs from left to right. From the top down:</p>
 <ul>
 <li><b>The ruler</b> shows the time. Click it to move the playhead; drag along it to scrub through the frames. A thin coloured bar just under it shows render previews (<a href="#ch15">Chapter 15</a>).</li>
-<li><b>V2</b>, the overlay track, holds logos, titles and picture-in-picture videos. Anything on V2 is shown on top of V1.</li>
+<li><b>The titles row</b> appears at the top once you make a title (<a href="#ch12">Chapter 12</a>). Titles are shown on top of everything else.</li>
+<li><b>V2</b>, the overlay track, holds logos, pictures and picture-in-picture videos. Anything on V2 is shown on top of V1.</li>
 <li><b>V1</b> is the main track, with your clips one after another. Each clip shows its first frame (and its last, if there's room), its name, and its sound as a light blue waveform along the bottom.</li>
 <li><b>Audio tracks</b> (A1, A2 and so on) appear under V1 when you add music or sound effects. There's always an empty row at the bottom to drop more on to.</li>
 </ul>
@@ -329,11 +330,11 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <ul>
 <li><kbd>Ctrl-C</kbd> copies it, with its settings: fades, mute and volume, and for an overlay its position, size and opacity.</li>
 <li><kbd>Ctrl-X</kbd> copies it and then deletes it.</li>
-<li><kbd>Ctrl-V</kbd> pastes it at the playhead. A clip is inserted there, and the clips after it move along. An overlay goes on V2 and a sound goes on an audio track.</li>
+<li><kbd>Ctrl-V</kbd> pastes it at the playhead. A clip is inserted there, and the clips after it move along. An overlay goes on V2, a title on the titles row, and a sound on an audio track.</li>
 </ul>
 <p>After pasting, the new copy is selected and the playhead is at its end, so pressing <kbd>Ctrl-V</kbd> again puts another copy straight after it.</p>
-<div class="box rem"><b class="label">REMEMBER</b>Overlays and sounds can't overlap others on their track, and overlays can't go past the end of the project. If there isn't space at the playhead you'll see "There's no room to paste it there."</div>
-<div class="box try"><b class="label">TRY IT</b><b>Use a title three times.</b> Make a short title (<a href="#ch12">Chapter 12</a>), trimmed to a second or two, select it on V2 and press <kbd>Ctrl-C</kbd>. Move the playhead to a part of the project where V2 is empty and press <kbd>Ctrl-V</kbd> three times. You'll get three titles in a row. Each is a separate title, so you can change the wording of one without affecting the others.</div>
+<div class="box rem"><b class="label">REMEMBER</b>Overlays, titles and sounds can't overlap others on their own row, and overlays and titles can't go past the end of the project. If there isn't space at the playhead you'll see "There's no room to paste it there."</div>
+<div class="box try"><b class="label">TRY IT</b><b>Use a title three times.</b> Make a short title (<a href="#ch12">Chapter 12</a>), trimmed to a second or two, select it on the titles row and press <kbd>Ctrl-C</kbd>. Move the playhead to a part of the project where there's no title yet and press <kbd>Ctrl-V</kbd> three times. You'll get three titles in a row. Each is a separate title, so you can change the wording of one without affecting the others.</div>
 
 <!-- ======================================================================= -->
 <h2 class="part" id="part3">Part III: Pictures and Sound<small>Transitions, sound, overlays, titles and speed</small></h2>
@@ -380,7 +381,7 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <li>A <b>video</b> appears in a small box in the bottom right, a third of the frame's size, and its sound is mixed with V1's. It's shortened if it would run past the end of the project.</li>
 <li>A <b>sprite file</b> containing more than one sprite gives you a menu to choose from. The sprite you choose is saved as a PNG next to the sprite file; keep it with your project.</li>
 </ul>
-<p>Overlays on V2 can't overlap. If you drop one on top of another, it starts where the other one ends.</p>
+<p>Overlays on V2 can't overlap. If you drop one on top of another, it starts where the other one ends. Titles have a row of their own, so a title can go over a logo or a picture in picture (<a href="#ch12">Chapter 12</a>).</p>
 <p>Press Menu over an overlay for its menu:</p>
 <figure><img src="images/overlay-place.png" alt="The Overlay menu with Place open"><figcaption>Overlay &gt; Place.</figcaption></figure>
 <table>
@@ -410,8 +411,10 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <tr><td>Lines</td><td>Left, Centred, Right</td></tr>
 <tr><td>Place</td><td>Centre, the four corners, Lower third</td></tr>
 </table>
-<p>Type one or two lines of text and click <b>Create</b>. (Return takes you to the second line; Return on the second line does the same as Create.) The title goes on V2, in the lower third of the picture, for 5 seconds.</p>
-<div class="box rem"><b class="label">REMEMBER</b>A title needs an empty part of V2 at the playhead. If another overlay is there, or the playhead is at the end of the project, ReelEdit tells you there's no room.</div>
+<p>Type one or two lines of text and click <b>Create</b>. (Return takes you to the second line; Return on the second line does the same as Create.) The title goes on the <b>titles row</b>, at the top of the Timeline, in the lower third of the picture, for 5 seconds. The titles row appears when you make your first title.</p>
+<p>Because titles have their own row, a title can be on screen at the same time as anything on V2. It's always shown on top, so you can put a caption over a logo or over a picture in picture.</p>
+<figure><img src="images/title-over-logo.png" alt="A title over a logo"><figcaption>A title on the titles row (top), over a logo on V2. In the Viewer, the title and the logo (top right) are both showing.</figcaption></figure>
+<div class="box rem"><b class="label">REMEMBER</b>Titles can't overlap each other, so a new title needs an empty part of the titles row at the playhead. If another title is there, or the playhead is at the end of the project, ReelEdit tells you there's no room.</div>
 <figure><img src="images/title-on-video.png" alt="A title over the video"><figcaption>"My Holiday" in Homerton Bold with a shadow, in the lower third.</figcaption></figure>
 <p>To change a title, press Menu over it and choose <b>Edit title…</b>. Make your changes and click <b>Change</b>. One press of <kbd>F8</kbd> undoes all of them.</p>
 <div class="box rem"><b class="label">REMEMBER</b>A title is an overlay, so you can move it, trim it, fade it and change its opacity like any other. The only difference is that its size is set in the Title window, not on the overlay menu.</div>
@@ -538,7 +541,7 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <tr><td>Nothing happened when I dropped a file</td><td>Check where you dropped it: sounds go on the audio rows, pictures on V1 or V2. A raw <code>.m2v</code> file is measured first ("Measuring" appears beside the transport controls).</td></tr>
 <tr><td>Pressing E did nothing</td><td>The clips either side of the cut have no spare frames to roll into. Trim one of them first (<a href="#ch6">Chapter 6</a>).</td></tr>
 <tr><td>"Its speed can't be changed"</td><td>Pictures have no speed, and you can't change the speed of a clip with a dissolve at either end. Delete the dissolve first.</td></tr>
-<tr><td>"There's no room to paste it there" (or no room for a title)</td><td>V2 and the audio tracks need an empty stretch at the playhead, inside the project. Move the playhead, or make some room.</td></tr>
+<tr><td>"There's no room to paste it there" (or no room for a title)</td><td>V2, the titles row and the audio tracks each need an empty stretch at the playhead, inside the project. Move the playhead, or make some room. (A title doesn't need V2 to be empty.)</td></tr>
 <tr><td>Exporting is slow</td><td>Tick <b>VideoCore encoder</b> (on a Pi with the VCHIQ module), or choose a smaller size.</td></tr>
 <tr><td>ReelEdit crashed</td><td>Open it again and choose <b>Recover</b>. If you can make it happen again, turn on logging (<a href="#ch2">Chapter 2</a>), repeat what you did, and send the log to the author.</td></tr>
 <tr><td>Something odd happened and you want to know why</td><td>Turn on logging from the icon bar menu, do it again, then look at <code>&lt;Wimp$ScrapDir&gt;.ReelEditLog</code>. It records what ReelEdit has been doing.</td></tr>
@@ -546,7 +549,7 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 
 <h3 class="chapter" id="ch20"><span>20</span> Ten things for experienced users</h3>
 <ol>
-<li><b>Projects are MLT XML.</b> ReelEdit uses Shotcut's track layout: V1 is a playlist, and V2 and the audio tracks are marked the way Shotcut marks them, with <code>store=shotcut</code>. melt can play the files, and Shotcut should be able to open them. Settings of ReelEdit's own (overlay place, size, opacity and fades, and the Clips list) are kept in <code>shotcut:reeledit_*</code> properties.</li>
+<li><b>Projects are MLT XML.</b> ReelEdit uses Shotcut's track layout, with <code>store=shotcut</code>: V1 is a playlist, and V2 and the audio tracks are marked the way Shotcut marks them. Titles have a track of their own above V2 (V3, marked <code>shotcut:reeledit_titles</code>); its composites are applied after V2's, so titles are always on top. melt can play the files, and Shotcut should be able to open them. Settings of ReelEdit's own (overlay place, size, opacity and fades, and the Clips list) are kept in <code>shotcut:reeledit_*</code> properties.</li>
 <li><b>The log</b>, <code>&lt;Wimp$ScrapDir&gt;.ReelEditLog</code>, records edits, which decoder each clip uses, playback statistics every second, and render and proxy jobs, along with MLT's and FFmpeg's own messages. It's off as standard; the icon bar menu's <b>Logging</b> item turns it on, and the choice is kept in <code>&lt;Choices$Write&gt;.ReelEdit.Logging</code>. Turned on again in the same session, it adds to the file; a new session starts it afresh. For testing, set <code>ReelEdit$Log</code> to a file name to log there from the start, or to <code>off</code>; either overrides the menu at start-up.</li>
 <li><b>Background jobs run in TaskWindows.</b> Exports, render previews and proxies are made by <code>!RunImage -export</code> or <code>-proxy</code> in a TaskWindow, which RISC OS multitasks pre-emptively. That's why the desktop keeps working while they run.</li>
 <li><b>How rendered stretches are recognised.</b> Each busy stretch gets a fingerprint (a hash) of everything in it (clips, overlays, sounds, frame numbers and settings), measured from the start of the stretch. As long as the fingerprint matches, the rendered file is used. That's why a ripple edit earlier in the project doesn't throw previews away.</li>

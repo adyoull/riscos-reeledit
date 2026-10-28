@@ -190,12 +190,18 @@ typedef struct
     int volume;            /* a video's sound's level, dB */
     int sound_fade_in, sound_fade_out; /* a video's sound's fades (frames; 0: none) */
     char name[64];         /* the file's leaf name (a picture's without .png or .jpg) */
+    int track;             /* 2: on V2; 3: on the titles' track, over V2 (titles made here) */
 } re_overlay;
-/* Their number, and each (in order, from 0). 0, or -1. */
+/* Their number, and each (in order, from 0: V2's, then the titles'
+   track's, each by start). 0, or -1. */
 int re_project_overlays(re_project *p);
 int re_project_overlay(re_project *p, int i, re_overlay *o);
-/* The overlay at a frame, or -1 */
+/* The overlay at a frame (on either track: V2's first), or -1 */
 int re_project_overlay_at(re_project *p, int frame);
+/* The one at a frame on a track (2: V2, 3: the titles'), or -1; how many
+   a track has */
+int re_project_overlay_at_track(re_project *p, int track, int frame);
+int re_project_track_overlays(re_project *p, int track);
 /* A picture or a video put over the video from a frame, so long (0: a
    picture 5 seconds, a video all of it), where there's room (after an
    overlay the frame's in; shortened to fit). A picture as big as the
@@ -228,7 +234,9 @@ int re_project_overlay_sound_fade(re_project *p, int i, int end, int length);
 int re_project_overlay_remove(re_project *p, int i);
 
 /* Titles (title.h): text over the video, an overlay made from it. Put on
-   V2 from a frame, so long (0: 5 seconds), where there's room; at the
+   the titles' track (over V2, so a title goes over a logo or a picture in
+   the picture) from a frame, so long (0: 5 seconds), where there's room
+   on it; at the
    lower third (its place can be changed as any overlay's; not its size:
    the title's own). Its index, or -1. */
 int re_project_title_add(re_project *p, const re_title *t, int frame, int length);

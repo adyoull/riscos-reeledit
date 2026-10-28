@@ -218,6 +218,10 @@ static unsigned ssb_heard(void)
     return p < ssb_added ? p : ssb_added;
 }
 
+/* (the titles' row, over V2: shown while there are titles on their track) */
+#define TL_T (re_test_project() && re_project_track_overlays(re_test_project(), 3) > 0 ? 48 + 8 : 0)
+#define TL_V2_MID (48 + 8 + TL_T + 32) /* (the middle of V2's row, down from the top) */
+#define TL_V1_TOP (48 + 8 + TL_T + 64 + 8) /* (the ruler, the titles' and V2's rows, the gaps: down to V1) */
 static int script(int *b, int mask);
 void lg_start(void);
 int lg_on(void);
@@ -618,7 +622,7 @@ static void data_load(int *b, int w, int x, int type, const char *file)
 static void data_load_v2(int *b, int frame, int type, const char *file)
 {
     data_load(b, TL, W[1].box[0] - W[1].scroll_x + 16 + (int) (frame * 4), type, file);
-    b[8] = W[1].box[3] - 48 - 8 - 32;
+    b[8] = W[1].box[3] - TL_V2_MID;
 }
 
 /* A sprite file of two sprites, "first" and "second", 4x2 32-bit (new
@@ -670,7 +674,6 @@ static double tl_scale = 4; /* the Timeline's OS units a frame, as it should be 
 
 /* a click (Select: 0x400 for this window's button type) on the Timeline at a frame: the ruler (1), V1 (0),
    or V2 (2) */
-#define TL_V1_TOP (48 + 8 + 64 + 8) /* (the ruler, V2's row, the gaps: down to V1) */
 #define TL_V1_H 160 /* (V1's row) */
 #define TL_A_TOP(k) (TL_V1_TOP + TL_V1_H + 8 + (k) * (56 + 8)) /* (an audio track's row: below V1) */
 static int click_audio(int *b, int frame, int k, int buttons)
@@ -689,7 +692,10 @@ static int drop_audio(int *b, int frame, int k, const char *file)
 static int click_tl(int *b, int frame, int on_ruler, int buttons)
 {
     b[0] = W[1].box[0] - W[1].scroll_x + 16 + (int) (frame * tl_scale);
-    b[1] = on_ruler == 1 ? W[1].box[3] - 10 : on_ruler == 2 ? W[1].box[3] - 48 - 8 - 32 : W[1].box[3] - TL_V1_TOP - 48;
+    b[1] = on_ruler == 1   ? W[1].box[3] - 10
+           : on_ruler == 2 ? W[1].box[3] - TL_V2_MID
+           : on_ruler == 3 ? W[1].box[3] - (48 + 8 + 24) /* (the titles' row) */
+                           : W[1].box[3] - TL_V1_TOP - 48;
     b[2] = buttons; b[3] = TL; b[4] = -1;
     return 6;
 }
@@ -1805,7 +1811,7 @@ static int script(int *b, int mask)
     }
     case 175:
         ptr[0] = W[1].box[0] - W[1].scroll_x + 16 + 50 * 4; /* (10 frames back) */
-        ptr[1] = W[1].box[3] - 48 - 8 - 32;
+        ptr[1] = W[1].box[3] - TL_V2_MID;
         next(176);
         return script(b, mask);
     case 176: {
@@ -1838,7 +1844,7 @@ static int script(int *b, int mask)
         help_text[0] = 0;
         memset(b, 0, 256);
         b[0] = 40; b[1] = 0x555; b[2] = 57; b[4] = 0x502;
-        b[5] = W[1].box[0] + 100; b[6] = W[1].box[3] - 48 - 8 - 32; b[8] = TL; b[9] = -1; /* help on V2 */
+        b[5] = W[1].box[0] + 100; b[6] = W[1].box[3] - TL_V2_MID; b[8] = TL; b[9] = -1; /* help on V2 */
         next(179);
         return 17;
     }
@@ -1919,7 +1925,7 @@ static int script(int *b, int mask)
     }
     case 188:
         ptr[0] = W[1].box[0] - W[1].scroll_x + 16 + 16 * 4; /* (10 frames on) */
-        ptr[1] = W[1].box[3] - 48 - 8 - 32;
+        ptr[1] = W[1].box[3] - TL_V2_MID;
         next(189);
         return script(b, mask);
     case 189: {
@@ -2192,7 +2198,7 @@ static int script(int *b, int mask)
               o.place, W[4].open);
         shot("24-title");
         next(245);
-        return click_tl(b, o.start + 10, 2, 2); /* Menu over the title on V2 */
+        return click_tl(b, o.start + 10, 3, 2); /* Menu over the title, on the titles' row */
     }
     case 245:
         next(246);

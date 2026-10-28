@@ -67,11 +67,20 @@
 #define RENDER_H 8   /* render previews' bar, under the ruler */
 #define RENDER_COLOUR   0x3030D000u /* (208, 48, 48): a stretch to render */
 #define RENDERED_COLOUR 0x40B04000u /* (64, 176, 64): rendered */
+#define V3_H    48   /* the titles' row (over V2), shown while the project has titles there */
+#define V3_TOP (-RULER_H - 8)
+#define V3_BOTTOM (V3_TOP - V3_H)
+#define TITLE_COLOUR 0xB0784000u /* (64, 120, 176): a title, on the titles' row */
 #define V2_H    64   /* V2's row: the overlays (pictures over the video), above V1 */
-#define V2_TOP (-RULER_H - 8) /* the rows' tops and bottoms (work area) */
+#define V2_TOP (titles_row() ? V3_BOTTOM - 8 : -RULER_H - 8) /* the rows' tops and bottoms (work area) */
 #define V2_BOTTOM (V2_TOP - V2_H)
 #define TRACK_TOP (V2_BOTTOM - 8)
 #define TRACK_BOTTOM (TRACK_TOP - TRACK_H)
+/* 1: the titles' row shown (titles on their track) */
+static int titles_row(void)
+{
+    return A.proj && re_project_track_overlays(A.proj, 3) > 0;
+}
 #define A_H 56        /* an audio track's row (A1, A2...: below V1), and the empty one after them */
 #define AUDIO_TOP(k) (TRACK_BOTTOM - 8 - (k) * (A_H + 8))
 #define AUDIO_BOTTOM(k) (AUDIO_TOP(k) - A_H)
@@ -308,7 +317,7 @@ int tl_on_overlays(int screen_y)
     if (!T.win || ro_swi(Wimp_GetWindowState, &r))
         return 0;
     int wy = screen_y - (st[4] - st[6]);
-    return wy <= V2_TOP + 8 && wy > V2_BOTTOM - 4;
+    return wy <= -RULER_H && wy > V2_BOTTOM - 4; /* (the titles' row too: a picture goes on V2) */
 }
 
 /* Moves the view sideways (keeping the window where it is) */
@@ -605,13 +614,15 @@ static void draw_dissolve(const re_item *it, int selected, int x0, int x1, int y
     }
 }
 
-/* V2's overlays: a box each over its frames, its fades purple along its
-   top, its name in it (a picture teal, a video blue); selected, an amber outline and handles at its
-   ends. With none, a word on what the row is for. */
-static void draw_overlays(int ox, int y0, int y1, int f0, int f1, int cx0, int cy0, int cx1, int cy1)
+/* A track's overlays (2: V2's, 3: the titles'): a box each over its
+   frames, its fades purple along its top, its name in it (a picture teal,
+   a video blue, a title on its own row darker blue); selected, an amber
+   outline and handles at its ends. V2 with none: a word on what the row is
+   for. */
+static void draw_overlays(int track, int ox, int y0, int y1, int f0, int f1, int cx0, int cy0, int cx1, int cy1)
 {
     int n = A.proj ? re_project_overlays(A.proj) : 0;
-    if (n == 0) {
+    if (track == 2 && (!A.proj || re_project_track_overlays(A.proj, 2) == 0)) {
         if (A.proj && re_project_length(A.proj) > 0)
             text("V2: drop a picture (PNG, JPEG, sprite) or a video here to put it over the video", ox + LEFT + 8, y0 + 20,
                  0xCCCCCC00, 0x77777700);
@@ -619,7 +630,7 @@ static void draw_overlays(int ox, int y0, int y1, int f0, int f1, int cx0, int c
     }
     for (int i = 0; i < n; i++) {
         re_overlay o;
-        if (re_project_overlay(A.proj, i, &o) || o.start + o.length < f0 || o.start > f1)
+        if (re_project_overlay(A.proj, i, &o) || o.track != track || o.start + o.length < f0 || o.start > f1)
             continue;
         int x0 = ox + x_of(o.start), x1 = ox + x_of(o.start + o.length) - 2, sel = i == A.ov_sel;
         if (x1 < x0)
@@ -627,7 +638,7 @@ static void draw_overlays(int ox, int y0, int y1, int f0, int f1, int cx0, int c
         colour(sel ? 0x2080F000 : 0x20202000);
         rect(x0, y0, x1, y1);
         int inset = sel ? 6 : 2;
-        unsigned fill = o.video ? CLIP_COLOUR : OVERLAY_COLOUR; /* (a video blue, as V1's) */
+        unsigned fill = o.video ? CLIP_COLOUR : track == 3 ? TITLE_COLOUR : OVERLAY_COLOUR; /* (a video blue, as V1's) */
         colour(fill);
         rect(x0 + inset, y0 + inset, x1 - inset, y1 - inset);
         colour(EFFECT_COLOUR); /* (its fades) */
@@ -775,7 +786,12 @@ static void draw(int *b)
     colour(0x77777700);
     rect(cx0, oy + AUDIO_BOTTOM(audio_rows() - 1) - 8, cx1, v2_y1 + 8 - 1);
     draw_audio(ox, oy, f0, f1, cx0, cy0, cx1, cy1);
-    draw_overlays(ox, v2_y0, v2_y1, f0, f1, cx0, cy0, cx1, cy1);
+    draw_overlays(2, ox, v2_y0, v2_y1, f0, f1, cx0, cy0, cx1, cy1);
+    if (titles_row()) {
+        colour(0x77777700);
+        rect(cx0, oy + V3_BOTTOM - 8, cx1, oy + V3_TOP + 8 - 1);
+        draw_overlays(3, ox, oy + V3_BOTTOM, oy + V3_TOP, f0, f1, cx0, cy0, cx1, cy1);
+    }
     if (A.proj) {
         for (int i = first_item(f0); i < re_project_items(A.proj); i++) {
             re_item it;
@@ -1073,10 +1089,16 @@ static int drag_box(int *b, int *st)
     return ro_swi(Wimp_DragBox, &r) ? -1 : 0;
 }
 
-/* A drag begun on V2: an overlay's middle moves it, its ends trim it */
-static void overlay_drag_start(int f, int wx, int *b, int *st)
+/* The overlays' track at a height (work area): 3 the titles' row, 2 V2's */
+static int overlay_track(int wy)
 {
-    int i = re_project_overlay_at(A.proj, (int) ((wx - LEFT) / T.scale));
+    return titles_row() && wy > V3_BOTTOM - 4 ? 3 : 2;
+}
+
+/* A drag begun on V2 or the titles' row: an overlay's middle moves it, its ends trim it */
+static void overlay_drag_start(int f, int wx, int wy, int *b, int *st)
+{
+    int i = re_project_overlay_at_track(A.proj, overlay_track(wy), (int) ((wx - LEFT) / T.scale));
     re_overlay o;
     if (i < 0 || re_project_overlay(A.proj, i, &o)) {
         app_log("timeline: a drag at %d on V2, on no overlay", wx);
@@ -1344,8 +1366,8 @@ void tl_click(int *b)
             int f = (int) ((wx - LEFT) / T.scale);
             if (wy <= TRACK_TOP && wy >= TRACK_BOTTOM && f >= 0)
                 item = re_project_item_at(A.proj, f);
-            else if (wy <= V2_TOP && wy >= V2_BOTTOM && f >= 0)
-                ov = re_project_overlay_at(A.proj, f);
+            else if (wy <= -RULER_H && wy >= V2_BOTTOM && f >= 0)
+                ov = re_project_overlay_at_track(A.proj, overlay_track(wy), f);
             else if ((ak = audio_row(wy)) >= 0 && f >= 0)
                 ai = re_project_audio_at(A.proj, ak, f);
         }
@@ -1416,13 +1438,13 @@ void tl_click(int *b)
             tl_select(-1);
         return;
     }
-    /* V2: overlays are selected, moved and trimmed */
+    /* V2 and the titles' row: overlays are selected, moved and trimmed */
     if (wy > V2_BOTTOM - 4) {
         if (drag) {
-            overlay_drag_start(f, wx, b, st);
+            overlay_drag_start(f, wx, wy, b, st);
             return;
         }
-        int ov = re_project_overlay_at(A.proj, (int) ((wx - LEFT) / T.scale));
+        int ov = re_project_overlay_at_track(A.proj, overlay_track(wy), (int) ((wx - LEFT) / T.scale));
         if (ov >= 0)
             tl_select_overlay(adjust && A.ov_sel == ov ? -1 : ov);
         else if (!adjust)
@@ -1512,6 +1534,9 @@ const char *tl_help(int screen_y)
     if (wy > -RULER_H)
         return "This is the Timeline's ruler.|MClick or drag here to move the playhead.|M"
                "I and O mark a stretch on it; Return plays the stretch, ' takes it out.";
+    if (titles_row() && wy > V3_BOTTOM - 4)
+        return "These are the titles (T makes one), over V2: a title can go over a logo or a picture in the picture."
+               "|MDrag one to move it, its ends to trim it; Menu over it to edit it, place it or fade it.";
     if (wy > V2_BOTTOM - 4)
         return "This is V2: pictures and videos over the video.|MDrop a PNG, JPEG, sprite or video here; "
                "drag one to move it, its ends to trim it; Menu over it to place it, size it, fade it, mute it.";

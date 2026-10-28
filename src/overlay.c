@@ -28,6 +28,13 @@
  * what's kept on them) where they're wanted, gaps between. Overlays don't
  * overlap; edits keep each where there's room, within the project.
  *
+ * Titles made here go on a track of their own over V2 (V3, marked
+ * shotcut:reeledit_titles; made with the first title), so a title can be
+ * over a logo or a picture in the picture. Its composites are planted
+ * after V2's, so they're put on top. The overlays are numbered across
+ * both: V2's first, then the titles'. (Titles on V2, from before, stay
+ * there and work as they did.)
+ *
  * Part of riscos-reeledit. GPL version 2 or later.
  */
 #include "project_internal.h"
@@ -45,17 +52,39 @@
 static const char *const PLACES[RE_PLACES] = {"full",        "centre",       "top-left",   "top-right",
                                               "bottom-left", "bottom-right", "lower-third"};
 
-/* ---- V2 ----------------------------------------------------------------------------------- */
+/* ---- V2 and the titles' track ------------------------------------------------------------ */
 
 int re_project_overlays(re_project *p)
 {
-    return rp_track_items(p->v2);
+    return rp_track_items(p->v2) + rp_track_items(p->v3);
 }
 
-/* The playlist index of overlay i, or -1 */
-static int entry(re_project *p, int i)
+int re_project_track_overlays(re_project *p, int track)
 {
-    return rp_track_entry(p->v2, i);
+    return rp_track_items(track == 3 ? p->v3 : p->v2);
+}
+
+int rp_overlay_entry(re_project *p, int i, mlt_playlist *pl)
+{
+    int n2 = rp_track_items(p->v2);
+    *pl = i < n2 ? p->v2 : p->v3;
+    return rp_track_entry(*pl, i < n2 ? i : i - n2);
+}
+
+/* Overlay i's clip info (on its track): 0, or -1 */
+static int info_of(re_project *p, int i, mlt_playlist_clip_info *info, mlt_playlist *pl)
+{
+    mlt_playlist t;
+    int e = rp_overlay_entry(p, i, &t);
+    if (pl)
+        *pl = t;
+    return e < 0 || mlt_playlist_get_clip_info(t, info, e) ? -1 : 0;
+}
+
+/* The first index of a track's overlays (V2's 0, the titles' after V2's) */
+static int first_of(re_project *p, mlt_playlist pl)
+{
+    return pl == p->v3 ? rp_track_items(p->v2) : 0;
 }
 
 static int place_of(const char *s)
@@ -69,10 +98,11 @@ static int place_of(const char *s)
 int re_project_overlay(re_project *p, int i, re_overlay *o)
 {
     mlt_playlist_clip_info info;
+    mlt_playlist pl;
     memset(o, 0, sizeof(*o));
-    int e = entry(p, i);
-    if (e < 0 || mlt_playlist_get_clip_info(p->v2, &info, e))
+    if (i < 0 || info_of(p, i, &info, &pl))
         return -1;
+    o->track = pl == p->v3 ? 3 : 2;
     mlt_properties cp = MLT_PRODUCER_PROPERTIES(info.cut);
     o->start = info.start;
     o->length = info.frame_count;
@@ -121,12 +151,23 @@ int re_project_overlay_at(re_project *p, int frame)
     return -1;
 }
 
-/* V2 made (the tractor's track above the others), if it isn't there */
-static int make_v2(re_project *p)
+int re_project_overlay_at_track(re_project *p, int track, int frame)
 {
-    if (p->v2)
+    re_overlay o;
+    for (int i = 0; !re_project_overlay(p, i, &o); i++)
+        if (o.track == track && frame >= o.start && frame < o.start + o.length)
+            return i;
+    return -1;
+}
+
+/* V2 or the titles' track made (the tractor's track above the others), if
+   it isn't there */
+static int make_track(re_project *p, int titles)
+{
+    mlt_playlist *pl = titles ? &p->v3 : &p->v2;
+    if (*pl)
         return 0;
-    if (!p->tractor || !(p->v2 = mlt_playlist_new(p->profile)))
+    if (!p->tractor || !(*pl = mlt_playlist_new(p->profile)))
         return -1;
     mlt_multitrack mt = mlt_tractor_multitrack(p->tractor);
     int n = mlt_multitrack_count(mt);
@@ -141,19 +182,27 @@ static int make_v2(re_project *p)
         if (!used)
             break;
     }
-    mlt_properties_set(MLT_PLAYLIST_PROPERTIES(p->v2), "id", id);
-    mlt_properties_set(MLT_PLAYLIST_PROPERTIES(p->v2), "shotcut:name", "V2");
-    mlt_tractor_set_track(p->tractor, MLT_PLAYLIST_PRODUCER(p->v2), n);
-    p->own_v2 = 1;
-    p->v2_track = n;
+    mlt_properties pp = MLT_PLAYLIST_PROPERTIES(*pl);
+    mlt_properties_set(pp, "id", id);
+    mlt_properties_set(pp, "shotcut:name", titles ? "V3" : "V2");
+    if (titles)
+        mlt_properties_set_int(pp, "shotcut:reeledit_titles", 1);
+    mlt_tractor_set_track(p->tractor, MLT_PLAYLIST_PRODUCER(*pl), n);
+    if (titles) {
+        p->own_v3 = 1;
+        p->v3_track = n;
+    } else {
+        p->own_v2 = 1;
+        p->v2_track = n;
+    }
     return 0;
 }
 
-/* V2 as it is (each cut with a reference of ours; a picture's in 0).
+/* A track as it is (each cut with a reference of ours; a picture's in 0).
    Their number, or -1. */
-static int read_v2(re_project *p, rp_slot **s)
+static int read_track(mlt_playlist pl, rp_slot **s)
 {
-    int n = rp_track_read(p->v2, s);
+    int n = rp_track_read(pl, s);
     for (int i = 0; i < n; i++)
         if (re_still_is((*s)[i].cut))
             (*s)[i].in = 0;
@@ -268,7 +317,7 @@ static int foreign_mix(re_project *p)
         mlt_properties tp = MLT_SERVICE_PROPERTIES(s);
         const char *svc = mlt_properties_get(tp, "mlt_service");
         if (svc && !strcmp(svc, "mix") && !mlt_properties_get_int(tp, "shotcut:reeledit_overlay")
-            && mlt_transition_get_b_track(MLT_TRANSITION(s)) == p->v2_track)
+            && p->v2 && mlt_transition_get_b_track(MLT_TRANSITION(s)) == p->v2_track)
             return 1;
     }
     return 0;
@@ -281,7 +330,7 @@ void rp_fit_overlays(re_project *p)
     drop_composites(p);
     mlt_field field = mlt_tractor_field(p->tractor);
     re_overlay o;
-    for (int i = 0; p->v2 && !re_project_overlay(p, i, &o); i++) {
+    for (int i = 0; !re_project_overlay(p, i, &o); i++) { /* (V2's first: the titles' go on top) */
         mlt_transition t = mlt_factory_transition(p->profile, "composite", NULL);
         if (!t)
             return;
@@ -290,7 +339,7 @@ void rp_fit_overlays(re_project *p)
         const char *ha, *va;
         if (o.title) {
             mlt_playlist_clip_info info;
-            mlt_playlist_get_clip_info(p->v2, &info, entry(p, i));
+            info_of(p, i, &info, NULL);
             title_box(p, info.cut, &o, &x, &y, &w, &h, &ha, &va);
         } else {
             box(&o, &x, &y, &w, &h, &ha, &va);
@@ -318,13 +367,13 @@ void rp_fit_overlays(re_project *p)
         mlt_properties_set(tp, "valign", va);
         mlt_properties_set_int(tp, "shotcut:reeledit_overlay", 1);
         mlt_transition_set_in_and_out(t, o.start, o.start + o.length - 1);
-        mlt_field_plant_transition(field, t, p->v1_track, p->v2_track);
+        mlt_field_plant_transition(field, t, p->v1_track, o.track == 3 ? p->v3_track : p->v2_track);
         mlt_transition_close(t); /* (the field keeps it) */
     }
     /* a video's sound, with V1's: one mix for all of V2, unless there's one */
     int videos = 0;
-    for (int i = 0; p->v2 && !re_project_overlay(p, i, &o); i++)
-        videos += o.video;
+    for (int i = 0; !re_project_overlay(p, i, &o); i++)
+        videos += o.video && o.track == 2;
     if (videos && !foreign_mix(p)) {
         mlt_transition t = mlt_factory_transition(p->profile, "mix", NULL);
         if (!t)
@@ -340,15 +389,16 @@ void rp_fit_overlays(re_project *p)
 
 /* ---- edits -------------------------------------------------------------------------------- */
 
-/* A picture, a video or a title (pic: ours from here) put on V2 from a
-   frame, so long, where there's room, at a place and size. Its index, or
-   -1. */
+/* A picture, a video or a title (pic: ours from here) put on V2 (a title:
+   on the titles' track) from a frame, so long, where there's room, at a
+   place and size. Its index, or -1. */
 int rp_overlay_put(re_project *p, mlt_producer pic, int in, int frame, int length, int place, int size)
 {
     if (frame < 0)
         frame = 0;
+    int titles = re_title_is(pic);
     rp_slot *s;
-    int n = read_v2(p, &s);
+    int n = read_track(titles ? p->v3 : p->v2, &s);
     if (n < 0 || rp_track_room(re_project_length(p), s, n, -1, &frame, &length)) {
         for (int i = 0; i < n; i++)
             mlt_producer_close(s[i].cut);
@@ -357,7 +407,7 @@ int rp_overlay_put(re_project *p, mlt_producer pic, int in, int frame, int lengt
         return -1;
     }
     rp_checkpoint(p);
-    if (make_v2(p) < 0) {
+    if (make_track(p, titles) < 0) {
         rp_no_edit(p);
         for (int i = 0; i < n; i++)
             mlt_producer_close(s[i].cut);
@@ -376,9 +426,9 @@ int rp_overlay_put(re_project *p, mlt_producer pic, int in, int frame, int lengt
     s[n].length = length;
     s[n].in = in;
     rp_track_sort(s, n + 1);
-    rp_track_write(p->v2, s, n + 1);
+    rp_track_write(titles ? p->v3 : p->v2, s, n + 1);
     rp_changed(p);
-    return re_project_overlay_at(p, frame);
+    return re_project_overlay_at_track(p, titles ? 3 : 2, frame);
 }
 
 int re_project_overlay_add(re_project *p, const char *file, int frame, int length)
@@ -416,8 +466,7 @@ int re_project_overlay_add(re_project *p, const char *file, int frame, int lengt
 const char *re_project_overlay_file(re_project *p, int i)
 {
     mlt_playlist_clip_info info;
-    int e = entry(p, i);
-    if (e < 0 || mlt_playlist_get_clip_info(p->v2, &info, e))
+    if (info_of(p, i, &info, NULL))
         return NULL;
     return rp_speed_file(info.producer, info.resource);
 }
@@ -425,19 +474,21 @@ const char *re_project_overlay_file(re_project *p, int i)
 int re_project_overlay_span(re_project *p, int i, int start, int length)
 {
     re_overlay o;
-    if (re_project_overlay(p, i, &o))
+    mlt_playlist pl;
+    if (re_project_overlay(p, i, &o) || rp_overlay_entry(p, i, &pl) < 0)
         return -1;
-    return rp_track_span(p, p->v2, i, start, length, o.video, o.source_length);
+    return rp_track_span(p, pl, i - first_of(p, pl), start, length, o.video, o.source_length);
 }
 
 /* One of an overlay's settings changed (not an edit of its own if
    in_edit). 1 changed, 0 not. */
 static int set_prop(re_project *p, int i, const char *name, const char *text, int value)
 {
-    int e = entry(p, i);
+    mlt_playlist pl;
+    int e = rp_overlay_entry(p, i, &pl);
     if (e < 0)
         return 0;
-    mlt_producer cut = mlt_playlist_get_clip(p->v2, e);
+    mlt_producer cut = mlt_playlist_get_clip(pl, e);
     mlt_properties cp = MLT_PRODUCER_PROPERTIES(cut);
     const char *now = mlt_properties_get(cp, name);
     char v[32];
@@ -477,8 +528,7 @@ int re_project_overlay_set(re_project *p, int i, int place, int size, int opacit
 static int sound_fade(re_project *p, int i, int end, int length)
 {
     mlt_playlist_clip_info info;
-    int e = entry(p, i);
-    if (e < 0 || mlt_playlist_get_clip_info(p->v2, &info, e) || !rp_cut_has_sound(info.cut))
+    if (info_of(p, i, &info, NULL) || !rp_cut_has_sound(info.cut))
         return 0;
     if (length < 0)
         length = 0;
@@ -526,9 +576,7 @@ int re_project_overlay_sound_fade(re_project *p, int i, int end, int length)
 int re_project_overlay_mute(re_project *p, int i, int on)
 {
     mlt_playlist_clip_info info;
-    int e = entry(p, i);
-    if (e < 0 || mlt_playlist_get_clip_info(p->v2, &info, e) || !rp_cut_has_sound(info.cut)
-        || rp_cut_muted(info.cut) == !!on)
+    if (info_of(p, i, &info, NULL) || !rp_cut_has_sound(info.cut) || rp_cut_muted(info.cut) == !!on)
         return 0;
     if (!p->in_edit)
         rp_checkpoint(p);
@@ -539,17 +587,18 @@ int re_project_overlay_mute(re_project *p, int i, int on)
 
 int re_project_overlay_remove(re_project *p, int i)
 {
-    int e = entry(p, i);
+    mlt_playlist pl;
+    int e = rp_overlay_entry(p, i, &pl);
     if (e < 0)
         return 0;
     rp_checkpoint(p);
-    mlt_producer gone = mlt_playlist_replace_with_blank(p->v2, e);
+    mlt_producer gone = mlt_playlist_replace_with_blank(pl, e);
     if (gone)
         mlt_producer_close(gone);
-    mlt_playlist_consolidate_blanks(p->v2, 1);
-    int n = mlt_playlist_count(p->v2);
-    if (n > 0 && mlt_playlist_is_blank(p->v2, n - 1))
-        mlt_playlist_remove(p->v2, n - 1);
+    mlt_playlist_consolidate_blanks(pl, 1);
+    int n = mlt_playlist_count(pl);
+    if (n > 0 && mlt_playlist_is_blank(pl, n - 1))
+        mlt_playlist_remove(pl, n - 1);
     rp_changed(p);
     return 1;
 }
@@ -571,8 +620,7 @@ int re_project_title_add(re_project *p, const re_title *t, int frame, int length
 int re_project_title(re_project *p, int i, re_title *t)
 {
     mlt_playlist_clip_info info;
-    int e = entry(p, i);
-    if (e < 0 || mlt_playlist_get_clip_info(p->v2, &info, e))
+    if (info_of(p, i, &info, NULL))
         return -1;
     return re_title_get(info.cut, t);
 }
@@ -581,8 +629,7 @@ int re_project_title_set(re_project *p, int i, const re_title *t)
 {
     mlt_playlist_clip_info info;
     re_title now;
-    int e = entry(p, i);
-    if (e < 0 || mlt_playlist_get_clip_info(p->v2, &info, e) || re_title_get(info.cut, &now))
+    if (info_of(p, i, &info, NULL) || re_title_get(info.cut, &now))
         return 0;
     if (!memcmp(&now, t, sizeof(now)) || (!strcmp(now.text, t->text) && !strcmp(now.font, t->font)
                                            && now.size == t->size && now.colour == t->colour
@@ -598,10 +645,8 @@ int re_project_title_set(re_project *p, int i, const re_title *t)
 int re_project_overlay_volume(re_project *p, int i, int db)
 {
     mlt_playlist_clip_info info;
-    int e = entry(p, i);
     db = db < -60 ? -60 : db > 12 ? 12 : db;
-    if (e < 0 || mlt_playlist_get_clip_info(p->v2, &info, e) || !rp_cut_has_sound(info.cut)
-        || rp_cut_volume(info.cut) == db)
+    if (info_of(p, i, &info, NULL) || !rp_cut_has_sound(info.cut) || rp_cut_volume(info.cut) == db)
         return 0;
     if (!p->in_edit)
         rp_checkpoint(p);

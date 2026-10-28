@@ -124,11 +124,14 @@ void rp_fit_fades(re_project *p)
         if (cut)
             rp_cut_fit_fades(p, cut, it.in, it.out);
     }
-    n = p->v2 ? mlt_playlist_count(p->v2) : 0;
-    for (int i = 0; i < n; i++) {
-        mlt_playlist_clip_info info;
-        if (!mlt_playlist_is_blank(p->v2, i) && !mlt_playlist_get_clip_info(p->v2, &info, i))
-            rp_cut_fit_fades(p, info.cut, info.frame_in, info.frame_out);
+    mlt_playlist over[2] = {p->v2, p->v3}; /* (V2 and the titles' track) */
+    for (int k = 0; k < 2; k++) {
+        n = over[k] ? mlt_playlist_count(over[k]) : 0;
+        for (int i = 0; i < n; i++) {
+            mlt_playlist_clip_info info;
+            if (!mlt_playlist_is_blank(over[k], i) && !mlt_playlist_get_clip_info(over[k], &info, i))
+                rp_cut_fit_fades(p, info.cut, info.frame_in, info.frame_out);
+        }
     }
 }
 

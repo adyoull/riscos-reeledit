@@ -1,10 +1,11 @@
-ReelEdit 0.3 beta (test 30)
+ReelEdit 0.3 beta (test 31)
 ===========================
 
 ReelEdit is a video editor for RISC OS, on the MLT multimedia framework
 (the engine of Shotcut and Kdenlive), with the Raspberry Pi's video
 hardware through riscos-reelhwaccel: a Viewer and a Timeline with a video
-track (V1), an overlay track (V2: logos, titles, picture in picture) and
+track (V1), an overlay track (V2: logos, picture in picture), a titles
+track over it (a title can go over a logo or a picture in picture) and
 audio tracks; cutting, trimming, rolls, copy and paste, fades, dissolves,
 marks, speed, a Clips window, render previews, proxies, undo, saving,
 autosave and export to MP4.
@@ -103,6 +104,13 @@ sprite file isn't changed), so keep it with the project. A sprite file of
 more sprites than one gives a menu to pick from; 32-bit sprites with
 alpha, masks and palettes are understood. A picture dropped on V1 is a
 clip there, 5 seconds long.
+
+Titles (T, or Edit > New title...): a title goes on a row of its own at
+the top of the Timeline (it appears with the first title), so it can be on
+screen with anything on V2, and it's always on top. Titles don't overlap
+each other: a new one needs room on the titles row at the playhead. Drag
+one to move it, its ends to trim it; Menu over it for Edit title..., Place,
+Opacity and fades.
 
 Videos on V2 (a picture in the picture, or a cutaway): drop a video on
 V2 and it goes over V1 from there, all of it (or up to the next overlay

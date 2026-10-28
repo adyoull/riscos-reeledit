@@ -128,15 +128,15 @@ int rp_restore(re_project *p, const char *xml)
     re_project old = *p;
     if (!*xml) {
         p->tractor = NULL;
-        p->v1 = p->v2 = NULL;
-        p->own_v1 = p->own_v2 = 0;
+        p->v1 = p->v2 = p->v3 = NULL;
+        p->own_v1 = p->own_v2 = p->own_v3 = 0;
     } else {
         setenv("MLT_XML_DEEP", "1", 1);
         mlt_producer prod = mlt_factory_producer(p->profile, "xml-string", (char *) xml);
         unsetenv("MLT_XML_DEEP");
         p->tractor = NULL;
-        p->v1 = p->v2 = NULL;
-        p->own_v1 = p->own_v2 = 0;
+        p->v1 = p->v2 = p->v3 = NULL;
+        p->own_v1 = p->own_v2 = p->own_v3 = 0;
         if (!prod || adopt(p, prod) < 0) {
             *p = old;
             return -1;
@@ -149,6 +149,8 @@ int rp_restore(re_project *p, const char *xml)
         mlt_playlist_close(old.v1);
     if (old.own_v2)
         mlt_playlist_close(old.v2);
+    if (old.own_v3)
+        mlt_playlist_close(old.v3);
     p->changes++;
     return 0;
 }
@@ -269,14 +271,15 @@ static int adopt(re_project *p, mlt_producer prod)
     /* V1: the first playlist that isn't Shotcut's black background (nor
        one of its audio tracks); V2 the next */
     mlt_multitrack mt = mlt_tractor_multitrack(p->tractor);
-    p->v1 = p->v2 = NULL;
-    p->own_v1 = p->own_v2 = 0;
+    p->v1 = p->v2 = p->v3 = NULL;
+    p->own_v1 = p->own_v2 = p->own_v3 = 0;
     for (int i = 0; i < mlt_multitrack_count(mt) && !p->v2; i++) {
         mlt_producer t = mlt_multitrack_track(mt, i);
         mlt_properties tp = MLT_PRODUCER_PROPERTIES(t);
         const char *id = mlt_properties_get(tp, "id");
         if (mlt_service_identify(MLT_PRODUCER_SERVICE(t)) != mlt_service_playlist_type
-            || (id && !strcmp(id, "background")) || mlt_properties_get_int(tp, "shotcut:audio"))
+            || (id && !strcmp(id, "background")) || mlt_properties_get_int(tp, "shotcut:audio")
+            || mlt_properties_get_int(tp, "shotcut:reeledit_titles"))
             continue;
         if (!p->v1) {
             p->v1 = (mlt_playlist) t;
@@ -284,6 +287,15 @@ static int adopt(re_project *p, mlt_producer prod)
         } else {
             p->v2 = (mlt_playlist) t;
             p->v2_track = i;
+        }
+    }
+    /* the titles' track (overlay.c): ours, marked */
+    for (int i = 0; i < mlt_multitrack_count(mt) && !p->v3; i++) {
+        mlt_producer t = mlt_multitrack_track(mt, i);
+        if (mlt_service_identify(MLT_PRODUCER_SERVICE(t)) == mlt_service_playlist_type
+            && mlt_properties_get_int(MLT_PRODUCER_PROPERTIES(t), "shotcut:reeledit_titles")) {
+            p->v3 = (mlt_playlist) t;
+            p->v3_track = i;
         }
     }
     if (!p->v1) {
@@ -347,6 +359,8 @@ void re_project_close(re_project *p)
         mlt_playlist_close(p->v1);
     if (p->own_v2)
         mlt_playlist_close(p->v2);
+    if (p->own_v3)
+        mlt_playlist_close(p->v3);
     mlt_profile_close(p->profile);
     drop_snaps(p->undo, &p->n_undo);
     drop_snaps(p->redo, &p->n_redo);
@@ -866,8 +880,10 @@ int re_project_info(re_project *p, char *buf, int size)
             clips++;
     ADD("Project\t%dx%d, %.3g fps, %s\n", p->profile->width, p->profile->height, re_project_fps(p), a);
     ADD("Clips\t%d on V1\n", clips);
-    if (re_project_overlays(p) > 0)
-        ADD("Overlays\t%d on V2\n", re_project_overlays(p));
+    if (re_project_track_overlays(p, 2) > 0)
+        ADD("Overlays\t%d on V2\n", re_project_track_overlays(p, 2));
+    if (re_project_track_overlays(p, 3) > 0)
+        ADD("Titles\t%d, over V2\n", re_project_track_overlays(p, 3));
     return n;
 }
 

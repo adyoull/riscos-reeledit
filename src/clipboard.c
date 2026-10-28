@@ -78,7 +78,9 @@ re_copy *re_project_copy(re_project *p, int kind, int track, int i)
         c->length = c->overlay.length;
         if (c->overlay.title)
             return re_project_title(p, i, &c->title) ? (free(c), NULL) : c;
-        c->parent = parent_of(p->v2, rp_track_entry(p->v2, i));
+        mlt_playlist opl;
+        int e = rp_overlay_entry(p, i, &opl);
+        c->parent = parent_of(opl, e);
         if (c->parent)
             return c;
         break;

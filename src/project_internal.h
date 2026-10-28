@@ -18,8 +18,9 @@ struct re_project
     mlt_profile profile;
     mlt_tractor tractor;   /* NULL while empty */
     mlt_playlist v1, v2;   /* V2: NULL until there's an overlay (overlay.c) */
-    int own_v1, own_v2;    /* made here (a reference of ours, besides the tractor's) */
-    int v1_track, v2_track; /* their places in the tractor */
+    mlt_playlist v3;       /* the titles' track, over V2: NULL until there's a title (overlay.c) */
+    int own_v1, own_v2, own_v3; /* made here (a reference of ours, besides the tractor's) */
+    int v1_track, v2_track, v3_track; /* their places in the tractor */
     unsigned state, next_state, saved_state; /* each edit a new state; modified: not the saved one */
     unsigned changes;
     /* undo and redo: the project as MLT XML before each edit */
@@ -62,6 +63,9 @@ int rp_insert_cut(re_project *p, mlt_producer cut, int frame);
    in.. for length, placed so: as an overlay's added. Its index, or -1.
    audio.c: the same on the audio tracks (stacked); 0 (*track, *i), or -1 */
 int rp_overlay_put(re_project *p, mlt_producer prod, int in, int frame, int length, int place, int size);
+/* overlay.c: overlay i's track (V2's or the titles') and its entry there;
+   -1 (none) */
+int rp_overlay_entry(re_project *p, int i, mlt_playlist *pl);
 int rp_audio_put(re_project *p, mlt_producer prod, int in, int frame, int length, int *track, int *i);
 /* speed.c: a clip's producer's speed (%), and its file (a timewarp
    producer's: the file it warps) */

@@ -1,7 +1,7 @@
 /* titles.c - the Title window (app.h): text over the video, made or
  * changed. Edit > New title... (T) opens it for a new title at the
  * playhead; the overlay menu's Edit title... for one there. What a title is and how it's drawn is title.h's;
- * putting it on V2 is project.h's.
+ * putting it on the titles' track (over V2) is project.h's.
  *
  *   Text     two lines (Return moves to the next; on the second, it's
  *            made)
@@ -252,8 +252,8 @@ static int apply(void)
         done |= re_project_overlay_set(A.proj, i, T.place, -1, -1);
     re_project_end(A.proj);
     if (i < 0) {
-        app_report("There's no room on V2 at the playhead: the overlays either side, or the project's end, are in the "
-                   "way.");
+        app_report("There's no room for a title at the playhead: the titles either side, or the project's end, are in "
+                   "the way.");
         return 0;
     }
     app_log("title %d: \"%s\" (%s, %d%%, %06x, style %d, place %d)%s", i, t.text, t.font, t.size, t.colour, t.style,
