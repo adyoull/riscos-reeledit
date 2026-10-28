@@ -1273,11 +1273,11 @@ static MENU(8) m_view = {"View", 7, 2, 7, 0, 520, 44, 0,
                           {2, -1, IT("The whole project     \x8bZ")}, {0, -1, IT("Attach the Timeline")},
                           {0, -1, IT("Snapping                   N")}, {0, 0, IT("Viewer size")},
                           {2, -1, IT("Clips...                  ^B")}, {0x80, -1, IT("Use proxies")}}};
-static MENU(5) m_main = {"ReelEdit", 7, 2, 7, 0, 340, 44, 0,
+static MENU(6) m_main = {"ReelEdit", 7, 2, 7, 0, 340, 44, 0,
                          {{0, 0, IT("File")}, {0, 0, IT("Edit")}, {0, 0, IT("Play")}, {0, 0, IT("View")},
-                          {0x80, -1, IT("Video information...")}}};
-static MENU(3) m_bar = {"ReelEdit", 7, 2, 7, 0, 200, 44, 0,
-                        {{0, -1, IT("Info")}, {0, -1, IT("Logging")}, {0x80, -1, IT("Quit")}}};
+                          {0, -1, IT("Video information...")}, {0x80, -1, IT("User guide      F1")}}};
+static MENU(4) m_bar = {"ReelEdit", 7, 2, 7, 0, 220, 44, 0,
+                        {{0, -1, IT("Info")}, {0, -1, IT("User guide")}, {0, -1, IT("Logging")}, {0x80, -1, IT("Quit")}}};
 static int menu_is; /* 0 none, 1 the icon bar's, 2 the editor's, 3 the Timeline's context menu (effects.c), 4 overlays.c's,
                        5 titles.c's, 6 exportbox.c's, 7 audiotracks.c's */
 static int menu_x, menu_y;
@@ -1440,8 +1440,10 @@ static void menu_select(int *b)
             snprintf(text, sizeof(text), APP " %s: a video editor for RISC OS, on the MLT framework.", RE_VERSION);
             app_report(text);
         } else if (b[0] == 1) {
-            lg_set(!lg_on());
+            gd_open();
         } else if (b[0] == 2) {
+            lg_set(!lg_on());
+        } else if (b[0] == 3) {
             if (close_editor())
                 V.quit = 1;
         }
@@ -1512,10 +1514,13 @@ static void menu_select(int *b)
     case 4: /* Video information */
         info_open();
         break;
+    case 5: /* User guide */
+        gd_open();
+        break;
     }
     /* Adjust: the menu stays open */
     r.r[1] = (intptr_t) p;
-    if (!ro_swi(Wimp_GetPointerInfo, &r) && (p[2] & 1) && A.proj && b[0] >= 0 && b[0] != 4 && !(b[0] == 0 && b[1] >= 0))
+    if (!ro_swi(Wimp_GetPointerInfo, &r) && (p[2] & 1) && A.proj && b[0] >= 0 && b[0] != 4 && b[0] != 5 && !(b[0] == 0 && b[1] >= 0))
         app_menu(menu_x, menu_y);
 }
 
@@ -1567,6 +1572,7 @@ int app_key(int k)
     case '+': case '=': tl_zoom(1); return 1;
     case '-': case '_': tl_zoom(0); return 1;
     case 0x1A: tl_select(-1); return 1;           /* ^Z: clear the selection */
+    case 0x181: gd_open(); return 1;              /* F1: the User Guide */
     case 0x188: undo(0); return 1;                /* F8 */
     case 0x189: undo(1); return 1;                /* F9 */
     case 0x18F: to_cut(-1); return 1;             /* Up: the cut before */
@@ -1653,10 +1659,10 @@ static void click(int *b)
         if (buttons & 2) {
             _kernel_swi_regs r;
             menu_is = 1;
-            menu_tick(&m_bar.item[1].flags, lg_on());
+            menu_tick(&m_bar.item[2].flags, lg_on());
             r.r[1] = (intptr_t) &m_bar;
             r.r[2] = b[0] - 64;
-            r.r[3] = 96 + 44 * 3;
+            r.r[3] = 96 + 44 * 4;
             ro_swi(Wimp_CreateMenu, &r);
             re_display_check_covered();
         } else {

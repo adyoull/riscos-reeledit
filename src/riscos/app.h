@@ -57,6 +57,8 @@ void lg_start(void);
 int lg_on(void);
 void lg_set(int on);
 void lg_end(void);
+/* guide.c: the User Guide opened in a browser (or why not, reported) */
+void gd_open(void);
 void app_report(const char *text);
 /* A question: buttons (a comma list); 3 the first, 4 the second... */
 int app_ask(const char *text, const char *buttons);

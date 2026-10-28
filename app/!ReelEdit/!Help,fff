@@ -1,4 +1,4 @@
-ReelEdit 0.3 beta (test 31)
+ReelEdit 0.3 beta (test 32)
 ===========================
 
 ReelEdit is a video editor for RISC OS, on the MLT multimedia framework
@@ -12,9 +12,11 @@ autosave and export to MP4.
 
 The User Guide
 --------------
-!ReelEdit.Guide.index/html is the full illustrated guide: double-click it
-(it opens in NetSurf or any browser), or Shift-double-click !ReelEdit and
-open Guide. It explains everything below with examples, for beginners and
+Press F1 in the editor, or choose User guide from the icon bar menu or
+the main menu, to open the full illustrated guide in your web browser.
+(It's !ReelEdit.Guide.index/html, if you'd rather open it yourself. If
+HTML files open in Edit on your computer, double-click NetSurf once
+first.) It explains everything below with examples, for beginners and
 for advanced users. This file is the short version.
 
 It needs RISC OS 5 on ARMv7 with VFP (Raspberry Pi 2, 3, 4), with
@@ -28,8 +30,8 @@ The editor
 Click the icon on the icon bar: the editor opens on a new project, the
 Viewer (the picture, the transport and a toolbar) with the Timeline under
 it.
-Menu over the icon: Info (the version), Logging (see Log, below) and
-Quit.
+Menu over the icon: Info (the version), User guide, Logging (see Log,
+below) and Quit.
 
 Adding clips: drag video files from a directory display to the Timeline
 (they go in where they're dropped: before the clip there, or after it if
@@ -183,6 +185,7 @@ Keys (with the Viewer or the Timeline in front, clicked on):
   Ctrl-R       render previews (the bar under the ruler: red, amber, green)
   Ctrl-E       export
   F3           save
+  F1           the User Guide
   Escape       stop
 
 Saving: the standard Save as box: drag the file icon to a directory

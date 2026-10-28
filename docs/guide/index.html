@@ -81,7 +81,7 @@ a { color:#1f5fa8; }
 <p>If you have some video you'd like to tidy up (clips from a phone, the school play, something for the club's website), ReelEdit lets you do it on RISC OS. You can cut out the dull bits, put clips in order, add music and titles, and save the result as an MP4 that plays anywhere.</p>
 
 <h4>About this guide</h4>
-<p>The guide is supplied with ReelEdit as <code>!ReelEdit.Guide.index/html</code>. To read it, Shift-double-click <b>!ReelEdit</b> to open the application directory, open <b>Guide</b> and double-click <b>index/html</b>. It opens in NetSurf.</p>
+<p>The guide comes with ReelEdit, and you can open it from the program: press <kbd>F1</kbd> in the editor, or choose <b>User guide</b> from the icon bar menu or the main menu. It opens in your web browser (NetSurf, for example). The file itself is <code>!ReelEdit.Guide.index/html</code>, if you'd rather open it yourself.</p>
 <p>You don't need to read it in order. If all you want is a title, go to <a href="#ch12">Chapter 12</a>. If you're new to video editing, start at <a href="#part1">Part I</a> and do the <b>Try it</b> examples as you go. By the end of <a href="#part2">Part II</a> you'll have made your first edit.</p>
 <p>The pictures are screenshots of ReelEdit running on RISC OS. The test clips are colour bars with a moving line across them, which makes it easy to see which frame you're on.</p>
 
@@ -149,6 +149,7 @@ a { color:#1f5fa8; }
 <figure><img src="images/iconbar-menu.png" alt="The icon bar menu, with Logging ticked"><figcaption>The icon bar menu, with logging turned on.</figcaption></figure>
 <ul>
 <li><b>Info</b> tells you which version you have.</li>
+<li><b>User guide</b> opens this guide in your web browser.</li>
 <li><b>Logging</b> turns the log on or off. A tick means it's on. ReelEdit remembers your choice the next time it starts.</li>
 <li><b>Quit</b> quits ReelEdit. If you have unsaved changes, it asks first.</li>
 </ul>
@@ -195,7 +196,7 @@ a { color:#1f5fa8; }
 
 <h4>The menus</h4>
 <p>Press Menu over the Viewer or the ruler for the main menu. Press Menu over a clip, an overlay or a sound for a menu about that one item.</p>
-<figure><img src="images/main-menu.png" alt="The main menu"><figcaption>The main menu.</figcaption></figure>
+<figure><img src="images/main-menu.png" alt="The main menu"><figcaption>The main menu. <b>User guide</b> at the bottom opens this guide, as does <kbd>F1</kbd>.</figcaption></figure>
 <figure><img src="images/edit-menu.png" alt="The Edit menu"><figcaption>The Edit menu, with each command's key on the right. Commands you can't use at the moment are greyed out.</figcaption></figure>
 
 <div class="box tip"><b class="label">TIP</b>Every command has a key, shown beside it in the menu. Learning a few of them (<a href="#ch18">Chapter 18</a> has a list) will save you a lot of trips to the menus.</div>
@@ -542,9 +543,9 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <tr><td>Pressing E did nothing</td><td>The clips either side of the cut have no spare frames to roll into. Trim one of them first (<a href="#ch6">Chapter 6</a>).</td></tr>
 <tr><td>"Its speed can't be changed"</td><td>Pictures have no speed, and you can't change the speed of a clip with a dissolve at either end. Delete the dissolve first.</td></tr>
 <tr><td>"There's no room to paste it there" (or no room for a title)</td><td>V2, the titles row and the audio tracks each need an empty stretch at the playhead, inside the project. Move the playhead, or make some room. (A title doesn't need V2 to be empty.)</td></tr>
+<tr><td>The User guide opens as a page of text, or not at all</td><td>Your computer hasn't been told to open HTML files in a web browser yet. Double-click NetSurf (it's in <code>Apps</code>) once, then try again. If HTML files open in Edit, ReelEdit tells you rather than showing the guide as text.</td></tr>
 <tr><td>Exporting is slow</td><td>Tick <b>VideoCore encoder</b> (on a Pi with the VCHIQ module), or choose a smaller size.</td></tr>
-<tr><td>ReelEdit crashed</td><td>Open it again and choose <b>Recover</b>. If you can make it happen again, turn on logging (<a href="#ch2">Chapter 2</a>), repeat what you did, and send the log to the author.</td></tr>
-<tr><td>Something odd happened and you want to know why</td><td>Turn on logging from the icon bar menu, do it again, then look at <code>&lt;Wimp$ScrapDir&gt;.ReelEditLog</code>. It records what ReelEdit has been doing.</td></tr>
+<tr><td>ReelEdit crashed, or did something odd</td><td>After a crash, open ReelEdit again and choose <b>Recover</b>. To find out what went wrong, turn on logging from the icon bar menu (<a href="#ch2">Chapter 2</a>), do the same thing again, then look at <code>&lt;Wimp$ScrapDir&gt;.ReelEditLog</code>. Please send it to the author with your report.</td></tr>
 </table>
 
 <h3 class="chapter" id="ch20"><span>20</span> Ten things for experienced users</h3>
@@ -604,6 +605,7 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <tr><td><kbd>Ctrl-R</kbd></td><td>Render previews</td></tr>
 <tr><td><kbd>Ctrl-E</kbd></td><td>Export</td></tr>
 <tr><td><kbd>F3</kbd></td><td>Save</td></tr>
+<tr><td><kbd>F1</kbd></td><td>Open this guide</td></tr>
 </table>
 <h4>The mouse on the Timeline</h4>
 <table>

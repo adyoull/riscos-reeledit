@@ -145,7 +145,7 @@ static int polls, idle_polls, null_events, last_mask;
 static int covered, shift_key, ctrl_key;
 static char help_text[256], drag_name0[64];
 static int whole_redraws;
-static int starts, morites, exports_typed, mark2_reports;
+static int starts, guide_starts, morites, exports_typed, mark2_reports;
 static char saved_layout[256], saved_title[300];
 static char start_cmd[1500];
 static int plots, reports, questions, answer = 3, closedown, acks, menus, savebox_opens, drags;
@@ -376,7 +376,10 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
     case 0x400C2: r->r[0] = BAR_ICON; break;
     case 0x400E9: break; /* Wimp_SpriteOp 24: the sprite is there */
     case 0x400DE: /* StartTask: an export's TaskWindow (the script plays its part) */
-        starts++;
+        if (!strncmp((const char *) r->r[0], "Filer_Run ", 10))
+            guide_starts++; /* (the User Guide: counted apart from the TaskWindows) */
+        else
+            starts++;
         snprintf(start_cmd, sizeof(start_cmd), "%s", (const char *) r->r[0]);
         break;
     case 0x400C5: {                                                 /* OpenWindow */
@@ -730,7 +733,7 @@ static int script(int *b, int mask)
     case 3000:
         CHECK(menus == menus_mark + 1, "Menu on the icon: %d menus", menus - menus_mark);
         next(3001);
-        b[0] = 1; b[1] = -1; /* Logging */
+        b[0] = 2; b[1] = -1; /* Logging */
         return 9;
     case 3001:
         CHECK(!lg_on() && choice_is("off"), "Logging: still on (%d), or the choice not kept", lg_on());
@@ -740,7 +743,7 @@ static int script(int *b, int mask)
         return 6;
     case 3002:
         next(3003);
-        b[0] = 1; b[1] = -1; /* Logging again */
+        b[0] = 2; b[1] = -1; /* Logging again */
         return 9;
     case 3003: {
         CHECK(lg_on() && choice_is("on"), "Logging again: not on (%d), or the choice not kept", lg_on());
@@ -758,10 +761,35 @@ static int script(int *b, int mask)
             fclose(f);
         CHECK(off == 1 && on == 1 && quiet && header == 2, "the log: off %d, on %d, quiet %d, headers %d (kept, added to)",
               off, on, quiet, header);
+        /* ---- the icon bar menu's User guide: with no browser known, said so; with one, run by the Filer ---- */
+        setenv("Alias$@RunType_FAF", "Run <Edit$Dir>.!Run %*0", 1); /* (HTML opened as text: no good) */
+        mark = reports;
+        menus_mark = guide_starts;
+        next(3004);
+        b[0] = 100; b[1] = 20; b[2] = 2; b[3] = -2; b[4] = BAR_ICON;
+        return 6;
+    }
+    case 3004:
+        next(3005);
+        b[0] = 1; b[1] = -1; /* User guide */
+        return 9;
+    case 3005:
+        CHECK(reports == mark + 1 && guide_starts == menus_mark, "User guide, no browser: %d reports, %d started",
+              reports - mark, guide_starts - menus_mark);
+        setenv("Alias$@RunType_FAF", "Run <NetSurf$Dir>.!Run %*0", 1);
+        next(3006);
+        b[0] = 100; b[1] = 20; b[2] = 2; b[3] = -2; b[4] = BAR_ICON;
+        return 6;
+    case 3006:
+        next(3007);
+        b[0] = 1; b[1] = -1; /* User guide */
+        return 9;
+    case 3007:
+        CHECK(guide_starts == menus_mark + 1 && !strcmp(start_cmd, "Filer_Run <ReelEdit$Dir>.Guide.index/html"),
+              "User guide: %d started, \"%s\"", guide_starts - menus_mark, start_cmd);
         next(2);
         b[0] = 100; b[1] = 20; b[2] = 4; b[3] = -2; b[4] = BAR_ICON;
         return 6;
-    }
     case 2:
         shot("01-empty");
         CHECK(W[0].open && W[1].open, "the editor's windows aren't open (%d, %d)", W[0].open, W[1].open);
@@ -2219,9 +2247,16 @@ static int script(int *b, int mask)
         int i = re_project_overlays(re_test_project()) - 1;
         CHECK(!re_project_overlay(re_test_project(), i, &o) && !strcmp(o.name, "Bye") && i == mark && !W[4].open,
               "Edit title... changed: \"%s\", %d overlays, open %d", o.name, i + 1, W[4].open);
+        mark = guide_starts;
+        start_cmd[0] = 0;
+        next(248);
+        return key_to(b, TL, 0x181); /* F1: the User Guide */
+    }
+    case 248:
+        CHECK(guide_starts == mark + 1 && !strcmp(start_cmd, "Filer_Run <ReelEdit$Dir>.Guide.index/html"),
+              "F1: %d started, \"%s\"", guide_starts - mark, start_cmd);
         next(250);
         return key_to(b, TL, 0x18D); /* (Right: a frame on) */
-    }
     /* ---- export: Ctrl-E, Size > 720 lines, a full name, Export: the TaskWindow started with
        -export; its output (progress, done) and its end shown; again, and stopped ---- */
     case 250:
