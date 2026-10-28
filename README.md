@@ -128,8 +128,6 @@ framework and the modules used). ReelEdit's own code is GPL version 2 or
 later. Built with riscos-ffmpeg's FFmpeg (GPL with the hardware decoders),
 the programs as a whole are GPL version 2.
 
-## Licence
-
 ReelEdit is free software under the GNU General Public License, version 2
 or later ([COPYING](COPYING)). The program as built also contains MLT
 (LGPL 2.1 or later), FFmpeg with x264 (GPL 2 or later),
