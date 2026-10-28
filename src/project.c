@@ -399,6 +399,7 @@ int re_project_item(re_project *p, int i, re_item *item)
     item->gap = mlt_playlist_is_blank(p->v1, i);
     item->mix = rp_mix_of(p, i) != NULL;
     item->source_length = info.length;
+    item->speed = 100;
     if (item->mix) {
         item->in = 0;
         item->out = item->length - 1;
@@ -412,10 +413,12 @@ int re_project_item(re_project *p, int i, re_item *item)
         item->sound = rp_cut_has_sound(cut);
         item->muted = rp_cut_muted(cut);
         item->volume = rp_cut_volume(cut);
+        item->speed = rp_speed_percent(info.producer);
     }
-    if (!item->gap && !item->mix && info.resource) {
-        const char *leaf = info.resource;
-        for (const char *c = info.resource; *c; c++)
+    const char *file = item->gap || item->mix ? NULL : rp_speed_file(info.producer, info.resource);
+    if (file) {
+        const char *leaf = file;
+        for (const char *c = file; *c; c++)
             if (*c == '/' || *c == '\\')
                 leaf = c + 1;
         snprintf(item->name, sizeof(item->name), "%s", leaf);
@@ -428,7 +431,7 @@ const char *re_project_item_file(re_project *p, int i)
     mlt_playlist_clip_info info;
     if (!p->v1 || mlt_playlist_get_clip_info(p->v1, &info, i) || mlt_playlist_is_blank(p->v1, i) || rp_mix_of(p, i))
         return NULL;
-    return info.resource && *info.resource ? info.resource : NULL; /* (MLT keeps a picture's without "qimage:") */
+    return rp_speed_file(info.producer, info.resource); /* (MLT keeps a picture's without "qimage:") */
 }
 
 int re_project_item_at(re_project *p, int frame)

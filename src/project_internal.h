@@ -60,6 +60,10 @@ int rp_insert_cut(re_project *p, mlt_producer cut, int frame);
    audio.c: the same on the audio tracks (stacked); 0 (*track, *i), or -1 */
 int rp_overlay_put(re_project *p, mlt_producer prod, int in, int frame, int length, int place, int size);
 int rp_audio_put(re_project *p, mlt_producer prod, int in, int frame, int length, int *track, int *i);
+/* speed.c: a clip's producer's speed (%), and its file (a timewarp
+   producer's: the file it warps) */
+int rp_speed_percent(mlt_producer parent);
+const char *rp_speed_file(mlt_producer parent, const char *resource);
 /* audio.c: an audio track's playlist (NULL: none) */
 mlt_playlist rp_audio_track(re_project *p, int k);
 

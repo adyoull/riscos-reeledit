@@ -550,15 +550,21 @@ static void draw_sound(int start, int length, int fade_in, int fade_out, int mut
 }
 
 /* A clip's name, " (muted)" after it if it is, or its sound's level if
-   it's been changed (" (-6 dB)") */
-static const char *label(char *buf, int size, const char *name, int muted, int volume)
+   it's been changed (" (-6 dB)"); its speed if it isn't 100% (" 200%",
+   " reversed", " -50%") */
+static const char *label(char *buf, int size, const char *name, int muted, int volume, int speed)
 {
+    char sp[24] = "";
+    if (speed == -100)
+        snprintf(sp, sizeof(sp), " reversed");
+    else if (speed != 100)
+        snprintf(sp, sizeof(sp), " %d%%", speed);
     if (muted)
-        snprintf(buf, size, "%s (muted)", name);
+        snprintf(buf, size, "%s%s (muted)", name, sp);
     else if (volume)
-        snprintf(buf, size, "%s (%+d dB)", name, volume);
+        snprintf(buf, size, "%s%s (%+d dB)", name, sp, volume);
     else
-        snprintf(buf, size, "%s", name);
+        snprintf(buf, size, "%s%s", name, sp);
     return buf;
 }
 
@@ -640,7 +646,7 @@ static void draw_overlays(int ox, int y0, int y1, int f0, int f1, int cx0, int c
             char shown[64];
             clip(c0, r0, c1, r1);
             char name[80];
-            fit_text(shown, sizeof(shown), label(name, sizeof(name), o.name, o.muted, o.volume), x1 - x0 - 24);
+            fit_text(shown, sizeof(shown), label(name, sizeof(name), o.name, o.muted, o.volume, 100), x1 - x0 - 24);
             text(shown, x0 + 10, y0 + 12, 0xFFFFFF00, fill);
             clip(cx0, cy0, cx1, cy1);
         }
@@ -677,7 +683,7 @@ static void draw_audio(int ox, int oy, int f0, int f1, int cx0, int cy0, int cx1
             int inset = sel ? 6 : 2;
             colour(AUDIO_COLOUR);
             rect(x0 + inset, y0 + inset, x1 - inset, y1 - inset);
-            pv_sound ps = {a.in, a.length, a.fade_in, a.fade_out, a.volume, a.muted};
+            pv_sound ps = {a.in, a.length, a.fade_in, a.fade_out, a.volume, a.muted, 100, a.source_length};
             ro_box wb = {x0 + inset > cx0 ? x0 + inset : cx0, cy0, x1 - inset < cx1 ? x1 - inset : cx1, cy1};
             if (wb.x1 >= wb.x0)
                 pv_wave(re_project_audio_file(A.proj, k, i), &ps, ox + x_of(a.start), T.scale, y0 + inset,
@@ -693,7 +699,7 @@ static void draw_audio(int ox, int oy, int f0, int f1, int cx0, int cy0, int cx1
             if (c1 > c0 && r1 > r0) {
                 char shown[64], name[80];
                 clip(c0, r0, c1, r1);
-                fit_text(shown, sizeof(shown), label(name, sizeof(name), a.name, a.muted, a.volume), x1 - x0 - 24);
+                fit_text(shown, sizeof(shown), label(name, sizeof(name), a.name, a.muted, a.volume, 100), x1 - x0 - 24);
                 text(shown, x0 + 10, y0 + 14, 0xFFFFFF00, AUDIO_COLOUR);
                 clip(cx0, cy0, cx1, cy1);
             }
@@ -794,17 +800,18 @@ static void draw(int *b)
             int name_end = x1;
             if (in_box.x1 >= in_box.x0 && in_box.y1 >= in_box.y0) {
                 if (it.sound) {
-                    pv_sound ps = {it.in, it.length, it.sound_fade_in, it.sound_fade_out, it.volume, it.muted};
+                    pv_sound ps = {it.in,  it.length,    it.sound_fade_in, it.sound_fade_out,
+                                   it.volume, it.muted, it.speed,      it.source_length};
                     pv_wave(file, &ps, ox + x_of(it.start), T.scale, track_y0 + inset, WAVE_H - inset, WAVE_COLOUR,
                             &in_box);
                 }
                 int head_x = ox + x_of(it.start) + inset, tw = pv_thumb_width(THUMB_H);
                 int tail_x = ox + x_of(it.start + it.length) - 2 - inset - tw;
                 if (tw > 0 && x1 - x0 >= tw + 2 * inset) {
-                    int w = pv_thumb(file, it.in, head_x, track_y1 - CORNER, THUMB_H, &in_box);
+                    int w = pv_thumb(file, re_item_file_frame(&it, it.in), head_x, track_y1 - CORNER, THUMB_H, &in_box);
                     if (w > 0 && name_x < head_x + w + 10)
                         name_x = head_x + w + 10;
-                    if (tail_x >= head_x + 2 * tw + 160 && pv_thumb(file, it.out, tail_x, track_y1 - CORNER, THUMB_H,
+                    if (tail_x >= head_x + 2 * tw + 160 && pv_thumb(file, re_item_file_frame(&it, it.out), tail_x, track_y1 - CORNER, THUMB_H,
                                                                     &in_box) > 0)
                         name_end = tail_x - 4;
                 }
@@ -823,7 +830,7 @@ static void draw(int *b)
                     if (nx < c1 && nx + 1000 > c0) {
                         char shown[64];
                         char name[80];
-                        fit_text(shown, sizeof(shown), label(name, sizeof(name), it.name, it.muted, it.volume),
+                        fit_text(shown, sizeof(shown), label(name, sizeof(name), it.name, it.muted, it.volume, it.speed),
                                  (name_end - nx < 1000 ? name_end - nx : 1000) - 12);
                         text(shown, nx, track_y1 - CORNER - 28, 0xFFFFFF00, fill); /* (below the fade handles) */
                     }

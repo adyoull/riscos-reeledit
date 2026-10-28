@@ -227,6 +227,21 @@ static void rect(int x0, int y0, int x1, int y1)
     P.wave_rects++;
 }
 
+/* A sound's frames g0..g1 (not g1) as its file's frames k0..k1 (not k1) */
+static void file_frames(const pv_sound *s, int g0, int g1, int *k0, int *k1)
+{
+    double sp = s->speed ? s->speed / 100.0 : 1, a = fabs(sp);
+    if (sp > 0) {
+        *k0 = (int) floor(g0 * a);
+        *k1 = (int) ceil(g1 * a);
+    } else {
+        *k0 = (int) floor((s->source_length - g1) * a);
+        *k1 = (int) ceil((s->source_length - g0) * a);
+    }
+    if (*k1 <= *k0)
+        *k1 = *k0 + 1;
+}
+
 void pv_wave(const char *file, const pv_sound *s, int x0, double scale, int y0, int h, unsigned colour,
              const ro_box *clip)
 {
@@ -251,10 +266,11 @@ void pv_wave(const char *file, const pv_sound *s, int x0, double scale, int y0, 
             int f0 = (int) floor(a), f1 = (int) floor(b);
             if (f1 <= f0)
                 f1 = f0 + 1;
-            int top = 0;
-            for (int f = f0; f < f1; f++)
-                if (s->in + f < n && s->in + f >= 0 && pk[s->in + f] > top)
-                    top = pk[s->in + f];
+            int top = 0, k0, k1; /* (the file's frames under them: at another speed, more or fewer) */
+            file_frames(s, s->in + f0, s->in + f1, &k0, &k1);
+            for (int k = k0 < 0 ? 0 : k0; k < k1 && k < n; k++)
+                if (pk[k] > top)
+                    top = pk[k];
             double g = level, t = a < 0 ? 0 : a > s->length ? s->length : a;
             if (s->fade_in > 0 && t < s->fade_in)
                 g *= t / s->fade_in;

@@ -47,11 +47,16 @@ typedef struct
     int sound;           /* 1: its file has sound (a picture or a silent video hasn't) */
     int muted;           /* 1: its sound muted */
     int volume;          /* its sound's level: dB (0: as it is) */
-    int source_length;   /* the clip's file's length (frames of the project): out is below it */
+    int source_length;   /* the clip's file's length (frames of the project): out is below it; at
+                            another speed, its length at that speed */
+    int speed;           /* % (100: as it is; 200 twice as fast; negative: reversed) */
     char name[64];       /* the clip's file's leaf name */
 } re_item;
 int re_project_items(re_project *p);
 int re_project_item(re_project *p, int i, re_item *item);
+/* Its frame f (in..out) as a frame of its file (at 100%): where its
+   thumbnails and waveform are */
+int re_item_file_frame(const re_item *it, int f);
 /* The item at a frame, -1 past the end. */
 int re_project_item_at(re_project *p, int frame);
 /* A clip's file (for its thumbnails and waveform, media.h): NULL for a
@@ -132,6 +137,13 @@ int re_project_dissolve_max(re_project *p, int mix);
 /* The cut between two clips (no dissolve there yet) nearest a frame: the
    clip before it, or -1 if there's none */
 int re_project_dissolve_cut(re_project *p, int frame);
+
+/* A clip's speed (speed.c): % (10 to 2000, or -10 to -2000: reversed;
+   100: as it is), the part of its file it shows kept, its start kept and
+   what follows moving along; its fades, mute and level kept. The sound
+   goes faster or slower with it (its pitch too). Not a picture, nor a clip
+   in a dissolve. One edit; 1 changed, 0 not. */
+int re_project_speed(re_project *p, int item, int percent);
 
 /* Fades from black at a clip's start (end 0) or to black at its end (end
    1), the sound with the picture; length 0 takes it away. Kept to the clip

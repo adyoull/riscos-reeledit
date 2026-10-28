@@ -212,6 +212,28 @@ static int peak_at(re_project *p, int frame)
     return peak;
 }
 
+/* The same, but only sound at 48 kHz counts (as the engine takes it): -1 at another rate */
+static int peak_48k(re_project *p, int frame)
+{
+    mlt_producer prod = re_project_producer(p);
+    mlt_frame f = NULL;
+    mlt_producer_seek(prod, frame);
+    if (mlt_service_get_frame(MLT_PRODUCER_SERVICE(prod), &f, 0) || !f)
+        return -1;
+    mlt_audio_format fmt = mlt_audio_s16;
+    int freq = 48000, ch = 2, n = mlt_audio_calculate_frame_samples(25, freq, frame), peak = 0;
+    int16_t *pcm = NULL;
+    if (!mlt_frame_get_audio(f, (void **) &pcm, &fmt, &freq, &ch, &n) && pcm && freq == 48000 && fmt == mlt_audio_s16) {
+        for (int i = 0; i < n * ch; i++)
+            if (abs(pcm[i]) > peak)
+                peak = abs(pcm[i]);
+    } else {
+        peak = -1;
+    }
+    mlt_frame_close(f);
+    return peak;
+}
+
 /* ---- fades: from black at a clip's start, to black at its end, the sound
    with the picture; kept to the clip as it's trimmed and split; kept
    through undo, saving and opening; taken away; not where a dissolve is */
@@ -1390,6 +1412,91 @@ static void copy_paste(const char *a, const char *snd, const char *pic)
     re_project_close(p);
 }
 
+/* ---- speeds: timewarp clips -------------------------------------------------- */
+static void speeds(const char *numbered, const char *snd, const char *pic, const char *a, const char *out)
+{
+    re_engine_io io = {show, NULL, clk, NULL, 48000, 2, NULL};
+    re_project *p = re_project_new();
+    re_item it;
+    re_project_add(p, numbered, -1);
+    re_project_add(p, a, -1);
+    CHECK(re_project_speed(p, 0, 200) == 1 && !strcmp(layout(p), "c38 c75"), "speed: 200%%: %s", layout(p));
+    re_project_item(p, 0, &it);
+    CHECK(it.speed == 200 && !strcmp(it.name, "numbered.mp4") && re_project_item_file(p, 0)
+              && !strcmp(re_project_item_file(p, 0), numbered) && re_item_file_frame(&it, 10) == 20,
+          "speed: 200%%: speed %d, name %s, file frame %d", it.speed, it.name, re_item_file_frame(&it, 10));
+    re_engine *e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    CHECK(abs(luma_at(e, 10) - (16 + 2 * 20)) <= 3, "speed: 200%%: frame 10 shows %d, not file frame 20's %d",
+          luma_at(e, 10), 16 + 40);
+    re_engine_close(e);
+    CHECK(re_project_undo(p) && !strcmp(layout(p), "c75 c75"), "speed: one undo: %s", layout(p));
+    re_project_redo(p);
+    CHECK(re_project_speed(p, 0, 50) == 1 && !strcmp(layout(p), "c150 c75"), "speed: 50%%: %s", layout(p));
+    e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    CHECK(abs(luma_at(e, 100) - (16 + 2 * 50)) <= 3, "speed: 50%%: frame 100 shows %d, not file frame 50's %d",
+          luma_at(e, 100), 16 + 100);
+    re_engine_close(e);
+    CHECK(re_project_speed(p, 0, -100) == 1 && !strcmp(layout(p), "c75 c75"), "speed: reversed: %s", layout(p));
+    re_project_item(p, 0, &it);
+    e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    CHECK(it.speed == -100 && re_item_file_frame(&it, 0) == 74 && abs(luma_at(e, 0) - (16 + 2 * 74)) <= 3
+              && abs(luma_at(e, 70) - (16 + 2 * 4)) <= 3,
+          "speed: reversed: frames 0, 70 show %d, %d", luma_at(e, 0), luma_at(e, 70));
+    re_engine_close(e);
+    /* a part of the file, kept through speeds */
+    CHECK(re_project_speed(p, 0, 100) == 1 && re_project_set_in_out(p, 0, 20, 59) && !strcmp(layout(p), "c40 c75"),
+          "speed: trimmed: %s", layout(p));
+    re_project_speed(p, 0, -100);
+    re_project_item(p, 0, &it);
+    e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    CHECK(it.length == 40 && re_item_file_frame(&it, it.in) == 59 && abs(luma_at(e, 0) - (16 + 2 * 59)) <= 3
+              && abs(luma_at(e, 39) - (16 + 2 * 20)) <= 3,
+          "speed: trimmed, reversed: %d long, file frame %d; frames 0, 39 show %d, %d", it.length,
+          re_item_file_frame(&it, it.in), luma_at(e, 0), luma_at(e, 39));
+    re_engine_close(e);
+    re_project_speed(p, 0, 200);
+    re_project_speed(p, 0, 100);
+    re_project_item(p, 0, &it);
+    CHECK(it.in == 20 && it.out == 59 && it.speed == 100, "speed: there and back: in %d out %d, %d%%", it.in, it.out,
+          it.speed);
+    /* saved, opened */
+    re_project_speed(p, 0, 200);
+    CHECK(!re_project_save(p, out), "speed: not saved");
+    re_project *q = re_project_open(out, 1);
+    CHECK(q && !re_project_item(q, 0, &it) && it.speed == 200 && it.length == 20 && it.in == 10,
+          "speed: opened: %d%%, %d long, in %d", q ? it.speed : -1, q ? it.length : -1, q ? it.in : -1);
+    re_project_close(q);
+    /* refused: no change, out of range, beside a dissolve */
+    CHECK(re_project_speed(p, 0, 200) == 0 && re_project_speed(p, 0, 0) == 0 && re_project_speed(p, 0, 5) == 0
+              && re_project_speed(p, 0, 3000) == 0 && re_project_speed(p, 9, 200) == 0,
+          "speed: a change that isn't one");
+    int mix = re_project_dissolve(p, 0, 5, 1);
+    CHECK(mix == 1 && re_project_speed(p, 0, 100) == 0 && re_project_speed(p, 2, 50) == 0, "speed: beside a dissolve");
+    re_project_close(p);
+    /* its sound's level and fades kept; a picture refused */
+    p = re_project_new();
+    re_project_add(p, snd, -1);
+    re_project_volume(p, 0, -6);
+    re_project_fade(p, 0, 0, 10);
+    char q2[300];
+    snprintf(q2, sizeof(q2), "qimage:%s", pic);
+    re_project_add(p, q2, -1);
+    CHECK(re_project_speed(p, 0, 200) == 1 && !re_project_item(p, 0, &it) && it.volume == -6 && it.fade_in == 10
+              && it.sound,
+          "speed: the sound's level %d, fade %d", it.volume, it.fade_in);
+    CHECK(peak_48k(p, 20) > 1000, "speed: 200%%: the sound at 48 kHz: %d", peak_48k(p, 20));
+    re_project_speed(p, 0, -50);
+    CHECK(peak_48k(p, 40) > 1000, "speed: -50%%: the sound at 48 kHz: %d", peak_48k(p, 40));
+    re_project_save(p, out);
+    re_project *q3 = re_project_open(out, 1);
+    CHECK(q3 && peak_48k(q3, 40) > 1000, "speed: opened: the sound at 48 kHz: %d", q3 ? peak_48k(q3, 40) : -2);
+    re_project_close(q3);
+    re_project_undo(p);
+    CHECK(peak_48k(p, 20) > 1000, "speed: undone: the sound at 48 kHz: %d", peak_48k(p, 20));
+    CHECK(re_project_speed(p, 1, 200) == 0, "speed: a picture sped up");
+    re_project_close(p);
+}
+
 /* ---- media: thumbnails and waveforms, made a step at a time ---------------- */
 
 /* Steps until there's nothing to do: how many (or -1, too many) */
@@ -1769,6 +1876,7 @@ int main(int argc, char **argv)
     media(n, argv[9], argv[12], a);
     rolls(n, b);
     copy_paste(a, argv[9], argv[11]);
+    speeds(n, argv[9], argv[12], a, out);
     overlays(a, b, argv[9], out, argv[10], argv[11], argv[12]);
     video_overlays(a, b, argv[9], n, argv[5], out);
     char dir[512];

@@ -1505,7 +1505,7 @@ static int script(int *b, int mask)
     }
     case 144:
         next(145);
-        b[0] = 4; b[1] = -1; /* Dissolve into the clip after */
+        b[0] = 5; b[1] = -1; /* Dissolve into the clip after */
         return 9;
     case 145:
         if (nulls)
@@ -2612,6 +2612,52 @@ static int script(int *b, int mask)
         re_item it;
         re_project_item(re_test_project(), 0, &it);
         CHECK(it.length == rec / 2 - 3, "roll: one F8 for the drag: %d long (%d)", it.length, rec / 2 - 3);
+        /* ---- speed: the context menu's Speed > 200%, Reversed; F8 ---- */
+        mark = it.length;
+        wr = re_project_length(re_test_project());
+        next(341);
+        return click_tl(b, 2, 0, 2); /* Menu over the first clip */
+    }
+    case 341:
+        if (nulls)
+            return 0;
+        next(342);
+        b[0] = 3; b[1] = 1; b[2] = -1; /* Speed > 200% */
+        return 9;
+    case 342: {
+        if (nulls)
+            return 0;
+        re_item it;
+        re_project_item(re_test_project(), 0, &it);
+        CHECK(it.speed == 200 && abs(it.length - (mark + 1) / 2) <= 1
+                  && re_project_length(re_test_project()) == wr - mark + it.length,
+              "Speed > 200%%: %d%%, %d long (from %d), the project %d", it.speed, it.length, mark,
+              re_project_length(re_test_project()));
+        shot("33-speed");
+        next(343);
+        return click_tl(b, 2, 0, 2);
+    }
+    case 343:
+        if (nulls)
+            return 0;
+        next(344);
+        b[0] = 3; b[1] = 8; b[2] = -1; /* Speed > Reversed */
+        return 9;
+    case 344: {
+        if (nulls)
+            return 0;
+        re_item it;
+        re_project_item(re_test_project(), 0, &it);
+        CHECK(it.speed == -200, "Speed > Reversed: %d%%", it.speed);
+        next(345);
+        return key_to(b, TL, 0x188); /* F8 */
+    }
+    case 345: {
+        if (nulls)
+            return 0;
+        re_item it;
+        re_project_item(re_test_project(), 0, &it);
+        CHECK(it.speed == 200, "Speed: F8: %d%%", it.speed);
         next(45);
         return key_to(b, TL, 0x18D);
     }

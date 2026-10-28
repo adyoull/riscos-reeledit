@@ -8,6 +8,9 @@
  *   Sound >  Mute; Fade in, Fade out (the sound alone, a second): each
  *            ticked when it's so, chosen again it goes; Volume > +12 dB
  *            to -36 dB (the level ticked); shaded for a clip without sound
+ *   Speed >  400% to 25% (the speed ticked; reversed, it stays so), and
+ *            Reversed (ticked when it is; chosen again, forwards); shaded
+ *            for a clip beside a dissolve
  *   Dissolve from the clip before, Dissolve into the clip after
  *                            a second long, from the clips' frames beyond
  *                            the cut where they have them; shaded with no
@@ -23,6 +26,7 @@
 #include "menu.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define Wimp_CreateMenu     0x400D4
@@ -76,6 +80,19 @@ int fx_sound_fade_toggle(int item, int end)
     return 1;
 }
 
+/* A clip's speed (%): 1 changed */
+int fx_speed(int item, int percent)
+{
+    if (!A.proj || !re_project_speed(A.proj, item, percent)) {
+        app_report("Its speed can't be changed: a picture's can't, nor a clip's in a dissolve (take the dissolve "
+                   "out first).");
+        return 0;
+    }
+    app_log("item %d: speed %d%%", item, percent);
+    app_edited();
+    return 1;
+}
+
 int fx_dissolve(int before)
 {
     int m = A.proj && before >= 0 ? re_project_dissolve(A.proj, before, re_project_frames(A.proj, 1.0), 0) : -1;
@@ -96,7 +113,13 @@ int fx_dissolve_at_cut(void)
 
 /* ---- the context menu ------------------------------------------------------------------------ */
 
-enum { C_FADE_IN, C_FADE_OUT, C_SOUND, C_FROM, C_INTO, C_DELETE, C_INFO };
+enum { C_FADE_IN, C_FADE_OUT, C_SOUND, C_SPEED, C_FROM, C_INTO, C_DELETE, C_INFO };
+#define N_SPEEDS 8
+static const int SPEEDS[N_SPEEDS] = {400, 200, 150, 125, 100, 75, 50, 25};
+static MENU(N_SPEEDS + 1) m_speed = {"Speed", 7, 2, 7, 0, 200, 44, 0,
+                                     {{0, -1, IT("400%")}, {0, -1, IT("200%")}, {0, -1, IT("150%")},
+                                      {0, -1, IT("125%")}, {0, -1, IT("100%")}, {0, -1, IT("75%")},
+                                      {0, -1, IT("50%")}, {2, -1, IT("25%")}, {0x80, -1, IT("Reversed")}}};
 static MENU(4) m_sound = {"Sound", 7, 2, 7, 0, 200, 44, 0,
                           {{2, -1, IT("Mute")}, {0, -1, IT("Fade in")}, {2, -1, IT("Fade out")},
                            {0x80, 0, IT("Volume")}}};
@@ -106,8 +129,8 @@ static MENU(FX_N_LEVELS) m_volume = {"Volume", 7, 2, 7, 0, 200, 44, 0,
                                       {0, -1, IT("0 dB")}, {0, -1, IT("-3 dB")}, {0, -1, IT("-6 dB")},
                                       {0, -1, IT("-12 dB")}, {0, -1, IT("-18 dB")}, {0, -1, IT("-24 dB")},
                                       {0x80, -1, IT("-36 dB")}}};
-static MENU(7) m_clip = {"Clip", 7, 2, 7, 0, 440, 44, 0,
-                         {{0, -1, IT("Fade in")}, {0, -1, IT("Fade out")}, {2, 0, IT("Sound")},
+static MENU(8) m_clip = {"Clip", 7, 2, 7, 0, 440, 44, 0,
+                         {{0, -1, IT("Fade in")}, {0, -1, IT("Fade out")}, {0, 0, IT("Sound")}, {2, 0, IT("Speed")},
                           {0, -1, IT("Dissolve from the clip before")}, {2, -1, IT("Dissolve into the clip after")},
                           {0, -1, IT("Delete")}, {0x80, -1, IT("Video information...")}}};
 
@@ -167,6 +190,11 @@ void fx_menu_open(int x, int y, int item)
         m_clip.item[C_SOUND].sub =
             fx_sound_menu(it.muted, it.sound_fade_in, it.sound_fade_out, in_dissolved, out_dissolved, it.volume);
         menu_shade(&m_clip.item[C_SOUND].iflags, !it.sound);
+        m_clip.item[C_SPEED].sub = (intptr_t) &m_speed;
+        for (int k = 0; k < N_SPEEDS; k++)
+            menu_tick(&m_speed.item[k].flags, SPEEDS[k] == abs(it.speed));
+        menu_tick(&m_speed.item[N_SPEEDS].flags, it.speed < 0);
+        menu_shade(&m_clip.item[C_SPEED].iflags, in_dissolved || out_dissolved);
         menu_shade(&m_clip.item[C_FROM].iflags, !can_dissolve(item - 1));
         menu_shade(&m_clip.item[C_INTO].iflags, !can_dissolve(item));
         r.r[1] = (intptr_t) &m_clip;
@@ -195,6 +223,12 @@ void fx_menu_select(int *b)
                 : b[1] == S_FADE_OUT ? fx_sound_fade_toggle(i, 1)
                 : b[1] == S_VOLUME && b[2] >= 0 && b[2] < FX_N_LEVELS ? fx_volume(i, FX_LEVELS[b[2]])
                 : 0;
+        break;
+    case C_SPEED:
+        if (b[1] >= 0 && b[1] < N_SPEEDS)
+            again = fx_speed(i, it.speed < 0 ? -SPEEDS[b[1]] : SPEEDS[b[1]]);
+        else if (b[1] == N_SPEEDS)
+            again = fx_speed(i, -it.speed);
         break;
     case C_FROM: fx_dissolve(i - 1); break;
     case C_INTO: fx_dissolve(i); break;

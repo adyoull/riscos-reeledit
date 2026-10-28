@@ -127,6 +127,7 @@ extern const int FX_LEVELS[FX_N_LEVELS];
 intptr_t fx_sound_menu(int muted, int fade_in, int fade_out, int in_off, int out_off, int volume);
 intptr_t fx_volume_menu(int volume);     /* the Volume submenu alone, its level ticked */
 int fx_volume(int item, int db);         /* a clip's sound's level. 1 changed */
+int fx_speed(int item, int percent);     /* a clip's speed (%; negative reversed). 1 changed (else reported) */
 int fx_dissolve(int before);             /* a second's dissolve at the cut after item `before`: its index, or -1 */
 int fx_dissolve_at_cut(void);            /* D: at the cut nearest the playhead */
 void fx_menu_open(int x, int y, int item);
@@ -194,6 +195,8 @@ typedef struct
     int in, length;          /* its first frame in its file, its length (frames) */
     int fade_in, fade_out;   /* its sound's fades (frames) */
     int volume, muted;       /* dB; muted: no waveform */
+    int speed;               /* % (re_item's: its frames' file frames) */
+    int source_length;       /* (a reversed clip's frames counted from its end) */
 } pv_sound;
 /* A thumbnail's width (OS units) at a height (0: none can be made) */
 int pv_thumb_width(int h_os);
