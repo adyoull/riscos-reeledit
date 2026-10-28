@@ -6,6 +6,8 @@
  * ticker. They are accepted and do nothing. MLT is built with
  * MLT_NO_THREADS, so they're only reached if threads are turned back on
  * (MLT_NO_THREADS=0).
+ *
+ * Part of riscos-reeledit. GPL version 2 or later.
  */
 #ifndef RISCOS_COMPAT_H
 #define RISCOS_COMPAT_H

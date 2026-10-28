@@ -25,6 +25,8 @@
  * almost no time; each copy of a 1080p picture is 3 MB. mlt_frame_clone and
  * mlt_frame_clone_image are wrapped and counted. A frame asked for past the
  * clip's end must still be its last picture (that's the concealment path).
+ *
+ * Part of riscos-reeledit. GPL version 2 or later.
  */
 #include "mltt.h"
 #include <libswscale/swscale.h>

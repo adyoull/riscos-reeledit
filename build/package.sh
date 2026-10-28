@@ -2,6 +2,7 @@
 # Make the zip of !MLT, the engine test: melt, MLT's data files, the
 # Obey files and icons from app/!MLT. Out: out/MLT-$VERSION.zip
 # Usage: VERSION=7.42.0-riscos1-test1 build/package.sh   (after build/build-riscos.sh)
+# Part of riscos-reeledit. GPL version 2 or later.
 set -euo pipefail
 . "$(dirname "$0")/env.sh"
 VERSION=${VERSION:-$MLT_VERSION-riscos1}

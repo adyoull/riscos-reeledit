@@ -1,6 +1,7 @@
 #!/bin/sh
 # Fetch every file in build/SOURCES into dl/ and check its sha256. A file
 # already in dl/ with the right checksum is kept.
+# Part of riscos-reeledit. GPL version 2 or later.
 set -eu
 TOP=$(cd "$(dirname "$0")/.." && pwd)
 DL=${DL:-$TOP/dl}

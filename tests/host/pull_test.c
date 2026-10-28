@@ -10,6 +10,8 @@
  *   B inside it, the same picture when a position is asked for again;
  * - MLT starts no thread doing it (MLT_NO_THREADS built in): pthread_create
  *   is wrapped (-Wl,--wrap=pthread_create) and counted.
+ *
+ * Part of riscos-reeledit. GPL version 2 or later.
  */
 #include "mltt.h"
 #include <pthread.h>

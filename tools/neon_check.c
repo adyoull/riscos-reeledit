@@ -7,6 +7,8 @@
  * (needs NEON). Prints the largest difference of each loop from the C
  * (8.8 against 16.16 fixed point: 1 or 2 at most) and exits 1 if one is
  * larger or the NEON wasn't used, 0 otherwise.
+ *
+ * Part of riscos-reeledit. GPL version 2 or later.
  */
 
 #include "core_neon.h"

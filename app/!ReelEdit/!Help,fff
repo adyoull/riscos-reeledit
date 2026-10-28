@@ -211,7 +211,11 @@ to keep it off), whatever the menu says.
 
 Licence
 -------
-GPL version 2 or later. MLT is under the LGPL (2.1 or later); FFmpeg, as
-built here with the Pi's decoders, is GPL. Source: riscos-reeledit.
+ReelEdit is free software under the GNU GPL, version 2 or later, with NO
+WARRANTY. !RunImage also contains MLT (LGPL 2.1 or later), FFmpeg with
+x264 (GPL 2 or later), ReelHWAccel (GPL 2), libxml2, zlib, UnixLib and
+others; as a whole it is distributed under the GPL version 2. Each part's
+licence, and where to get the source code, is in !ReelEdit.Licences
+(start with ReadMe). Source: https://github.com/adyoull/riscos-reeledit
 
 Andrew Youll

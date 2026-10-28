@@ -6,6 +6,7 @@
 #              `make prebuilt` there). In its container image it is
 #              /opt/riscos-crossdev.
 #   JOBS       parallel jobs (default: the number of CPUs)
+# Part of riscos-reeledit. GPL version 2 or later.
 TOP=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)
 if [ -z "${RCD_DIR:-}" ]; then
   for d in /opt/riscos-crossdev "$TOP/../riscos-crossdev"; do

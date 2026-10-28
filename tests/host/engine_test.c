@@ -7,6 +7,8 @@
  *
  * The "Wimp" here calls re_engine_poll, then moves the clock on by the wait
  * it was given (Wimp_PollIdle), plus however long showing a picture took.
+ *
+ * Part of riscos-reeledit. GPL version 2 or later.
  */
 #include "engine.h"
 #include <framework/mlt.h>

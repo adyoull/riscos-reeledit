@@ -1,5 +1,8 @@
 /* count_threads.so - LD_PRELOAD into a program to count the threads it
- * starts: "count_threads: N" goes to stderr when it exits. */
+ * starts: "count_threads: N" goes to stderr when it exits.
+ *
+ * Part of riscos-reeledit. GPL version 2 or later.
+ */
 #define _GNU_SOURCE
 #include <dlfcn.h>
 #include <pthread.h>

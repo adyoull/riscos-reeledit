@@ -13,6 +13,7 @@
 #   prefer_test:  the preferred decoder taken, refused, failing part way, off
 # Usage: tests/host/run.sh   (after build/build-host.sh)
 #        SCREENS=dir tests/host/run.sh: editor_test's screenshots too (PNGs; screens.py)
+# Part of riscos-reeledit. GPL version 2 or later.
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 TOP=$(cd "$HERE/../.." && pwd)

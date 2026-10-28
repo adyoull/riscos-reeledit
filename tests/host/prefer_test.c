@@ -36,6 +36,8 @@
  *           hardware decoder (on RISC OS nothing else would, and it would
  *           keep its VideoCore memory until a restart)
  * In every mode, every picture must be the right one.
+ *
+ * Part of riscos-reeledit. GPL version 2 or later.
  */
 #include "mltt.h"
 #include <libavcodec/avcodec.h>

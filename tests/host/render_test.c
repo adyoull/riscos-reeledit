@@ -9,6 +9,8 @@
  * project at hundreds of frames a second without decoding anything (the
  * first Pi test, 2026-10-20). Every frame shown must have its picture and
  * sound, at the consumer's size.
+ *
+ * Part of riscos-reeledit. GPL version 2 or later.
  */
 #include "mltt.h"
 

@@ -13,6 +13,8 @@
  * picture usually costs, unmoved by a few slow ones such as a VideoCore
  * decoder being handed over) and the slowest, and the first picture
  * separately (opening and the first decode).
+ *
+ * Part of riscos-reeledit. GPL version 2 or later.
  */
 #include "../src/still.h"
 #include <framework/mlt.h>
