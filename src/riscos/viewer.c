@@ -198,6 +198,11 @@ void app_report(const char *text)
     ask(text, NULL);
 }
 
+int app_ask(const char *text, const char *buttons)
+{
+    return ask(text, buttons);
+}
+
 static int mode_var(int var)
 {
     _kernel_swi_regs r;
@@ -720,6 +725,7 @@ static void edited(int picture)
 void app_edited(void)
 {
     edited(1);
+    as_edited(); /* (a copy kept, now and then) */
 }
 
 void app_edited_dragging(void)
@@ -730,6 +736,7 @@ void app_edited_dragging(void)
 void app_saved(const char *path)
 {
     snprintf(A.path, sizeof(A.path), "%s", path);
+    as_forget(); /* (saved: no copy needed) */
     update_title();
 }
 
@@ -737,6 +744,7 @@ void app_saved(const char *path)
 
 static void open_editor(void)
 {
+    int recovered = !A.proj && as_offer(); /* (a copy left by Reel Edit stopping: recovered, if wanted) */
     if (!A.proj) {
         A.proj = re_project_new();
         A.path[0] = 0;
@@ -780,6 +788,8 @@ static void open_editor(void)
     if (A.e)
         re_engine_seek(A.e, re_engine_position(A.e));
     update_controls(1);
+    if (recovered)
+        app_edited();
 }
 
 /* Closes the project and its windows. 0 if the user wants to keep it. */
@@ -794,6 +804,7 @@ static int close_editor(void)
     }
     measure_cancel();
     engine_close();
+    as_forget(); /* (kept or discarded: closed as asked) */
     if (V.win) {
         _kernel_swi_regs r;
         r.r[1] = (intptr_t) &V.win;
@@ -1033,6 +1044,7 @@ static void save(int x, int y)
             r.r[2] = FILETYPE_MLT;
             ro_swi(0x08, &r);
             app_log("saved as %s", A.path);
+            as_forget();
             update_title();
             return;
         }
@@ -1704,6 +1716,22 @@ int re_test_snap(void) { return A.snap; }
 int re_test_measuring(void) { return V.ms != NULL; }
 int re_test_busy(void) { return A.e && re_engine_busy(A.e); }
 const char *re_test_title(void) { return V.title; }
+/* Reel Edit stopping without closing anything (as a reset would): the
+   editor gone, its autosaved copy left */
+void re_test_crash(void)
+{
+    _kernel_swi_regs r;
+    engine_close();
+    if (V.win) {
+        r.r[1] = (intptr_t) &V.win;
+        ro_swi(Wimp_CloseWindow, &r);
+    }
+    tl_close();
+    re_project_close(A.proj);
+    A.proj = NULL;
+    A.path[0] = 0;
+    A.sel = A.ov_sel = A.au_sel = -1;
+}
 #endif
 
 int reeledit_main(int argc, char **argv)
@@ -1805,6 +1833,7 @@ int reeledit_main(int argc, char **argv)
         }
     }
     engine_close();
+    as_forget(); /* (a clean quit: no copy needed) */
     if (A.proj) {
         re_project_close(A.proj);
         A.proj = NULL;

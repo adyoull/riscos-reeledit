@@ -365,6 +365,11 @@ int re_project_modified(re_project *p)
     return p->state != p->saved_state;
 }
 
+void re_project_set_modified(re_project *p)
+{
+    p->saved_state = p->state - 1;
+}
+
 unsigned re_project_changes(re_project *p)
 {
     return p->changes;

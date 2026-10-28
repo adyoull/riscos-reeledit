@@ -30,6 +30,7 @@ mlt_profile re_project_profile(re_project *p);
 int re_project_length(re_project *p);   /* frames */
 double re_project_fps(re_project *p);
 int re_project_modified(re_project *p); /* changed since made, opened or saved */
+void re_project_set_modified(re_project *p); /* (a copy recovered: still to be saved) */
 /* Each edit adds 1: the engine and the windows compare it with what they
    last saw. */
 unsigned re_project_changes(re_project *p);

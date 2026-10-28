@@ -11,6 +11,7 @@
  *   overlays.c  pictures and videos over the video (V2): dropped, their menu; sprites
  *               made PNGs
  *   audiotracks.c  sounds on the audio tracks (below V1): dropped, their menu
+ *   autosave.c  a copy of the project kept while it's edited; recovery
  *   exportbox.c the Export window: the project made into a video, in a TaskWindow
  *   titles.c    the Title window: text over the video
  *   fonts.c     titles' text drawn by the Font Manager
@@ -46,6 +47,8 @@ extern re_app A;
 /* ---- viewer.c ---- */
 void app_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 void app_report(const char *text);
+/* A question: buttons (a comma list); 3 the first, 4 the second... */
+int app_ask(const char *text, const char *buttons);
 /* The project was edited: the engine sees it, the windows show it. */
 void app_edited(void);
 /* The same, in the middle of a drag (each step of it): the Viewer's
@@ -154,6 +157,11 @@ void au_menu_open(int x, int y, int track, int i);
 void au_menu_select(int *block);
 void app_audio_menu(int x, int y, int track, int i); /* (viewer.c: its menu, at the pointer) */
 void app_audio_menu_opened(void);  /* a menu of audiotracks.c's open */
+
+/* ---- autosave.c: a copy of the project kept while it's edited ---- */
+void as_edited(void);  /* after an edit: a copy, if half a minute since the last (or none) */
+void as_forget(void);  /* saved, closed, quit: the copy taken away */
+int as_offer(void);    /* a copy there (Reel Edit stopped): recover it? 1: A.proj (and A.path) set */
 
 /* ---- exportbox.c: the Export window ---- */
 int ex_window(void);

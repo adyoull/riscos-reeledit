@@ -60,6 +60,8 @@ int re_test_snap(void);
 int re_test_measuring(void);
 int re_test_busy(void);
 const char *re_test_title(void);
+void re_test_crash(void);
+#define AUTOSAVE "<Choices$Write>.ReelEdit.Autosave" /* (the RISC OS name, as a file here) */
 char *re_test_savebox_name(void);
 char *re_test_title_line(int n);
 char *re_test_export_name(void);
@@ -120,6 +122,7 @@ static int covered, shift_key, ctrl_key;
 static char help_text[256], drag_name0[64];
 static int whole_redraws;
 static int starts, morites, exports_typed, mark2_reports;
+static char saved_layout[256], saved_title[300];
 static char start_cmd[1500];
 static int plots, reports, questions, answer = 3, closedown, acks, menus, savebox_opens, drags;
 static int filetypes_set, dataloads_sent, plots_tl, prequit_acks, key_sent;
@@ -2302,6 +2305,42 @@ static int script(int *b, int mask)
         CHECK(W[0].box[2] - W[0].box[0] > mark * 3 / 2 && W[0].open,
               "View > Viewer size > Large: %d wide (%d)", W[0].box[2] - W[0].box[0], mark);
         shot("28-viewer-large");
+        next(300);
+        return key_to(b, TL, 0x18D);
+    /* ---- autosave: an edit half a minute on makes a copy; Reel Edit "reset"; opened again: Recover,
+       the project as it was, still to be saved ---- */
+    case 300: {
+        if (nulls)
+            return 0;
+        fake_cs += 4000; /* (40 s on) */
+        remove(AUTOSAVE);
+        next(301);
+        return key_to(b, TL, 's'); /* an edit: split */
+    }
+    case 301: {
+        if (nulls)
+            return 0;
+        FILE *f = fopen(AUTOSAVE, "r");
+        CHECK(f != NULL, "an edit 40 s on: no autosaved copy");
+        if (f)
+            fclose(f);
+        snprintf(saved_layout, sizeof(saved_layout), "%s", layout());
+        snprintf(saved_title, sizeof(saved_title), "%s", re_test_title());
+        re_test_crash();
+        answer = 3; /* Recover */
+        mark = questions;
+        next(302);
+        b[0] = 100; b[1] = 20; b[2] = 4; b[3] = -2; b[4] = BAR_ICON; /* the icon: the editor */
+        return 6;
+    }
+    case 302:
+        if (nulls)
+            return 0;
+        CHECK(questions == mark + 1 && W[0].open && re_test_project() && !strcmp(layout(), saved_layout)
+                  && re_project_modified(re_test_project()) && !strcmp(re_test_title(), saved_title),
+              "recovered: %d questions, open %d, \"%s\" (\"%s\"), modified %d, title \"%s\" (\"%s\")",
+              questions - mark, W[0].open, layout(), saved_layout,
+              re_test_project() ? re_project_modified(re_test_project()) : -1, re_test_title(), saved_title);
         next(45);
         return key_to(b, TL, 0x18D);
     case 45: /* the desktop shutting down: asked, Discard; the shutdown started again; quit */
@@ -2340,6 +2379,7 @@ int main(int argc, char **argv)
     remove(dragged_path);
     setenv("ReelEdit$Log", "editor_test.log", 1);
     scr_init();
+    remove(AUTOSAVE); /* (a copy left by a run before: none) */
     int r = reeledit_main(0, NULL);
     CHECK(r == 0, "reeledit_main returned %d", r);
     CHECK(phase == 46, "the script stopped at phase %d", phase);
@@ -2347,6 +2387,10 @@ int main(int argc, char **argv)
           questions - mark, prequit_acks);
     CHECK(key_sent == 0x1FC, "the shutdown not started again (key &%X sent)", key_sent);
     CHECK(closedown == 1, "Wimp_CloseDown not called");
+    FILE *as = fopen(AUTOSAVE, "r");
+    CHECK(!as, "quit: the autosaved copy left");
+    if (as)
+        fclose(as);
     printf("editor_test: %d polls, %d null events, %d Wimp_PollIdle, %u cs asleep; overlay %d pictures; "
            "%u bytes of sound\n", polls, null_events, idle_polls, slept, ov_displays, ssb_bytes);
     if (S.on)
