@@ -112,11 +112,12 @@ static char typed_path[300], dragged_path[300];
 
 #define VIEWER 0x1000 /* the windows, in the order the program makes them */
 #define TL     0x1100
-#define INFO   0x1200 /* (made before the save box in this script) */
-#define SAVEB  0x1300
-#define TITLEW 0x1400 /* (the Title window: drawn by the Wimp) */
-#define EXPW   0x1500 /* (the Export window: drawn by the Wimp) */
-#define CLIPW  0x1600 /* (the Clips window) */
+#define INSPW  0x1200 /* (the Inspector: made with the editor) */
+#define INFO   0x1300 /* (made before the save box in this script) */
+#define SAVEB  0x1400
+#define TITLEW 0x1500 /* (the Title window: drawn by the Wimp) */
+#define EXPW   0x1600 /* (the Export window: drawn by the Wimp) */
+#define CLIPW  0x1700 /* (the Clips window) */
 #define COVER  0x2000
 #define FILER  0x3000 /* a directory display */
 #define TASK   0x4321
@@ -131,12 +132,12 @@ typedef struct
 {
     int open, box[4], scroll_x, behind, redraw, extent_w;
 } fwin;
-static fwin W[7]; /* VIEWER, TL, INFO, SAVEB, TITLEW, EXPW, CLIPW */
+static fwin W[8]; /* VIEWER, TL, INSPW, INFO, SAVEB, TITLEW, EXPW, CLIPW */
 static int windows_made;
 static fwin *win(int h)
 {
     int i = (h - VIEWER) / 0x100;
-    return h >= VIEWER && i < 7 && (h - VIEWER) % 0x100 == 0 ? &W[i] : NULL;
+    return h >= VIEWER && i < 8 && (h - VIEWER) % 0x100 == 0 ? &W[i] : NULL;
 }
 
 static unsigned fake_cs = 1000;
@@ -223,6 +224,8 @@ static unsigned ssb_heard(void)
 #define TL_V2_MID (48 + 8 + TL_T + 32) /* (the middle of V2's row, down from the top) */
 #define TL_V1_TOP (48 + 8 + TL_T + 64 + 8) /* (the ruler, the titles' and V2's rows, the gaps: down to V1) */
 static int script(int *b, int mask);
+int re_test_inspector_controls(void);
+void app_edited(void);
 void lg_start(void);
 int lg_on(void);
 void lg_end(void);
@@ -368,8 +371,8 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
     case 0x57288: r->r[0] = ssb_added; r->r[1] = ssb_heard(); break;
     case 0x400C0: r->r[0] = 380; r->r[1] = TASK; break;
     case 0x400C1:                                                   /* CreateWindow */
-        if (windows_made >= 7)
-            fail_quit("more than seven windows made");
+        if (windows_made >= 8)
+            fail_quit("more than eight windows made");
         scr_create_window(windows_made, (const void *) r->r[1]);
         r->r[0] = VIEWER + 0x100 * windows_made++;
         break;
@@ -407,8 +410,8 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
         last_mask = (int) r->r[0];
         if (++polls > 40000)
             fail_quit("too many polls: the script is stuck");
-        for (int i = 0; i < 7; i++)
-            if (W[i].redraw && W[i].open && i != 3 && i != 4 && i != 5) { /* (the save box is drawn by the Wimp) */
+        for (int i = 0; i < 8; i++)
+            if (W[i].redraw && W[i].open && i != 4 && i != 5 && i != 6) { /* (the save box is drawn by the Wimp) */
                 W[i].redraw = 0;
                 b[0] = VIEWER + 0x100 * i;
                 r->r[0] = 1;
@@ -459,12 +462,12 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
     case 0x400D4:                                                   /* CreateMenu */
         if (r->r[1] == SAVEB) {
             savebox_opens++;
-            W[3].open = 1;
-            W[3].box[0] = (int) r->r[2]; W[3].box[3] = (int) r->r[3]; /* (its top left) */
-            W[3].box[2] = W[3].box[0] + S.w[3].vw; W[3].box[1] = W[3].box[3] - S.w[3].vh;
+            W[4].open = 1;
+            W[4].box[0] = (int) r->r[2]; W[4].box[3] = (int) r->r[3]; /* (its top left) */
+            W[4].box[2] = W[4].box[0] + S.w[3].vw; W[4].box[1] = W[4].box[3] - S.w[3].vh;
             S.menu = NULL;
         } else if (r->r[1] == -1) {
-            W[3].open = 0;
+            W[4].open = 0;
             S.menu = NULL;
         } else {
             menus++;
@@ -692,6 +695,16 @@ static int drop_audio(int *b, int frame, int k, const char *file)
     b[8] = W[1].box[3] - TL_A_TOP(k) - 28;
     return 17;
 }
+/* A click on the Inspector's control row (from 0), at x of its work area */
+#define IN_W (W[2].open ? 600 + 8 : 0) /* (the Inspector beside the Viewer: the two centred over the Timeline) */
+static int in_row(int *b, int row, int x, int buttons)
+{
+    b[0] = W[2].box[0] - W[2].scroll_x + x;
+    b[1] = W[2].box[3] - 64 - row * 52 - 26;
+    b[2] = buttons; b[3] = INSPW; b[4] = -1;
+    return 6;
+}
+
 static int click_tl(int *b, int frame, int on_ruler, int buttons)
 {
     b[0] = W[1].box[0] - W[1].scroll_x + 16 + (int) (frame * tl_scale);
@@ -797,7 +810,7 @@ static int script(int *b, int mask)
         CHECK(!re_test_open(), "an engine with nothing to play");
         CHECK(!strcmp(re_test_title(), "<Untitled>"), "title \"%s\"", re_test_title());
         CHECK(!nulls, "null events with nothing to play");
-        CHECK(W[1].box[3] + 40 == W[0].box[1] && abs((W[1].box[0] + W[1].box[2]) - (W[0].box[0] + W[0].box[2])) <= 2
+        CHECK(W[1].box[3] + 40 == W[0].box[1] && abs((W[1].box[0] + W[1].box[2]) - (W[0].box[0] + W[0].box[2] + IN_W)) <= 2
                   && W[1].box[2] - W[1].box[0] > W[0].box[2] - W[0].box[0],
               "the Timeline isn't attached under the Viewer (%d,%d,%d,%d under %d,%d,%d,%d)", W[1].box[0], W[1].box[1],
               W[1].box[2], W[1].box[3], W[0].box[0], W[0].box[1], W[0].box[2], W[0].box[3]);
@@ -809,7 +822,7 @@ static int script(int *b, int mask)
         return 2;
     case 60:
         CHECK(W[0].box[0] == mark + 100 && W[1].box[3] + 40 == W[0].box[1]
-                  && abs((W[1].box[0] + W[1].box[2]) - (W[0].box[0] + W[0].box[2])) <= 2,
+                  && abs((W[1].box[0] + W[1].box[2]) - (W[0].box[0] + W[0].box[2] + IN_W)) <= 2,
               "dragging the Timeline didn't bring the Viewer (Viewer x %d, was %d)", W[0].box[0], mark);
         next(3);
         data_load(b, TL, W[1].box[0] + 100, 0xFFD, clip);
@@ -1608,9 +1621,131 @@ static int script(int *b, int mask)
         re_item it;
         re_project_item(re_test_project(), 1, &it);
         CHECK(it.volume == -6, "Sound > Volume > -6 dB: %d", it.volume);
+        /* ---- the Inspector: open with the editor; the second clip selected; Brightness
+           clicked at its end; Saturation dragged to 0 (one undo); Look > Warm; Reset; Mute;
+           Ctrl-I closes and opens it ---- */
+        CHECK(W[2].open && W[2].box[0] >= W[0].box[2], "the Inspector: open %d, at %d (the Viewer's right %d)",
+              W[2].open, W[2].box[0], W[0].box[2]);
+        next(4000);
+        return click_tl(b, it.start + 5, 0, 0x400);
+    }
+    case 4000: {
+        if (nulls)
+            return 0;
+        CHECK(re_test_selected() == 1 && re_test_inspector_controls() >= 10, "the Inspector: sel %d, %d controls",
+              re_test_selected(), re_test_inspector_controls());
+        shot("36-inspector");
+        next(4001);
+        return in_row(b, 2, 480, 0x400); /* Brightness, past its right end: 100 */
+    }
+    case 4001: {
+        if (nulls)
+            return 0;
+        re_colour c;
+        re_project_colour(re_test_project(), 1, &c);
+        CHECK(c.brightness == 100 && c.contrast == 100, "Inspector: Brightness clicked: %d", c.brightness);
+        mark = drags;
+        next(4002);
+        return in_row(b, 4, 345, 0x40); /* Saturation: a drag from its middle */
+    }
+    case 4002:
+        CHECK(drags == mark + 1, "Inspector: a drag on Saturation not started");
+        ptr[0] = W[2].box[0] - W[2].scroll_x + 220 + 250 / 4; /* (a quarter along: 50%; then 0, in two steps) */
+        ptr[1] = W[2].box[3] - 64 - 4 * 52 - 26;
+        next(4013);
+        return script(b, mask);
+    case 4013: {
+        re_colour c;
+        re_project_colour(re_test_project(), 1, &c);
+        if (c.saturation != 50) {
+            if (fake_cs - phase_cs > 100)
+                fail_quit("Inspector: Saturation dragged to half: not set while dragging");
+            return nulls ? 0 : (fail_quit("Inspector: null events masked while dragging a slider"), 0);
+        }
+        ptr[0] = W[2].box[0] - W[2].scroll_x + 220 - 40; /* (past its left end: 0) */
+        next(4003);
+        return script(b, mask);
+    }
+    case 4003: {
+        re_colour c;
+        re_project_colour(re_test_project(), 1, &c);
+        if (c.saturation != 0) {
+            if (fake_cs - phase_cs > 100)
+                fail_quit("Inspector: Saturation dragged to 0: not set while dragging");
+            return nulls ? 0 : (fail_quit("Inspector: null events masked while dragging a slider"), 0);
+        }
+        next(4004);
+        return 7; /* the drag ends */
+    }
+    case 4004:
+        if (nulls)
+            return 0;
+        next(4005);
+        return key_to(b, TL, 0x188); /* F8: the drag undone in one */
+    case 4005: {
+        if (nulls)
+            return 0;
+        re_colour c;
+        re_project_colour(re_test_project(), 1, &c);
+        CHECK(c.saturation == 100 && c.brightness == 100, "Inspector: one F8 for the drag: saturation %d, brightness %d",
+              c.saturation, c.brightness);
+        re_item it;
+        re_project_item(re_test_project(), 1, &it);
+        next(4012);
+        return click_tl(b, it.start + 5, 0, 0x400); /* (undo cleared the selection: the clip again) */
+    }
+    case 4012:
+        if (nulls)
+            return 0;
+        mark = menus;
+        next(4006);
+        return in_row(b, 1, 300, 0x400); /* Look: its menu */
+    case 4006:
+        CHECK(menus == mark + 1, "Inspector: Look gave no menu");
+        next(4007);
+        b[0] = 2; b[1] = -1; /* Warm */
+        return 9;
+    case 4007: {
+        if (nulls)
+            return 0;
+        re_colour c, warm;
+        re_project_colour(re_test_project(), 1, &c);
+        re_colour_look(2, &warm);
+        CHECK(!memcmp(&c, &warm, sizeof(c)), "Inspector: Look > Warm: warmth %d", c.warmth);
+        next(4008);
+        return in_row(b, 7, 300, 0x400); /* Reset the colour */
+    }
+    case 4008: {
+        if (nulls)
+            return 0;
+        re_colour c;
+        re_project_colour(re_test_project(), 1, &c);
+        re_item it;
+        re_project_item(re_test_project(), 1, &it);
+        CHECK(re_colour_is_none(&c) && !it.coloured, "Inspector: Reset: brightness %d", c.brightness);
+        mark = it.muted;
+        next(4009);
+        return in_row(b, 10, 300, 0x400); /* Mute */
+    }
+    case 4009: {
+        if (nulls)
+            return 0;
+        re_item it;
+        re_project_item(re_test_project(), 1, &it);
+        CHECK(it.muted == !mark, "Inspector: Mute: %d (was %d)", it.muted, mark);
+        re_project_mute(re_test_project(), 1, mark); /* (back as it was) */
+        app_edited();
+        next(4010);
+        return key_to(b, TL, 9); /* Ctrl-I: closed */
+    }
+    case 4010:
+        CHECK(!W[2].open, "Ctrl-I didn't close the Inspector");
+        next(4011);
+        return key_to(b, TL, 9); /* and open */
+    case 4011:
+        CHECK(W[2].open, "Ctrl-I didn't open the Inspector again");
         next(144);
         return click_tl(b, 15, 0, 2);
-    }
     case 144:
         next(145);
         b[0] = 5; b[1] = -1; /* Dissolve into the clip after */
@@ -2012,9 +2147,9 @@ static int script(int *b, int mask)
         b[0] = 4; b[1] = -1; /* Video information */
         return 9;
     case 66:
-        if (W[2].redraw)
+        if (W[3].redraw)
             return nulls ? 0 : 1;
-        CHECK(windows_made == 3 && W[2].open, "Video information didn't open");
+        CHECK(windows_made == 4 && W[3].open, "Video information didn't open");
         CHECK(strstr(all_text, "H.264") && strstr(all_text, "Decoded by") && strstr(all_text, "320x180") &&
                   strstr(all_text, "AAC"),
               "Video information: \"%.300s\"", all_text);
@@ -2035,13 +2170,13 @@ static int script(int *b, int mask)
         return key(b, 0x183); /* F3 */
     /* ---- saving ---- */
     case 26:
-        CHECK(savebox_opens == 1 && W[3].open, "F3 didn't open the save box");
+        CHECK(savebox_opens == 1 && W[4].open, "F3 didn't open the save box");
         shot("10-save-box");
         snprintf(re_test_savebox_name(), 256, "%.255s", typed_path);
         next(27);
         return key_to(b, SAVEB, 13);
     case 27: {
-        CHECK(!W[3].open, "the save box still open after saving");
+        CHECK(!W[4].open, "the save box still open after saving");
         FILE *f = fopen(typed_path, "r");
         char x[8192] = "";
         if (f) {
@@ -2089,7 +2224,7 @@ static int script(int *b, int mask)
         b[0] = 0; b[1] = 2; b[2] = -1;
         return 9;
     case 35:
-        CHECK(savebox_opens == 2 && W[3].open && !strcmp(re_test_savebox_name(), typed_path),
+        CHECK(savebox_opens == 2 && W[4].open && !strcmp(re_test_savebox_name(), typed_path),
               "File > Save as: the box (%d) with \"%s\"", savebox_opens, re_test_savebox_name());
         next(36);
         mark = drags;
@@ -2194,13 +2329,13 @@ static int script(int *b, int mask)
     case 241:
         if (nulls)
             return 0;
-        CHECK(windows_made == 5 && W[4].open, "T didn't open the Title window (%d windows, open %d)", windows_made,
-              W[4].open);
+        CHECK(windows_made == 6 && W[5].open, "T didn't open the Title window (%d windows, open %d)", windows_made,
+              W[5].open);
         strcpy(re_test_title_line(0), "Hello");
         strcpy(re_test_title_line(1), "ReelEdit");
         mark = menus;
         next(242);
-        b[0] = W[4].box[0] + 600; b[1] = W[4].box[3] - 170; b[2] = 4; b[3] = TITLEW; b[4] = 6; /* Size: its menu */
+        b[0] = W[5].box[0] + 600; b[1] = W[5].box[3] - 170; b[2] = 4; b[3] = TITLEW; b[4] = 6; /* Size: its menu */
         return 6;
     case 242:
         CHECK(menus == mark + 1, "the Size button gave no menu");
@@ -2211,7 +2346,7 @@ static int script(int *b, int mask)
         shot("23-title-window");
         mark = re_project_overlays(re_test_project());
         next(244);
-        b[0] = W[4].box[2] - 50; b[1] = W[4].box[1] + 50; b[2] = 4; b[3] = TITLEW; b[4] = 16; /* Create */
+        b[0] = W[5].box[2] - 50; b[1] = W[5].box[1] + 50; b[2] = 4; b[3] = TITLEW; b[4] = 16; /* Create */
         return 6;
     case 244: {
         if (nulls)
@@ -2221,9 +2356,9 @@ static int script(int *b, int mask)
         int i = re_project_overlays(re_test_project()) - 1;
         CHECK(i == mark && !re_project_overlay(re_test_project(), i, &o) && o.title && !strcmp(o.name, "Hello")
                   && !re_project_title(re_test_project(), i, &t) && !strcmp(t.text, "Hello\nReelEdit") && t.size == 11
-                  && o.place == RE_PLACE_LOWER_THIRD && !W[4].open,
+                  && o.place == RE_PLACE_LOWER_THIRD && !W[5].open,
               "Create: %d overlays (%d before), \"%s\", size %d, place %d, window open %d", i + 1, mark, o.name, t.size,
-              o.place, W[4].open);
+              o.place, W[5].open);
         shot("24-title");
         next(245);
         return click_tl(b, o.start + 10, 3, 2); /* Menu over the title, on the titles' row */
@@ -2235,8 +2370,8 @@ static int script(int *b, int mask)
     case 246:
         if (nulls)
             return 0;
-        CHECK(W[4].open && !strcmp(re_test_title_line(0), "Hello") && !strcmp(re_test_title_line(1), "ReelEdit"),
-              "Edit title...: open %d, \"%s\" / \"%s\"", W[4].open, re_test_title_line(0), re_test_title_line(1));
+        CHECK(W[5].open && !strcmp(re_test_title_line(0), "Hello") && !strcmp(re_test_title_line(1), "ReelEdit"),
+              "Edit title...: open %d, \"%s\" / \"%s\"", W[5].open, re_test_title_line(0), re_test_title_line(1));
         strcpy(re_test_title_line(0), "Bye");
         next(247);
         return key_to(b, TITLEW, 13); /* (Return on the second line: changed) */
@@ -2245,8 +2380,8 @@ static int script(int *b, int mask)
             return 0;
         re_overlay o;
         int i = re_project_overlays(re_test_project()) - 1;
-        CHECK(!re_project_overlay(re_test_project(), i, &o) && !strcmp(o.name, "Bye") && i == mark && !W[4].open,
-              "Edit title... changed: \"%s\", %d overlays, open %d", o.name, i + 1, W[4].open);
+        CHECK(!re_project_overlay(re_test_project(), i, &o) && !strcmp(o.name, "Bye") && i == mark && !W[5].open,
+              "Edit title... changed: \"%s\", %d overlays, open %d", o.name, i + 1, W[5].open);
         mark = guide_starts;
         start_cmd[0] = 0;
         next(248);
@@ -2269,12 +2404,12 @@ static int script(int *b, int mask)
         if (nulls)
             return 0;
         const char *nm = re_test_export_name();
-        CHECK(windows_made == 6 && W[5].open && strlen(nm) > 4 && !strcmp(nm + strlen(nm) - 4, "/mp4")
+        CHECK(windows_made == 7 && W[6].open && strlen(nm) > 4 && !strcmp(nm + strlen(nm) - 4, "/mp4")
                   && strstr(re_test_export_status(), "Drag"),
-              "Ctrl-E: %d windows, open %d, \"%s\", \"%s\"", windows_made, W[5].open, nm, re_test_export_status());
+              "Ctrl-E: %d windows, open %d, \"%s\", \"%s\"", windows_made, W[6].open, nm, re_test_export_status());
         mark = menus;
         next(252);
-        b[0] = W[5].box[0] + 200; b[1] = W[5].box[3] - 226; b[2] = 4; b[3] = EXPW; b[4] = 3; /* Size: its menu */
+        b[0] = W[6].box[0] + 200; b[1] = W[6].box[3] - 226; b[2] = 4; b[3] = EXPW; b[4] = 3; /* Size: its menu */
         return 6;
     }
     case 252:
@@ -2286,7 +2421,7 @@ static int script(int *b, int mask)
         shot("25-export");
         snprintf(re_test_export_name(), 256, "ADFS::Disc.$.Video/mp4");
         next(254);
-        b[0] = W[5].box[2] - 50; b[1] = W[5].box[1] + 40; b[2] = 4; b[3] = EXPW; b[4] = 8; /* Export */
+        b[0] = W[6].box[2] - 50; b[1] = W[6].box[1] + 40; b[2] = 4; b[3] = EXPW; b[4] = 8; /* Export */
         return 6;
     case 254:
         CHECK(starts == 1 && strstr(start_cmd, "TaskWindow") && strstr(start_cmd, "-export")
@@ -2320,10 +2455,10 @@ static int script(int *b, int mask)
         b[0] = 20; b[1] = 0x777; b[2] = 73; b[4] = 0x808C3; /* TaskWindow_Morio */
         return 17;
     case 258:
-        CHECK(exports_typed == 1 && !strcmp(re_test_export_status(), "Exported: Video/mp4") && W[5].open,
+        CHECK(exports_typed == 1 && !strcmp(re_test_export_status(), "Exported: Video/mp4") && W[6].open,
               "the export done: typed %d, \"%s\"", exports_typed, re_test_export_status());
         next(259);
-        b[0] = W[5].box[2] - 50; b[1] = W[5].box[1] + 40; b[2] = 4; b[3] = EXPW; b[4] = 8; /* Export again */
+        b[0] = W[6].box[2] - 50; b[1] = W[6].box[1] + 40; b[2] = 4; b[3] = EXPW; b[4] = 8; /* Export again */
         return 6;
     case 259:
         CHECK(starts == 2, "Export again: %d tasks started", starts);
@@ -2333,7 +2468,7 @@ static int script(int *b, int mask)
         return 17;
     case 260:
         next(261);
-        b[0] = W[5].box[2] - 50; b[1] = W[5].box[1] + 40; b[2] = 4; b[3] = EXPW; b[4] = 8; /* Stop */
+        b[0] = W[6].box[2] - 50; b[1] = W[6].box[1] + 40; b[2] = 4; b[3] = EXPW; b[4] = 8; /* Stop */
         return 6;
     case 261:
         CHECK(morites == 1 && strstr(re_test_export_status(), "Stopping"), "Stop: %d killed, \"%s\"", morites,
@@ -2485,17 +2620,17 @@ static int script(int *b, int mask)
     case 311:
         if (nulls)
             return 0;
-        CHECK(windows_made == 7 && W[6].open && re_project_clips(re_test_project()) >= 2,
-              "Ctrl-B: %d windows, open %d, %d clips", windows_made, W[6].open, re_project_clips(re_test_project()));
+        CHECK(windows_made == 8 && W[7].open && re_project_clips(re_test_project()) >= 2,
+              "Ctrl-B: %d windows, open %d, %d clips", windows_made, W[7].open, re_project_clips(re_test_project()));
         shot("29-clips");
         next(312);
-        b[0] = W[6].box[0] + 100; b[1] = W[6].box[3] - 56 - 20; b[2] = 0x400; b[3] = CLIPW; b[4] = -1;
+        b[0] = W[7].box[0] + 100; b[1] = W[7].box[3] - 56 - 20; b[2] = 0x400; b[3] = CLIPW; b[4] = -1;
         return 6;
     case 312:
         CHECK(re_test_clips_selected() == 0, "a click on the first clip: selected %d", re_test_clips_selected());
         mark = re_project_length(re_test_project());
         next(313);
-        b[0] = W[6].box[0] + 100; b[1] = W[6].box[3] - 56 - 20; b[2] = 4; b[3] = CLIPW; b[4] = -1; /* double */
+        b[0] = W[7].box[0] + 100; b[1] = W[7].box[3] - 56 - 20; b[2] = 4; b[3] = CLIPW; b[4] = -1; /* double */
         return 6;
     case 313:
         if (nulls)
@@ -2543,7 +2678,7 @@ static int script(int *b, int mask)
         CHECK(strncmp(re_test_title(), "Source: ", 8) != 0, "Escape: the Viewer's title \"%s\"", re_test_title());
         shot("30-inserted");
         next(319);
-        b[0] = W[6].box[0] + 100; b[1] = W[6].box[3] - 56 - 20; b[2] = 0x40; b[3] = CLIPW; b[4] = -1; /* a drag */
+        b[0] = W[7].box[0] + 100; b[1] = W[7].box[3] - 56 - 20; b[2] = 0x40; b[3] = CLIPW; b[4] = -1; /* a drag */
         return 6;
     case 319:
         /* dropped on the Timeline's V1, at frame 0 */

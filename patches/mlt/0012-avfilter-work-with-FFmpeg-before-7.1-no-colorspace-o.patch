@@ -1,0 +1,37 @@
+From ba3a1aa70ae50c1c4e7524e0506667adb59799a1 Mon Sep 17 00:00:00 2001
+From: Andrew Youll <andrewyoull86@gmail.com>
+Date: Wed, 28 Oct 2026 22:59:26 +0000
+Subject: [PATCH 12/12] avfilter: work with FFmpeg before 7.1 (no colorspace or
+ range on the buffer source)
+
+MLT 7.42 sets the buffer source's colorspace and range options, which
+FFmpeg 5.1's buffersrc doesn't have, so every avfilter.* video filter's
+graph failed to start ("Cannot set src colorspace") and the filter
+passed its pictures through unchanged. A missing option is now skipped.
+---
+ src/modules/avformat/filter_avfilter.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/modules/avformat/filter_avfilter.c b/src/modules/avformat/filter_avfilter.c
+index f414d06..c6bf04d 100644
+--- a/src/modules/avformat/filter_avfilter.c
++++ b/src/modules/avformat/filter_avfilter.c
+@@ -507,11 +507,15 @@ static void init_image_filtergraph(mlt_filter filter,
+         goto fail;
+     }
+     ret = av_opt_set_int(pdata->avbuffsrc_ctx, "colorspace", avcolorspace, AV_OPT_SEARCH_CHILDREN);
++    if (ret == AVERROR_OPTION_NOT_FOUND)
++        ret = 0; // (FFmpeg before 7.1: the buffer source has no colorspace; a filter works without)
+     if (ret < 0) {
+         mlt_log_error(filter, "Cannot set src colorspace %d\n", avcolorspace);
+         goto fail;
+     }
+     ret = av_opt_set_int(pdata->avbuffsrc_ctx, "range", color_range, AV_OPT_SEARCH_CHILDREN);
++    if (ret == AVERROR_OPTION_NOT_FOUND)
++        ret = 0; // (nor a range)
+     if (ret < 0) {
+         mlt_log_error(filter, "Cannot set src range %d\n", color_range);
+         goto fail;
+-- 
+2.43.0
+

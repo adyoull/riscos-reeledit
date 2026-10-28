@@ -128,6 +128,9 @@ uint64_t re_render_signature(re_project *p, int start, int length)
         h = fnv(h, "V1 %d %d %d %d %d %d %d %d %d %d %d %d %d %d %s|", it.start - start, it.length, it.in, it.out,
                 it.gap, it.mix, it.fade_in, it.fade_out, it.sound_fade_in, it.sound_fade_out, it.muted, it.volume,
                 it.speed, it.source_length, it.gap || it.mix ? "" : resource(p, p->v1, i));
+        re_colour c;
+        if (it.coloured && !re_project_colour(p, i, &c))
+            h = fnv(h, "C %d %d %d %d %d|", c.brightness, c.contrast, c.saturation, c.warmth, c.midtones);
     }
     for (int i = 0; i < re_project_overlays(p); i++) {
         re_overlay o;

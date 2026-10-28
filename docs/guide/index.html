@@ -66,11 +66,11 @@ a { color:#1f5fa8; }
 <li><a href="#part2">Part II: Editing Basics</a>
 <ul><li><a href="#ch4">4. Adding clips</a></li><li><a href="#ch5">5. Playing and moving about</a></li><li><a href="#ch6">6. Cutting, trimming and moving</a></li><li><a href="#ch7">7. Marks, extract and lift</a></li><li><a href="#ch8">8. Cut, copy and paste</a></li></ul></li>
 <li><a href="#part3">Part III: Pictures and Sound</a>
-<ul><li><a href="#ch9">9. Fades and dissolves</a></li><li><a href="#ch10">10. Sound</a></li><li><a href="#ch11">11. Logos and picture in picture</a></li><li><a href="#ch12">12. Titles</a></li><li><a href="#ch13">13. Speed and reverse</a></li></ul></li>
+<ul><li><a href="#ch9">9. Fades and dissolves</a></li><li><a href="#ch10">10. Colour and looks</a></li><li><a href="#ch11">11. Sound</a></li><li><a href="#ch12">12. Logos and picture in picture</a></li><li><a href="#ch13">13. Titles</a></li><li><a href="#ch14">14. Speed and reverse</a></li></ul></li>
 <li><a href="#part4">Part IV: Working Faster</a>
-<ul><li><a href="#ch14">14. The Clips window and three-point editing</a></li><li><a href="#ch15">15. Smooth playback: render previews and proxies</a></li><li><a href="#ch16">16. Saving, autosave and recovery</a></li><li><a href="#ch17">17. Exporting your film</a></li></ul></li>
+<ul><li><a href="#ch15">15. The Clips window and three-point editing</a></li><li><a href="#ch16">16. Smooth playback: render previews and proxies</a></li><li><a href="#ch17">17. Saving, autosave and recovery</a></li><li><a href="#ch18">18. Exporting your film</a></li></ul></li>
 <li><a href="#part5">Part V: The Part of Tens</a>
-<ul><li><a href="#ch18">18. Ten keys to learn first</a></li><li><a href="#ch19">19. Ten problems and what to do about them</a></li><li><a href="#ch20">20. Ten things for experienced users</a></li></ul></li>
+<ul><li><a href="#ch19">19. Ten keys to learn first</a></li><li><a href="#ch20">20. Ten problems and what to do about them</a></li><li><a href="#ch21">21. Ten things for experienced users</a></li></ul></li>
 <li><a href="#appA">Appendix: keys and menus</a></li>
 </ul>
 </nav>
@@ -82,11 +82,11 @@ a { color:#1f5fa8; }
 
 <h4>About this guide</h4>
 <p>The guide comes with ReelEdit, and you can open it from the program: press <kbd>F1</kbd> in the editor, or choose <b>User guide</b> from the icon bar menu or the main menu. It opens in your web browser (NetSurf, for example). The file itself is <code>!ReelEdit.Guide.index/html</code>, if you'd rather open it yourself.</p>
-<p>You don't need to read it in order. If all you want is a title, go to <a href="#ch12">Chapter 12</a>. If you're new to video editing, start at <a href="#part1">Part I</a> and do the <b>Try it</b> examples as you go. By the end of <a href="#part2">Part II</a> you'll have made your first edit.</p>
+<p>You don't need to read it in order. If all you want is a title, go to <a href="#ch13">Chapter 13</a>. If you're new to video editing, start at <a href="#part1">Part I</a> and do the <b>Try it</b> examples as you go. By the end of <a href="#part2">Part II</a> you'll have made your first edit.</p>
 <p>The pictures are screenshots of ReelEdit running on RISC OS. The test clips are colour bars with a moving line across them, which makes it easy to see which frame you're on.</p>
 
 <h4>This is a beta version</h4>
-<p>ReelEdit 0.3 is a <b>beta</b>: everything in this guide works, but it's still being tested, and you may come across bugs. Save your work often (ReelEdit also keeps a backup, see <a href="#ch16">Chapter 16</a>). If something goes wrong, the most useful thing you can send with your report is a log of what happened. Logging is off as standard, so turn it on first; <a href="#ch2">Chapter 2</a> shows you how.</p>
+<p>ReelEdit 0.3 is a <b>beta</b>: everything in this guide works, but it's still being tested, and you may come across bugs. Save your work often (ReelEdit also keeps a backup, see <a href="#ch17">Chapter 17</a>). If something goes wrong, the most useful thing you can send with your report is a log of what happened. Logging is off as standard, so turn it on first; <a href="#ch2">Chapter 2</a> shows you how.</p>
 
 <h4>What we assume you know</h4>
 <p>Not much. You should know the three mouse buttons (Select on the left, Menu in the middle, Adjust on the right), and how to drag a file from a Filer window into a program. You don't need to know anything about video.</p>
@@ -142,7 +142,7 @@ a { color:#1f5fa8; }
 <li>Click the icon. The editor opens with a new, empty project.</li>
 </ol>
 <figure><img src="images/iconbar.png" alt="The ReelEdit icon on the icon bar"><figcaption>The film reel on the icon bar is ReelEdit.</figcaption></figure>
-<figure><img src="images/editor-empty.png" alt="The editor, empty"><figcaption>The editor as it first opens: the Viewer at the top, the Timeline below.</figcaption></figure>
+<figure><img src="images/editor-empty.png" alt="The editor, empty"><figcaption>The editor as it first opens: the Viewer at the top left, the Inspector beside it and the Timeline below.</figcaption></figure>
 
 <h4>The icon bar menu</h4>
 <p>Press Menu over the icon for these:</p>
@@ -168,7 +168,7 @@ a { color:#1f5fa8; }
 <h3 class="chapter" id="ch3"><span>3</span> Finding your way round the screen</h3>
 <p class="intro">It's worth spending a few minutes on this chapter before you start editing.</p>
 
-<figure><img src="images/editor-two-clips.png" alt="The editor with two clips"><figcaption>Two clips on the Timeline. The orange outline marks the selected clip.</figcaption></figure>
+<figure><img src="images/editor-two-clips.png" alt="The editor with two clips"><figcaption>Two clips on the Timeline. The orange outline marks the selected clip, and the Inspector shows its settings.</figcaption></figure>
 
 <h4>The Viewer</h4>
 <p>The top window is the <b>Viewer</b>. It shows the frame under the <b>playhead</b>, the red line on the Timeline that marks where you are. Below the picture are the transport controls:</p>
@@ -186,20 +186,29 @@ a { color:#1f5fa8; }
 <h4>The Timeline</h4>
 <p>The lower window is the <b>Timeline</b>. Your film runs from left to right. From the top down:</p>
 <ul>
-<li><b>The ruler</b> shows the time. Click it to move the playhead; drag along it to scrub through the frames. A thin coloured bar just under it shows render previews (<a href="#ch15">Chapter 15</a>).</li>
-<li><b>The titles row</b> appears at the top once you make a title (<a href="#ch12">Chapter 12</a>). Titles are shown on top of everything else.</li>
+<li><b>The ruler</b> shows the time. Click it to move the playhead; drag along it to scrub through the frames. A thin coloured bar just under it shows render previews (<a href="#ch16">Chapter 16</a>).</li>
+<li><b>The titles row</b> appears at the top once you make a title (<a href="#ch13">Chapter 13</a>). Titles are shown on top of everything else.</li>
 <li><b>V2</b>, the overlay track, holds logos, pictures and picture-in-picture videos. Anything on V2 is shown on top of V1.</li>
 <li><b>V1</b> is the main track, with your clips one after another. Each clip shows its first frame (and its last, if there's room), its name, and its sound as a light blue waveform along the bottom.</li>
 <li><b>Audio tracks</b> (A1, A2 and so on) appear under V1 when you add music or sound effects. There's always an empty row at the bottom to drop more on to.</li>
 </ul>
 <p>Until you've used a track, it shows a line of text saying what to drop there.</p>
 
+<h4>The Inspector</h4>
+<p>To the right of the Viewer is the <b>Inspector</b>. It shows the settings of whatever you've selected on the Timeline, so you can change them while you watch the picture:</p>
+<ul>
+<li>for a clip: its colour (<a href="#ch10">Chapter 10</a>) and its sound;</li>
+<li>for a logo, picture or title: where it goes, its size and how see-through it is (<a href="#ch12">Chapter 12</a>);</li>
+<li>for a sound on an audio track: its volume.</li>
+</ul>
+<p>Click or drag along a slider to set it; click a button such as Look or Place for a menu. Press <kbd>Ctrl-I</kbd> (or choose <b>View &gt; Inspector</b>) to close it if you want the room, and again to bring it back. It moves with the Viewer.</p>
+
 <h4>The menus</h4>
 <p>Press Menu over the Viewer or the ruler for the main menu. Press Menu over a clip, an overlay or a sound for a menu about that one item.</p>
 <figure><img src="images/main-menu.png" alt="The main menu"><figcaption>The main menu. <b>User guide</b> at the bottom opens this guide, as does <kbd>F1</kbd>.</figcaption></figure>
 <figure><img src="images/edit-menu.png" alt="The Edit menu"><figcaption>The Edit menu, with each command's key on the right. Commands you can't use at the moment are greyed out.</figcaption></figure>
 
-<div class="box tip"><b class="label">TIP</b>Every command has a key, shown beside it in the menu. Learning a few of them (<a href="#ch18">Chapter 18</a> has a list) will save you a lot of trips to the menus.</div>
+<div class="box tip"><b class="label">TIP</b>Every command has a key, shown beside it in the menu. Learning a few of them (<a href="#ch19">Chapter 19</a> has a list) will save you a lot of trips to the menus.</div>
 
 <div class="box tech"><b class="label">TECHNICAL STUFF</b>The Timeline normally moves with the Viewer. Untick <b>View &gt; Attach the Timeline</b> to move them separately. <b>View &gt; Viewer size</b> makes the Viewer 35%, 50% or 65% of the screen's width. On the Pi the picture is scaled by the graphics hardware while playing, so a bigger Viewer takes up more of the screen but doesn't slow anything down.</div>
 
@@ -227,9 +236,9 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 
 <h4>What you can drop</h4>
 <ul>
-<li><b>Video files</b> that FFmpeg can read, including MP4 and MOV (H.264 or HEVC), MKV, WebM, AVI and MPEG. The Pi's VideoCore decodes H.264 up to 1080p. For other kinds of video ReelEdit makes a proxy so that it plays smoothly (<a href="#ch15">Chapter 15</a>).</li>
-<li><b>Pictures</b> (PNG, JPEG and sprite files). On V1 a picture becomes a 5-second clip; on V2 it becomes an overlay (<a href="#ch11">Chapter 11</a>).</li>
-<li><b>Sound files</b> (WAV, MP3, AAC, Ogg, FLAC). Drop these on the audio rows (<a href="#ch10">Chapter 10</a>).</li>
+<li><b>Video files</b> that FFmpeg can read, including MP4 and MOV (H.264 or HEVC), MKV, WebM, AVI and MPEG. The Pi's VideoCore decodes H.264 up to 1080p. For other kinds of video ReelEdit makes a proxy so that it plays smoothly (<a href="#ch16">Chapter 16</a>).</li>
+<li><b>Pictures</b> (PNG, JPEG and sprite files). On V1 a picture becomes a 5-second clip; on V2 it becomes an overlay (<a href="#ch12">Chapter 12</a>).</li>
+<li><b>Sound files</b> (WAV, MP3, AAC, Ogg, FLAC). Drop these on the audio rows (<a href="#ch11">Chapter 11</a>).</li>
 <li><b>A project</b> (MLT XML, from ReelEdit, Shotcut, Kdenlive or melt), which is opened.</li>
 </ul>
 
@@ -244,7 +253,7 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <tr><td><kbd>L</kbd></td><td>Play forwards. Press it again for double speed, and again for four times.</td></tr>
 <tr><td><kbd>J</kbd></td><td>Play backwards, faster each time you press it.</td></tr>
 <tr><td><kbd>K</kbd></td><td>Stop.</td></tr>
-<tr><td><kbd>Escape</kbd></td><td>Stop. (It also takes you back from a source clip; see <a href="#ch14">Chapter 14</a>.)</td></tr>
+<tr><td><kbd>Escape</kbd></td><td>Stop. (It also takes you back from a source clip; see <a href="#ch15">Chapter 15</a>.)</td></tr>
 </table>
 <div class="box tip"><b class="label">TIP</b>J, K and L work the same way in most professional editors. Keep three fingers on them and you can go back and forth through a clip without looking at the keyboard.</div>
 
@@ -335,7 +344,7 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 </ul>
 <p>After pasting, the new copy is selected and the playhead is at its end, so pressing <kbd>Ctrl-V</kbd> again puts another copy straight after it.</p>
 <div class="box rem"><b class="label">REMEMBER</b>Overlays, titles and sounds can't overlap others on their own row, and overlays and titles can't go past the end of the project. If there isn't space at the playhead you'll see "There's no room to paste it there."</div>
-<div class="box try"><b class="label">TRY IT</b><b>Use a title three times.</b> Make a short title (<a href="#ch12">Chapter 12</a>), trimmed to a second or two, select it on the titles row and press <kbd>Ctrl-C</kbd>. Move the playhead to a part of the project where there's no title yet and press <kbd>Ctrl-V</kbd> three times. You'll get three titles in a row. Each is a separate title, so you can change the wording of one without affecting the others.</div>
+<div class="box try"><b class="label">TRY IT</b><b>Use a title three times.</b> Make a short title (<a href="#ch13">Chapter 13</a>), trimmed to a second or two, select it on the titles row and press <kbd>Ctrl-C</kbd>. Move the playhead to a part of the project where there's no title yet and press <kbd>Ctrl-V</kbd> three times. You'll get three titles in a row. Each is a separate title, so you can change the wording of one without affecting the others.</div>
 
 <!-- ======================================================================= -->
 <h2 class="part" id="part3">Part III: Pictures and Sound<small>Transitions, sound, overlays, titles and speed</small></h2>
@@ -353,11 +362,44 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <li>Choose <b>Dissolve from the clip before</b> or <b>Dissolve into the clip after</b> from a clip's menu.</li>
 <li>Drag the small white triangle at the bottom of a cut. The dissolve is as long as your drag.</li>
 </ul>
-<figure><img src="images/fade-dissolve.png" alt="A fade-in and a dissolve"><figcaption>A fade in at the start of the first clip, and a dissolve (the purple box with a diagonal line) between the two clips. The red bar under the ruler shows stretches you could render for smoother playback (<a href="#ch15">Chapter 15</a>).</figcaption></figure>
+<figure><img src="images/fade-dissolve.png" alt="A fade-in and a dissolve"><figcaption>A fade in at the start of the first clip, and a dissolve (the purple box with a diagonal line) between the two clips. The red bar under the ruler shows stretches you could render for smoother playback (<a href="#ch16">Chapter 16</a>).</figcaption></figure>
 <p>Drag either end of a dissolve to change its length. To remove it, press Menu over it and choose <b>Delete</b>; the clips go back to their original lengths.</p>
 <div class="box tech"><b class="label">TECHNICAL STUFF</b>If the clips have spare frames beyond the cut (because they've been trimmed), the dissolve uses those, and the project stays the same length. If they don't, the clips are overlapped and the project gets shorter by the length of the dissolve.</div>
 
-<h3 class="chapter" id="ch10"><span>10</span> Sound</h3>
+<h3 class="chapter" id="ch10"><span>10</span> Colour and looks</h3>
+<p class="intro">In this chapter: making a clip brighter, warmer or black and white, in the Inspector.</p>
+<p>Select a clip on the Timeline and its colour settings appear in the <b>Inspector</b>, to the right of the Viewer (<a href="#ch3">Chapter 3</a>):</p>
+<figure><img src="images/inspector-sepia.png" alt="The Inspector with the Sepia look"><figcaption>A clip with the Sepia look. The Inspector shows the settings the look uses.</figcaption></figure>
+<h4>Looks</h4>
+<p>The quickest way to change a clip's colour is a <b>look</b>. Click the button next to <b>Look</b> and choose one:</p>
+<figure><img src="images/look-menu.png" alt="The Look menu"><figcaption>The Look menu.</figcaption></figure>
+<table>
+<tr><th>Look</th><th>What it does</th></tr>
+<tr><td>None</td><td>The clip as it was filmed.</td></tr>
+<tr><td>Vivid</td><td>Stronger colours and a little more contrast.</td></tr>
+<tr><td>Warm</td><td>A little redder: good for faces, sunsets and indoor shots.</td></tr>
+<tr><td>Cool</td><td>A little bluer.</td></tr>
+<tr><td>Faded</td><td>Softer contrast and paler colours, like an old print.</td></tr>
+<tr><td>Black and white</td><td>No colour, with a little more contrast.</td></tr>
+<tr><td>Sepia</td><td>Brown and white, like an old photograph.</td></tr>
+<tr><td>Night</td><td>Darker and bluer, for "day for night".</td></tr>
+</table>
+<h4>Adjusting it yourself</h4>
+<p>Each slider can be clicked or dragged. The Viewer shows the change as you drag, and the whole drag counts as one edit, so <kbd>F8</kbd> undoes it in one go.</p>
+<table>
+<tr><th>Slider</th><th>What it does</th></tr>
+<tr><td>Brightness</td><td>Lighter or darker all over.</td></tr>
+<tr><td>Contrast</td><td>More or less difference between the light and dark parts (100% is as filmed).</td></tr>
+<tr><td>Saturation</td><td>Stronger or paler colours. 0% is black and white.</td></tr>
+<tr><td>Warmth</td><td>Redder (to the right) or bluer (to the left), to correct a colour cast or set a mood.</td></tr>
+<tr><td>Midtones</td><td>Lightens or darkens the middle greys and leaves black and white alone. Good for a dark clip that looks muddy with Brightness alone.</td></tr>
+</table>
+<p>Once you've moved a slider, the Look button shows "Your own". <b>Reset the colour</b> puts the clip back as it was filmed.</p>
+<div class="box try"><b class="label">TRY IT</b><b>Rescue a dull clip.</b> Select it and choose Look &gt; Vivid. If the shadows are now too dark, drag Midtones a little to the right. Then press <kbd>F8</kbd> to see the difference, and <kbd>F9</kbd> to put your changes back.</div>
+<div class="box rem"><b class="label">REMEMBER</b>A clip keeps its colour when you split it (both parts get it), change its speed, copy and paste it, or make a dissolve: the colour lasts right through the dissolve.</div>
+<div class="box tech"><b class="label">TECHNICAL STUFF</b>The colour settings become a single FFmpeg <code>lutyuv</code> filter on the clip (<code>avfilter.lutyuv</code> in the project file, marked <code>shotcut:filter=reeleditColour</code>). It works in the same picture format the Viewer uses, so each pixel costs one look-up in a table: on the testbed a Sepia clip still played at 13 to 29 milliseconds a picture. ReelEdit's copy of MLT has a fix so that FFmpeg's filters work with the FFmpeg 5.1 that RISC OS has.</div>
+
+<h3 class="chapter" id="ch11"><span>11</span> Sound</h3>
 <h4>A clip's own sound</h4>
 <p>The <b>Sound</b> submenu on a clip's menu works on the sound alone:</p>
 <figure><img src="images/sound-submenu.png" alt="The Sound submenu"><figcaption>Clip &gt; Sound.</figcaption></figure>
@@ -375,14 +417,14 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <figure><img src="images/sound-menu.png" alt="The Sound menu for a sound on an audio track"><figcaption>The menu for a sound on an audio track.</figcaption></figure>
 <div class="box rem"><b class="label">REMEMBER</b>Waveforms show the sound as you'll hear it, so they take the volume and fades into account, and a muted clip has none. If a waveform looks flat, the sound really is quiet.</div>
 
-<h3 class="chapter" id="ch11"><span>11</span> Logos and picture in picture</h3>
+<h3 class="chapter" id="ch12"><span>12</span> Logos and picture in picture</h3>
 <p>Anything on <b>V2</b> is shown on top of V1. Drop a picture (a PNG, which can have transparent parts, a JPEG or a sprite file) or a video on the V2 row, at the point where you want it to start.</p>
 <ul>
 <li>A <b>picture</b> at least half the width or half the height of the frame fills the whole frame. A smaller picture goes in the top right corner, as a logo. Either way it's shown for 5 seconds; drag its ends to change that.</li>
 <li>A <b>video</b> appears in a small box in the bottom right, a third of the frame's size, and its sound is mixed with V1's. It's shortened if it would run past the end of the project.</li>
 <li>A <b>sprite file</b> containing more than one sprite gives you a menu to choose from. The sprite you choose is saved as a PNG next to the sprite file; keep it with your project.</li>
 </ul>
-<p>Overlays on V2 can't overlap. If you drop one on top of another, it starts where the other one ends. Titles have a row of their own, so a title can go over a logo or a picture in picture (<a href="#ch12">Chapter 12</a>).</p>
+<p>Overlays on V2 can't overlap. If you drop one on top of another, it starts where the other one ends. Titles have a row of their own, so a title can go over a logo or a picture in picture (<a href="#ch13">Chapter 13</a>).</p>
 <p>Press Menu over an overlay for its menu:</p>
 <figure><img src="images/overlay-place.png" alt="The Overlay menu with Place open"><figcaption>Overlay &gt; Place.</figcaption></figure>
 <table>
@@ -395,12 +437,14 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <tr><td>Edit title…</td><td>For a title only: opens the Title window.</td></tr>
 <tr><td>Delete</td><td>Removes it.</td></tr>
 </table>
+<p>The Inspector has the same settings for the selected overlay, with sliders for Size and Opacity, so you can choose any value (an opacity of 60%, say) and watch the Viewer as you drag.</p>
+<figure><img src="images/inspector-overlay.png" alt="The Inspector for an overlay"><figcaption>A logo at 41% of the frame and 61% opacity, set by dragging in the Inspector.</figcaption></figure>
 <div class="box tip"><b class="label">TIP</b>If you choose a menu item with Adjust rather than Select, the menu stays open. You can then try Top left, Top right and Centre in turn and see each one in the Viewer.</div>
 <figure><img src="images/logo-top-right.png" alt="A logo placed top right"><figcaption>A logo in the top right corner.</figcaption></figure>
 <figure><img src="images/pip.png" alt="Picture in picture"><figcaption>Picture in picture: v2.mp4 on V2, shown in the bottom right of v1.mp4.</figcaption></figure>
 <div class="box tech"><b class="label">TECHNICAL STUFF</b>Overlays are saved as MLT composite transitions, the same way Shotcut saves them. Ripple edits on V1 don't move anything on V2.</div>
 
-<h3 class="chapter" id="ch12"><span>12</span> Titles</h3>
+<h3 class="chapter" id="ch13"><span>13</span> Titles</h3>
 <p>Move the playhead to where the title should start and press <kbd>T</kbd> (or choose <b>Edit &gt; New title…</b>). The <b>Title window</b> opens:</p>
 <figure><img src="images/title-window.png" alt="The Title window"><figcaption>The Title window. Each button opens a menu of choices.</figcaption></figure>
 <table>
@@ -420,7 +464,7 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <p>To change a title, press Menu over it and choose <b>Edit title…</b>. Make your changes and click <b>Change</b>. One press of <kbd>F8</kbd> undoes all of them.</p>
 <div class="box rem"><b class="label">REMEMBER</b>A title is an overlay, so you can move it, trim it, fade it and change its opacity like any other. The only difference is that its size is set in the Title window, not on the overlay menu.</div>
 
-<h3 class="chapter" id="ch13"><span>13</span> Speed and reverse</h3>
+<h3 class="chapter" id="ch14"><span>14</span> Speed and reverse</h3>
 <p>Press Menu over a clip and open <b>Speed</b>:</p>
 <figure><img src="images/speed-submenu.png" alt="The Speed submenu"><figcaption>Clip &gt; Speed.</figcaption></figure>
 <ul>
@@ -434,7 +478,7 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <!-- ======================================================================= -->
 <h2 class="part" id="part4">Part IV: Working Faster<small>Quicker editing, smoother playback, saving and exporting</small></h2>
 
-<h3 class="chapter" id="ch14"><span>14</span> The Clips window and three-point editing</h3>
+<h3 class="chapter" id="ch15"><span>15</span> The Clips window and three-point editing</h3>
 <p>Press <kbd>Ctrl-B</kbd> (or choose <b>View &gt; Clips…</b>) to open the <b>Clips window</b>. It lists the videos in your project, and any video you drop on the window itself. The list is saved with the project.</p>
 <figure><img src="images/clips-window.png" alt="The Clips window"><figcaption>The Clips window.</figcaption></figure>
 <ul>
@@ -454,7 +498,7 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <figure><img src="images/source-mode.png" alt="A source in the Viewer"><figcaption>v2.mp4 showing as a source, marked from 1 s to 2 s. The title bar reminds you of the keys.</figcaption></figure>
 <div class="box tip"><b class="label">TIP</b>This is a quick way to put together a first cut from long recordings. Mark a good moment, press comma, mark the next, press comma, and so on. The pieces go on to the Timeline one after another, in order.</div>
 
-<h3 class="chapter" id="ch15"><span>15</span> Smooth playback: render previews and proxies</h3>
+<h3 class="chapter" id="ch16"><span>16</span> Smooth playback: render previews and proxies</h3>
 <h4>Why playback sometimes stutters</h4>
 <p>A plain 1080p clip needs one picture decoded for each frame, which the Pi's VideoCore does in about 10 milliseconds. Picture in picture needs two, and ReelEdit can only use one VideoCore decoder, so the second picture is decoded by the ARM, which takes about 43 milliseconds. At 25 frames a second there are only 40 milliseconds per frame. Fades, dissolves, titles and speed changes add work too. To keep the picture in step with the sound, ReelEdit drops frames it can't get ready in time, so busy parts of the project look jerky.</p>
 
@@ -474,7 +518,7 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <li>Each proxy is used in the Viewer and on the Timeline as soon as it's ready. Clips keep their own names.</li>
 <li>Saving, exporting, render previews and autosave always use your original files, at full quality.</li>
 <li><b>View &gt; Use proxies</b> turns proxies off and on.</li>
-<li>Proxies are deleted when you close the editor or quit. If ReelEdit crashes they're kept, so they can be used again when you recover the project (<a href="#ch16">Chapter 16</a>).</li>
+<li>Proxies are deleted when you close the editor or quit. If ReelEdit crashes they're kept, so they can be used again when you recover the project (<a href="#ch17">Chapter 17</a>).</li>
 <li>Making a proxy can take several minutes on a slow machine. Until it's ready, the clip plays from the original file.</li>
 </ul>
 <h4>How much difference do proxies make?</h4>
@@ -487,7 +531,7 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 </table>
 <div class="box rem"><b class="label">REMEMBER</b>On a Pi, plain 1080p H.264 already plays smoothly through the VideoCore. Proxies help most with HEVC, 4K and picture in picture, and render previews help with anything busy. You can use both.</div>
 
-<h3 class="chapter" id="ch16"><span>16</span> Saving, autosave and recovery</h3>
+<h3 class="chapter" id="ch17"><span>17</span> Saving, autosave and recovery</h3>
 <p>Press <kbd>F3</kbd> or click <b>Save</b>. The first time, you get the usual Save as box: drag its icon to a Filer window, or type a full file name and press Return. After that, <kbd>F3</kbd> saves to the same file. To save under a different name, choose <b>File &gt; Save as…</b>.</p>
 <figure><img src="images/save-as.png" alt="The Save as box"><figcaption>The Save as box.</figcaption></figure>
 <p>Projects are saved as MLT XML files (filetype XML). The Viewer's title bar shows the project's full path, with a star (*) after it if there are unsaved changes.</p>
@@ -502,7 +546,7 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 </ul>
 <div class="box warn"><b class="label">WARNING</b>Autosave is only a backup. Save often with <kbd>F3</kbd>, especially before exporting or making big changes.</div>
 
-<h3 class="chapter" id="ch17"><span>17</span> Exporting your film</h3>
+<h3 class="chapter" id="ch18"><span>18</span> Exporting your film</h3>
 <p>Press <kbd>Ctrl-E</kbd> (or choose <b>File &gt; Export…</b>):</p>
 <figure><img src="images/export-window.png" alt="The Export window"><figcaption>The Export window.</figcaption></figure>
 <table>
@@ -519,7 +563,7 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <!-- ======================================================================= -->
 <h2 class="part" id="part5">Part V: The Part of Tens<small>Short lists for quick reference</small></h2>
 
-<h3 class="chapter" id="ch18"><span>18</span> Ten keys to learn first</h3>
+<h3 class="chapter" id="ch19"><span>19</span> Ten keys to learn first</h3>
 <ol>
 <li><kbd>Space</kbd>: play and stop.</li>
 <li><kbd>J</kbd> <kbd>K</kbd> <kbd>L</kbd>: backwards, stop, forwards. Press J or L again to go faster.</li>
@@ -533,7 +577,7 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <li><kbd>F3</kbd>: save.</li>
 </ol>
 
-<h3 class="chapter" id="ch19"><span>19</span> Ten problems and what to do about them</h3>
+<h3 class="chapter" id="ch20"><span>20</span> Ten problems and what to do about them</h3>
 <table>
 <tr><th>Problem</th><th>What to try</th></tr>
 <tr><td>No sound</td><td>Check SharedSoundBuffer and StreamManager (ssb.zip) are installed and SharedSound is loaded. Check the clip isn't muted (a red line along its bottom).</td></tr>
@@ -548,7 +592,7 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <tr><td>ReelEdit crashed, or did something odd</td><td>After a crash, open ReelEdit again and choose <b>Recover</b>. To find out what went wrong, turn on logging from the icon bar menu (<a href="#ch2">Chapter 2</a>), do the same thing again, then look at <code>&lt;Wimp$ScrapDir&gt;.ReelEditLog</code>. Please send it to the author with your report.</td></tr>
 </table>
 
-<h3 class="chapter" id="ch20"><span>20</span> Ten things for experienced users</h3>
+<h3 class="chapter" id="ch21"><span>21</span> Ten things for experienced users</h3>
 <ol>
 <li><b>Projects are MLT XML.</b> ReelEdit uses Shotcut's track layout, with <code>store=shotcut</code>: V1 is a playlist, and V2 and the audio tracks are marked the way Shotcut marks them. Titles have a track of their own above V2 (V3, marked <code>shotcut:reeledit_titles</code>); its composites are applied after V2's, so titles are always on top. melt can play the files, and Shotcut should be able to open them. Settings of ReelEdit's own (overlay place, size, opacity and fades, and the Clips list) are kept in <code>shotcut:reeledit_*</code> properties.</li>
 <li><b>The log</b>, <code>&lt;Wimp$ScrapDir&gt;.ReelEditLog</code>, records edits, which decoder each clip uses, playback statistics every second, and render and proxy jobs, along with MLT's and FFmpeg's own messages. It's off as standard; the icon bar menu's <b>Logging</b> item turns it on, and the choice is kept in <code>&lt;Choices$Write&gt;.ReelEdit.Logging</code>. Turned on again in the same session, it adds to the file; a new session starts it afresh. For testing, set <code>ReelEdit$Log</code> to a file name to log there from the start, or to <code>off</code>; either overrides the menu at start-up.</li>
@@ -602,6 +646,7 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <tr><td>Ctrl + scroll wheel</td><td>Zoom around the pointer</td></tr>
 <tr><td><kbd>N</kbd></td><td>Snapping on / off</td></tr>
 <tr><td><kbd>Ctrl-B</kbd></td><td>The Clips window</td></tr>
+<tr><td><kbd>Ctrl-I</kbd></td><td>The Inspector (close or open it)</td></tr>
 <tr><td><kbd>Ctrl-R</kbd></td><td>Render previews</td></tr>
 <tr><td><kbd>Ctrl-E</kbd></td><td>Export</td></tr>
 <tr><td><kbd>F3</kbd></td><td>Save</td></tr>
@@ -622,7 +667,7 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <h4>The menus</h4>
 <figure><img src="images/file-menu.png" alt="File menu"><figcaption>File: New, Save, Save as…, Export…</figcaption></figure>
 <figure><img src="images/play-menu.png" alt="Play menu"><figcaption>Play: playing, the marks, and render previews.</figcaption></figure>
-<figure><img src="images/view-menu.png" alt="View menu"><figcaption>View: zoom, Attach the Timeline, Snapping, Viewer size, Clips… and Use proxies.</figcaption></figure>
+<figure><img src="images/view-menu.png" alt="View menu"><figcaption>View: zoom, Attach the Timeline, Snapping, Viewer size, Clips…, Use proxies and Inspector. (This picture was taken before the Inspector was added.)</figcaption></figure>
 <figure><img src="images/info-window.png" alt="Video information"><figcaption>Video information, from the main menu or a clip's menu: details of the selected clip and of the project.</figcaption></figure>
 
 <p class="small">ReelEdit is free software (GPL version 2 or later) by Andrew Youll. This guide is for ReelEdit 0.3 Beta. The screenshots were taken on RISC OS 5 running in the RISC OS for Linux testbed.</p>

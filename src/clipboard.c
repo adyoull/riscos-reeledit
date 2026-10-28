@@ -22,6 +22,7 @@ struct re_copy
     mlt_producer parent;  /* (NULL: a title) */
     int in, length;
     re_item item;
+    re_colour colour;     /* (a clip's) */
     re_overlay overlay;
     re_title title;
     re_audio sound;
@@ -67,6 +68,7 @@ re_copy *re_project_copy(re_project *p, int kind, int track, int i)
             break;
         c->in = c->item.in;
         c->length = c->item.length;
+        re_project_colour(p, i, &c->colour);
         c->parent = parent_of(p->v1, i);
         if (c->parent)
             return c;
@@ -141,6 +143,7 @@ int re_project_paste(re_project *p, const re_copy *c, int frame, int *track)
             re_project_mute(p, i, 1);
         if (it->volume)
             re_project_volume(p, i, it->volume);
+        re_project_set_colour(p, i, &c->colour);
         break;
     }
     case RE_COPY_OVERLAY: {

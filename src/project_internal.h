@@ -120,6 +120,11 @@ void rp_fit_fades(re_project *p);
 int rp_cut_has_sound(mlt_producer cut);
 int rp_cut_muted(mlt_producer cut);
 void rp_cut_mute(re_project *p, mlt_producer cut, int on);
+/* colour.c: a cut's colour (1: it has a filter for it), set (none: the
+   filter taken off); the dissolves' ends given their clips' colour */
+int rp_cut_colour(mlt_producer cut, re_colour *c);
+void rp_cut_set_colour(re_project *p, mlt_producer cut, const re_colour *c);
+void rp_fit_colour(re_project *p);
 int rp_cut_volume(mlt_producer cut);                          /* dB (0: as it is) */
 void rp_cut_set_volume(re_project *p, mlt_producer cut, int db);
 void rp_fit_sound(re_project *p);

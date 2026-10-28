@@ -269,6 +269,7 @@ void tl_select(int item)
     A.ov_sel = -1;
     A.au_sel = -1;
     redraw_all();
+    in_edited();
 }
 
 void tl_select_overlay(int ov)
@@ -277,6 +278,7 @@ void tl_select_overlay(int ov)
     A.sel = -1;
     A.au_sel = -1;
     redraw_all();
+    in_edited();
 }
 
 void tl_select_audio(int track, int i)
@@ -285,6 +287,7 @@ void tl_select_audio(int track, int i)
     A.au_sel = i;
     A.sel = A.ov_sel = -1;
     redraw_all();
+    in_edited();
 }
 
 /* The audio row at a height (work area), or -1 */

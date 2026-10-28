@@ -937,6 +937,113 @@ static void overlays(const char *a, const char *b, const char *snd, const char *
     re_project_close(p);
 }
 
+/* ---- colour: a clip's brightness, saturation and warmth seen in its
+   picture (and not the next clip's); kept in range; looks; undone; kept
+   by a split (both parts), a speed change, copy and paste, a dissolve's
+   ends, saving and opening */
+static int chroma(int which) /* (the middle of the shown picture's Cb or Cr) */
+{
+    return which ? shown_cr[45 * 160 + 80] : shown_cb[45 * 160 + 80];
+}
+
+static void colours(const char *a, const char *b, const char *out)
+{
+    re_engine_io io = {show, NULL, clk, NULL, 48000, 2, NULL};
+    re_project *p = re_project_new();
+    re_project_add(p, a, -1);
+    re_project_add(p, b, -1);
+    re_engine *e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    int y0 = luma_at(e, 10), cb0 = chroma(0), cr0 = chroma(1), yb = luma_at(e, 100);
+    re_colour c, g;
+    re_colour_none(&c);
+    re_item it;
+    re_project_item(p, 0, &it);
+    CHECK(!it.coloured && !re_project_colour(p, 0, &g) && re_colour_is_none(&g) && re_project_colour(p, 5, &g) == -1,
+          "colour: none at first");
+    c.brightness = 50;
+    CHECK(re_project_set_colour(p, 0, &c) == 1 && re_project_set_colour(p, 0, &c) == 0, "colour: brighter (once)");
+    re_engine_refresh(e);
+    int y1 = luma_at(e, 10), yb1 = luma_at(e, 100);
+    CHECK(y1 > y0 + 40 && y1 < y0 + 70 && abs(yb1 - yb) <= 1, "colour: brighter: luma %d (was %d), the next clip %d (%d)",
+          y1, y0, yb1, yb);
+    re_colour_none(&c);
+    c.saturation = 0;
+    re_project_set_colour(p, 0, &c);
+    re_engine_refresh(e);
+    luma_at(e, 10);
+    int cbg = chroma(0), crg = chroma(1);
+    CHECK(abs(cbg - 128) <= 2 && abs(crg - 128) <= 2 && abs(cr0 - 128) > 50, "colour: grey: Cb %d Cr %d (was %d %d)",
+          cbg, crg, cb0, cr0);
+    c.warmth = 100;
+    re_project_set_colour(p, 0, &c);
+    re_engine_refresh(e);
+    luma_at(e, 10);
+    CHECK(chroma(1) > 140 && chroma(0) < 116, "colour: warm grey: Cb %d Cr %d", chroma(0), chroma(1));
+    re_project_item(p, 0, &it);
+    CHECK(it.coloured, "colour: the item says so");
+    /* kept in range; looks */
+    re_colour wild = {500, -3, 900, -400, 250};
+    re_project_set_colour(p, 0, &wild);
+    re_project_colour(p, 0, &g);
+    CHECK(g.brightness == 100 && g.contrast == 0 && g.saturation == 200 && g.warmth == -100 && g.midtones == 100,
+          "colour: kept in range: %d %d %d %d %d", g.brightness, g.contrast, g.saturation, g.warmth, g.midtones);
+    re_colour_look(6, &g);
+    CHECK(re_colour_look_of(&g) == 6 && !strcmp(re_colour_looks[6], "Sepia") && g.saturation == 0 && g.warmth > 0,
+          "colour: the looks");
+    re_colour_look(0, &g);
+    CHECK(re_colour_is_none(&g) && re_colour_look_of(&wild) == -1, "colour: no look");
+    CHECK(re_project_undo(p) && !re_project_colour(p, 0, &g) && g.saturation == 0 && g.warmth == 100,
+          "colour: undone: %d %d", g.saturation, g.warmth);
+    re_engine_close(e); /* (undo made the project again: the engine had the old one) */
+    e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    luma_at(e, 10);
+    CHECK(chroma(1) > 140 && chroma(0) < 116, "colour: undone, shown: Cb %d Cr %d", chroma(0), chroma(1));
+    /* a split: both parts */
+    CHECK(re_project_split(p, 30) && !strcmp(layout(p), "c30 c45 c75"), "colour: split: %s", layout(p));
+    re_colour g2;
+    re_project_colour(p, 0, &g);
+    re_project_colour(p, 1, &g2);
+    CHECK(!memcmp(&g, &g2, sizeof(g)) && g.warmth == 100, "colour: both parts of the split");
+    /* a dissolve (overlapped) into the next clip: its end keeps the colour */
+    int mx = re_project_dissolve(p, 1, 20, 1), mid = -1;
+    CHECK(mx >= 0 && !re_project_item(p, mx, &it) && it.mix, "colour: a dissolve (%d: %s)", mx, layout(p));
+    if (mx >= 0)
+        mid = it.start + it.length / 2;
+    re_engine_refresh(e);
+    luma_at(e, mid);
+    int cr_with = chroma(1);
+    re_colour none;
+    re_colour_none(&none);
+    re_project_set_colour(p, 1, &none);
+    re_engine_refresh(e);
+    luma_at(e, mid);
+    int cr_without = chroma(1);
+    CHECK(abs(cr_with - cr_without) > 20, "colour: through the dissolve: Cr %d with, %d without (%s)", cr_with,
+          cr_without, layout(p));
+    re_project_undo(p);
+    /* a speed change, copy and paste */
+    CHECK(re_project_speed(p, 0, 50) == 1 && !re_project_colour(p, 0, &g) && g.warmth == 100 && g.saturation == 0,
+          "colour: kept at 50%%: %d %d", g.warmth, g.saturation);
+    re_copy *cp = re_project_copy(p, RE_COPY_CLIP, 0, 0);
+    int track = 0;
+    CHECK(cp && re_project_paste(p, cp, 0, &track) == 0 && !re_project_colour(p, 0, &g) && g.warmth == 100,
+          "colour: pasted: %d", g.warmth);
+    re_copy_free(cp);
+    /* saved, opened */
+    re_engine_close(e);
+    CHECK(re_project_save(p, out) == 0 && count(out, "reeleditColour") >= 3, "colour: saved: %d",
+          count(out, "reeleditColour"));
+    re_project_close(p);
+    p = re_project_open(out, 1);
+    CHECK(p && !re_project_colour(p, 0, &g) && g.warmth == 100 && g.saturation == 0, "colour: opened: %d %d",
+          p ? g.warmth : -1, p ? g.saturation : -1);
+    e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    luma_at(e, 5);
+    CHECK(chroma(1) > 140, "colour: opened, shown: Cr %d", chroma(1));
+    re_engine_close(e);
+    re_project_close(p);
+}
+
 /* ---- titles: text over the video (blocks for letters here: no Font
    Manager); its picture made by style; put on V2 at the lower third, its
    own size; changed (made again, its box with it); placed; kept through
@@ -2101,6 +2208,7 @@ int main(int argc, char **argv)
     clip_sound(a, argv[9], out);
     stills(argv[10]);
     titles(a, argv[10], out);
+    colours(a, b, out);
     export(a, argv[9], out, "export-test.mp4");
     audio_tracks(a, argv[9], argv[11], out);
     source_editing(a, b, n, out);

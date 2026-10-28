@@ -50,6 +50,7 @@ typedef struct
     int source_length;   /* the clip's file's length (frames of the project): out is below it; at
                             another speed, its length at that speed */
     int speed;           /* % (100: as it is; 200 twice as fast; negative: reversed) */
+    int coloured;        /* 1: its colour changed (re_project_colour) */
     char name[64];       /* the clip's file's leaf name */
 } re_item;
 int re_project_items(re_project *p);
@@ -163,6 +164,27 @@ int re_project_sound_fade(re_project *p, int item, int end, int length);
 /* A clip's sound's level, dB (-60 to +12; 0: as it is): kept as its mute is.
    1 changed, 0 not. */
 int re_project_volume(re_project *p, int item, int db);
+
+/* A clip's colour (colour.c): each setting from "as it is" (re_colour_none) */
+typedef struct
+{
+    int brightness; /* -100..100 (0: as it is) */
+    int contrast;   /* 0..200 % (100) */
+    int saturation; /* 0..200 % (100; 0: black and white) */
+    int warmth;     /* -100 (cooler, bluer) .. 100 (warmer, redder) (0) */
+    int midtones;   /* -100 (darker) .. 100 (lighter): gamma (0) */
+} re_colour;
+void re_colour_none(re_colour *c);
+int re_colour_is_none(const re_colour *c);
+/* Looks: settings by name (0 None ... ); the look a setting is, or -1 */
+#define RE_LOOKS 8
+extern const char *const re_colour_looks[RE_LOOKS];
+void re_colour_look(int look, re_colour *c);
+int re_colour_look_of(const re_colour *c);
+/* A clip's (0, or -1: not a clip; as it is), and set (kept in range): 1
+   changed, 0 not. Between begin and end too. */
+int re_project_colour(re_project *p, int item, re_colour *c);
+int re_project_set_colour(re_project *p, int item, const re_colour *c);
 
 /* Overlays: pictures (logos, titles) and videos (a picture in the
    picture) over the video, on V2, the track above V1 (overlay.c). Each is

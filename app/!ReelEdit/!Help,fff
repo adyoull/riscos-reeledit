@@ -1,5 +1,5 @@
-ReelEdit 0.3 beta
-=================
+ReelEdit 0.3 beta (test 33)
+===========================
 
 ReelEdit is a video editor for RISC OS, on the MLT multimedia framework
 (the engine of Shotcut and Kdenlive), with the Raspberry Pi's video
@@ -32,6 +32,14 @@ Viewer (the picture, the transport and a toolbar) with the Timeline under
 it.
 Menu over the icon: Info (the version), User guide, Logging (see Log,
 below) and Quit.
+
+The Inspector, to the right of the Viewer, shows the settings of what's
+selected on the Timeline: a clip's colour (Look, Brightness, Contrast,
+Saturation, Warmth, Midtones, Reset) and sound (Volume, Mute); an
+overlay's Place, Size and Opacity (and a title's Edit title...); a sound's
+Volume and Mute. Click or drag along a slider (the Viewer shows it as you
+drag; a drag is one step for Undo). Ctrl-I (View > Inspector) closes and
+opens it.
 
 Adding clips: drag video files from a directory display to the Timeline
 (they go in where they're dropped: before the clip there, or after it if
@@ -186,6 +194,7 @@ Keys (with the Viewer or the Timeline in front, clicked on):
   Ctrl-E       export
   F3           save
   F1           the User Guide
+  Ctrl-I       the Inspector
   Escape       stop
 
 Saving: the standard Save as box: drag the file icon to a directory

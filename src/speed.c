@@ -99,6 +99,8 @@ int re_project_speed(re_project *p, int item, int percent)
     out = out < in ? in : out > len - 1 ? len - 1 : out;
     mlt_producer cut = mlt_producer_cut(prod, in, out);
     mlt_producer_close(prod); /* (the cut has it) */
+    re_colour colour;
+    re_project_colour(p, item, &colour);
     re_project_begin(p); /* (one undo: the clip taken out, put back at its speed, its effects) */
     int removed = re_project_remove(p, item, 1), ok = 0;
     if (removed)
@@ -117,6 +119,7 @@ int re_project_speed(re_project *p, int item, int percent)
             re_project_mute(p, item, 1);
         if (it.volume)
             re_project_volume(p, item, it.volume);
+        re_project_set_colour(p, item, &colour);
     }
     re_project_end(p);
     if (!ok && removed) /* (half done: undone) */

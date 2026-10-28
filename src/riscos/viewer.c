@@ -460,6 +460,27 @@ static int screen_w(void)
     return (mode_var(11) + 1) << mode_var(4);
 }
 
+int app_screen_w(void)
+{
+    return screen_w();
+}
+
+/* The Inspector, attached: to the right of the Viewer, as tall as it */
+void app_place_inspector(void)
+{
+    int vs[9], vo[5];
+    _kernel_swi_regs r;
+    if (!V.win)
+        return;
+    window_state(V.win, vs);
+    if (!(vs[8] & (1 << 16)))
+        return;
+    vo[0] = V.win;
+    r.r[1] = (intptr_t) vo;
+    ro_swi(Wimp_GetWindowOutline, &r);
+    in_place(vo[3], vs[2], vs[4], V.win);
+}
+
 /* The Timeline's width, attached: most of the screen (the workspace: room
    for the project and its tracks), at least the Viewer's */
 static int workspace_w(int viewer_w)
@@ -487,8 +508,9 @@ static void place_timeline(void)
     r.r[1] = (intptr_t) to;
     ro_swi(Wimp_GetWindowOutline, &r);
     int top = to[4] - ts[4], h = ts[4] - ts[2]; /* (its title bar, and its height) */
-    int tw = workspace_w(vs[3] - vs[1]), x0 = (vs[1] + vs[3]) / 2 - tw / 2;
+    int tw = workspace_w(vs[3] - vs[1] + in_width()), x0 = (vs[1] + vs[3] + in_width()) / 2 - tw / 2;
     int b[9] = {tl_window(), x0, vo[2] - top - h, x0 + tw, vo[2] - top, ts[5], ts[6], V.win, 0};
+    app_place_inspector();
     if (b[1] == ts[1] && b[2] == ts[2] && b[3] == ts[3] && b[4] == ts[4] && ts[7] == V.win)
         return;
     tl_open_request(b);
@@ -513,7 +535,7 @@ static void timeline_moved(int *b)
     int ts[9];
     window_state(tl_window(), ts);
     int bottom = vs[2] - vo[2];          /* the Viewer's border below its work area */
-    int y0 = to[4] + bottom, h = vs[4] - vs[2], w = vs[3] - vs[1], x0 = (ts[1] + ts[3]) / 2 - w / 2;
+    int y0 = to[4] + bottom, h = vs[4] - vs[2], w = vs[3] - vs[1], x0 = (ts[1] + ts[3]) / 2 - (w + in_width()) / 2;
     int nb[9] = {V.win, x0, y0, x0 + w, y0 + h, vs[5], vs[6], b[7] == V.win ? -1 : b[7], 0};
     if (nb[1] != vs[1] || nb[2] != vs[2] || nb[3] != vs[3] || nb[4] != vs[4] || b[7] != ts[7])
         open_window(nb);
@@ -751,6 +773,7 @@ static void edited(int picture)
     mk_edited();
     tl_edited();
     info_edited();
+    in_edited();
     px_edited(); /* (files wanting proxies: made) */
     update_title();
     update_controls(1);
@@ -908,7 +931,7 @@ static void open_editor(void)
     int th = 48 + 96 + 16 + 40 + 40; /* the Timeline, its title and scroll bar */
     int b[9];
     b[0] = V.win;
-    b[1] = (sw - pw) / 2; b[3] = b[1] + pw;
+    b[1] = (sw - pw - in_width()) / 2; b[3] = b[1] + pw; /* (the Inspector to its right: the two centred) */
     b[4] = sh - 64; b[2] = b[4] - ph - 2 * CH;
     if (b[2] - th < 140) { /* (a small screen: the picture smaller) */
         b[2] = 140 + th;
@@ -917,9 +940,11 @@ static void open_editor(void)
     V.vis_w = V.vis_h = 0;
     update_title();
     open_window(b);
-    int tw = workspace_w(pw);
+    int tw = workspace_w(pw + in_width());
     tl_open((sw - tw) / 2, b[2] - 40, tw);
     place_timeline();
+    if (in_width())
+        in_open();
     set_caret(V.win);
     if (A.e)
         re_engine_seek(A.e, re_engine_position(A.e));
@@ -956,6 +981,7 @@ static int close_editor(void)
         ro_swi(Wimp_CloseWindow, &r);
     }
     tl_close();
+    in_close();
     info_close();
     sb_forget();
     re_project_close(A.proj);
@@ -1268,11 +1294,12 @@ static MENU(9) m_play = {"Play", 7, 2, 7, 0, 420, 44, 0,
                           {0, -1, IT("Render previews  ^R")}, {0x80, -1, IT("Stop rendering")}}};
 static MENU(3) m_viewer_size = {"Viewer size", 7, 2, 7, 0, 200, 44, 0,
                                 {{0, -1, IT("Small")}, {0, -1, IT("Medium")}, {0x80, -1, IT("Large")}}};
-static MENU(8) m_view = {"View", 7, 2, 7, 0, 520, 44, 0,
+static MENU(9) m_view = {"View", 7, 2, 7, 0, 520, 44, 0,
                          {{0, -1, IT("Zoom the Timeline in       +")}, {0, -1, IT("Zoom the Timeline out      -")},
                           {2, -1, IT("The whole project     \x8bZ")}, {0, -1, IT("Attach the Timeline")},
                           {0, -1, IT("Snapping                   N")}, {0, 0, IT("Viewer size")},
-                          {2, -1, IT("Clips...                  ^B")}, {0x80, -1, IT("Use proxies")}}};
+                          {2, -1, IT("Clips...                  ^B")}, {0, -1, IT("Use proxies")},
+                          {0x80, -1, IT("Inspector                 ^I")}}};
 static MENU(6) m_main = {"ReelEdit", 7, 2, 7, 0, 340, 44, 0,
                          {{0, 0, IT("File")}, {0, 0, IT("Edit")}, {0, 0, IT("Play")}, {0, 0, IT("View")},
                           {0, -1, IT("Video information...")}, {0x80, -1, IT("User guide      F1")}}};
@@ -1348,6 +1375,7 @@ void app_menu(int x, int y)
     menu_shade(&m_play.item[8].iflags, !rr_running());
     m_view.item[4].flags = (m_view.item[4].flags & ~1) | (A.snap ? 1 : 0);
     menu_tick(&m_view.item[7].flags, px_on());
+    menu_tick(&m_view.item[8].flags, in_is_open());
     m_view.item[5].sub = (intptr_t) &m_viewer_size;
     for (int i = 0; i < 3; i++)
         menu_tick(&m_viewer_size.item[i].flags, i == V.viewer_size);
@@ -1410,6 +1438,12 @@ void app_audio_menu_opened(void)
     re_display_check_covered();
 }
 
+void app_inspector_menu_opened(void)
+{
+    menu_is = 8;
+    re_display_check_covered();
+}
+
 static void menu_select(int *b)
 {
     _kernel_swi_regs r;
@@ -1432,6 +1466,10 @@ static void menu_select(int *b)
     }
     if (menu_is == 7) {
         au_menu_select(b);
+        return;
+    }
+    if (menu_is == 8) {
+        in_menu_select(b);
         return;
     }
     if (menu_is == 1) {
@@ -1507,6 +1545,8 @@ static void menu_select(int *b)
             viewer_size(b[2]);
         } else if (b[1] == 6) {
             cl_open();
+        } else if (b[1] == 8) {
+            in_toggle();
         } else if (b[1] == 7) {
             px_toggle();
         }
@@ -1591,6 +1631,7 @@ int app_key(int k)
     case 't': case 'T': ti_open(-1); return 1;
     case 5: ex_open(); return 1;                  /* Ctrl-E: Export... */
     case 2: cl_open(); return 1;                  /* Ctrl-B: the Clips window (Premiere's bin) */
+    case 9: in_toggle(); return 1;                /* Ctrl-I: the Inspector */
     case 'Z': case '\\': tl_zoom(-1); return 1;    /* Shift-Z, \\: the whole project */
     case 0x183: {                                  /* F3: save */
         int p[5];
@@ -1623,6 +1664,10 @@ static void key(int *b)
         cl_key(b);
         return;
     }
+    if (in_window() && b[0] == in_window()) {
+        in_key(b);
+        return;
+    }
     if ((b[0] == V.win || b[0] == tl_window()) && app_key(b[6]))
         return;
     r.r[0] = b[6];
@@ -1644,6 +1689,10 @@ static void redraw(int *b)
     }
     if (cl_window() && b[0] == cl_window()) {
         cl_redraw(b);
+        return;
+    }
+    if (in_window() && b[0] == in_window()) {
+        in_redraw(b);
         return;
     }
     r.r[1] = (intptr_t) b;
@@ -1684,6 +1733,10 @@ static void click(int *b)
     }
     if (cl_window() && w == cl_window()) {
         cl_click(b);
+        return;
+    }
+    if (in_window() && w == in_window()) {
+        in_click(b);
         return;
     }
     if (w == tl_window()) {
@@ -1758,6 +1811,8 @@ static const char *help_for(int win, int icon, int y)
         return ex_help(icon);
     if (cl_window() && win == cl_window())
         return cl_help();
+    if (in_window() && win == in_window())
+        return in_help();
     if (win != V.win)
         return NULL;
     switch (icon) {
@@ -2026,6 +2081,7 @@ int reeledit_main(int argc, char **argv)
         if (A.proj && re_project_changes(A.proj) != V.changes)
             app_edited();
         int ev, busy = (A.e && re_engine_busy(A.e)) || tl_scrubbing() || V.ms /* (scrubbing: the pointer followed) */
+                       || in_dragging()
                        || pv_busy(); /* (thumbnails and waveforms to make) */
         unsigned before = ro_now_cs();
         r.r[0] = busy ? 0 : 1;
@@ -2044,6 +2100,8 @@ int reeledit_main(int argc, char **argv)
         case 0:
             if (tl_scrubbing())
                 tl_scrub_tick();
+            if (in_dragging())
+                in_drag_tick();
             if (V.ms)
                 measure_tick();
             if (A.e)
@@ -2074,6 +2132,8 @@ int reeledit_main(int argc, char **argv)
         case 7:
             if (tl_scrubbing())
                 tl_drag_end(block);
+            else if (in_dragging())
+                in_drag_end(block);
             else if (cl_dragging())
                 cl_drag_end(block);
             else

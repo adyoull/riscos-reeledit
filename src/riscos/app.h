@@ -59,6 +59,28 @@ void lg_set(int on);
 void lg_end(void);
 /* guide.c: the User Guide opened in a browser (or why not, reported) */
 void gd_open(void);
+/* inspector.c: the selected item's settings, beside the Viewer */
+int in_window(void);
+int in_is_open(void);
+int in_width(void);                           /* its width and gap beside the Viewer (0: closed) */
+void in_open(void);
+void in_close(void);
+void in_toggle(void);
+void in_edited(void);                         /* the project or the selection changed */
+void in_place(int x1, int y0, int y1, int behind); /* to the right of x1, from y0 to y1 */
+void in_redraw(int *block);
+void in_click(int *block);
+void in_key(int *block);
+void in_menu_select(int *block);
+int in_dragging(void);
+void in_drag_tick(void);
+void in_drag_end(int *block);
+const char *in_help(void);
+/* viewer.c for it: the screen's width (OS units); the Inspector put beside
+   the Viewer; its menu open */
+int app_screen_w(void);
+void app_place_inspector(void);
+void app_inspector_menu_opened(void);
 void app_report(const char *text);
 /* A question: buttons (a comma list); 3 the first, 4 the second... */
 int app_ask(const char *text, const char *buttons);

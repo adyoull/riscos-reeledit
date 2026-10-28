@@ -37,6 +37,7 @@ void rp_changed(re_project *p)
     rp_relink(p);
     rp_fit_fades(p);
     rp_fit_sound(p);
+    rp_fit_colour(p);
     rp_fit_overlays(p);
     rp_fit_audio(p);
     fit_tractor(p);
@@ -305,6 +306,7 @@ static int adopt(re_project *p, mlt_producer prod)
     }
     rp_relink(p);
     rp_fit_sound(p);
+    rp_fit_colour(p);
     rp_fit_overlays(p);
     rp_fit_audio(p);
     return 0;
@@ -439,6 +441,8 @@ int re_project_item(re_project *p, int i, re_item *item)
         item->muted = rp_cut_muted(cut);
         item->volume = rp_cut_volume(cut);
         item->speed = rp_speed_percent(info.producer);
+        re_colour c;
+        item->coloured = rp_cut_colour(cut, &c);
     }
     const char *file =
         item->gap || item->mix ? NULL : re_project_original(p, rp_speed_file(info.producer, info.resource));
@@ -531,6 +535,8 @@ int rp_split_at(re_project *p, int frame)
     int fade_out = rp_fade_of(p, i, RP_PICTURE, 1), sound_out = rp_fade_of(p, i, RP_SOUND, 1);
     int muted = rp_cut_muted(mlt_playlist_get_clip(p->v1, i));
     int volume = rp_cut_volume(mlt_playlist_get_clip(p->v1, i));
+    re_colour colour;
+    rp_cut_colour(mlt_playlist_get_clip(p->v1, i), &colour);
     /* (the first part: its in to the frame before; the second, a new cut,
        is given the fades out and the mute) */
     if (mlt_playlist_split(p->v1, i, frame - it.start - 1))
@@ -542,6 +548,7 @@ int rp_split_at(re_project *p, int frame)
         rp_cut_mute(p, mlt_playlist_get_clip(p->v1, i + 1), 1);
     if (volume)
         rp_cut_set_volume(p, mlt_playlist_get_clip(p->v1, i + 1), volume);
+    rp_cut_set_colour(p, mlt_playlist_get_clip(p->v1, i + 1), &colour);
     return 1;
 }
 
