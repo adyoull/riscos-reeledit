@@ -877,6 +877,122 @@ static void overlays(const char *a, const char *b, const char *snd, const char *
     re_project_close(p);
 }
 
+/* ---- titles: text over the video (blocks for letters here: no Font
+   Manager); its picture made by style; put on V2 at the lower third, its
+   own size; changed (made again, its box with it); placed; kept through
+   undo, saving and opening */
+static int bright(int x0, int y0, int x1, int y1) /* (pixels of the shown picture brighter than 200) */
+{
+    int n = 0;
+    for (int y = y0; y < y1; y++)
+        for (int x = x0; x < x1; x++)
+            n += shown_luma[y * 320 + x] > 200;
+    return n;
+}
+
+static void titles(const char *a, const char *out)
+{
+    /* the pictures */
+    re_title t;
+    re_title_default(&t);
+    snprintf(t.text, sizeof(t.text), "Hello\nWorld!");
+    t.style = RE_TITLE_PLAIN;
+    t.size = 10;
+    uint8_t *rgba = NULL;
+    int w = 0, h = 0, w2 = 0, h2 = 0;
+    CHECK(!re_title_render(&t, 200, &rgba, &w, &h) && rgba && w > 6 * 12 && h >= 2 * 25,
+          "titles: rendered: %dx%d", w, h);
+    int lit = 0;
+    for (int i = 0; i < w * h; i++)
+        lit += rgba[i * 4 + 3] == 255 && rgba[i * 4] == 255;
+    CHECK(lit > 100 && rgba[3] == 0, "titles: plain: %d white pixels, the corner's alpha %d", lit, rgba[3]);
+    free(rgba);
+    t.style = RE_TITLE_BOX;
+    CHECK(!re_title_render(&t, 200, &rgba, &w2, &h2) && w2 > w && h2 > h && rgba[3] == 160 && rgba[0] == 0,
+          "titles: a box: %dx%d, its corner %d,%d", w2, h2, rgba ? rgba[0] : -1, rgba ? rgba[3] : -1);
+    free(rgba);
+    t.style = RE_TITLE_OUTLINE;
+    CHECK(!re_title_render(&t, 200, &rgba, &w2, &h2), "titles: an outline");
+    int dark = 0;
+    for (int i = 0; i < w2 * h2; i++)
+        dark += rgba[i * 4 + 3] == 255 && rgba[i * 4] == 0;
+    CHECK(dark > 50, "titles: an outline: %d black pixels", dark);
+    free(rgba);
+    t.style = RE_TITLE_SHADOW;
+    t.align = RE_TITLE_LEFT;
+    CHECK(!re_title_render(&t, 200, &rgba, &w2, &h2) && rgba[(2 * w2 + 2) * 4 + 3] == 0, "titles: a shadow");
+    dark = 0;
+    for (int i = 0; i < w2 * h2; i++)
+        dark += rgba[i * 4 + 3] > 100 && rgba[i * 4] == 0;
+    CHECK(dark > 20, "titles: a shadow: %d dark pixels", dark);
+    free(rgba);
+
+    /* on V2 */
+    re_engine_io io = {show, NULL, clk, NULL, 48000, 2, NULL};
+    re_project *p = re_project_new();
+    re_project_add(p, a, -1);
+    re_engine *e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    re_title_default(&t);
+    snprintf(t.text, sizeof(t.text), "Hello\nWorld");
+    t.style = RE_TITLE_PLAIN;
+    CHECK(re_project_title_add(p, &t, 10, 0) == 0, "titles: not added");
+    re_overlay o;
+    re_project_overlay(p, 0, &o);
+    CHECK(o.title && !o.video && !o.sound && o.start == 10 && o.length == 65 && o.place == RE_PLACE_LOWER_THIRD
+              && !strcmp(o.name, "Hello"),
+          "titles: added: title %d video %d at %d for %d, place %d, \"%s\"", o.title, o.video, o.start, o.length,
+          o.place, o.name);
+    re_title g;
+    CHECK(!re_project_title(p, 0, &g) && !strcmp(g.text, "Hello\nWorld") && g.size == t.size
+              && !strcmp(g.font, t.font) && g.colour == 0xFFFFFF && g.style == RE_TITLE_PLAIN,
+          "titles: read back: \"%s\" %s %d%% %06x style %d", g.text, g.font, g.size, g.colour, g.style);
+    re_engine_refresh(e);
+    luma_xy(e, 20, 0, 0);
+    int bottom = bright(0, 120, 320, 180), top = bright(0, 0, 320, 120), left = bright(0, 120, 100, 180);
+    int centre = bright(100, 120, 220, 180);
+    CHECK(bottom > 100 && top == 0 && centre > left, "titles: shown at the lower third: %d bright below, %d above, "
+          "%d centre, %d left", bottom, top, centre, left);
+    luma_xy(e, 5, 0, 0);
+    CHECK(bright(0, 0, 320, 180) == 0, "titles: not before it: %d", bright(0, 0, 320, 180));
+
+    /* changed: bigger; one undo */
+    t.size = 16;
+    CHECK(re_project_title_set(p, 0, &t) == 1 && re_project_title_set(p, 0, &t) == 0, "titles: made bigger (once)");
+    re_engine_refresh(e);
+    luma_xy(e, 20, 0, 0);
+    int bigger = bright(0, 0, 320, 180);
+    CHECK(bigger > bottom * 2, "titles: bigger: %d bright (%d before)", bigger, bottom);
+    snprintf(t.text, sizeof(t.text), "Bye");
+    re_project_title_set(p, 0, &t);
+    re_project_overlay(p, 0, &o);
+    CHECK(!strcmp(o.name, "Bye"), "titles: renamed: \"%s\"", o.name);
+    CHECK(re_project_undo(p) && !re_project_title(p, 0, &g) && !strcmp(g.text, "Hello\nWorld") && g.size == 16,
+          "titles: undone: \"%s\" %d", g.text, g.size);
+
+    /* placed top left */
+    CHECK(re_project_overlay_set(p, 0, RE_PLACE_TOP_LEFT, -1, -1) == 1, "titles: placed");
+    re_engine_close(e);
+    e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    luma_xy(e, 20, 0, 0);
+    CHECK(bright(0, 0, 160, 90) > 100 && bright(160, 90, 320, 180) == 0, "titles: top left: %d there, %d bottom right",
+          bright(0, 0, 160, 90), bright(160, 90, 320, 180));
+
+    /* saved, opened */
+    CHECK(re_project_save(p, out) == 0, "titles: not saved");
+    re_engine_close(e);
+    re_project_close(p);
+    CHECK(count(out, "qtext") >= 1 && count(out, "Hello") >= 1, "titles: saved as qtext");
+    p = re_project_open(out, 1);
+    CHECK(p && !re_project_overlay(p, 0, &o) && o.title && !re_project_title(p, 0, &g) && g.size == 16
+              && !strcmp(g.text, "Hello\nWorld"),
+          "titles: opened: title %d, \"%s\" %d", o.title, g.text, g.size);
+    e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    luma_xy(e, 20, 0, 0);
+    CHECK(bright(0, 0, 160, 90) > 100, "titles: opened, shown: %d", bright(0, 0, 160, 90));
+    re_engine_close(e);
+    re_project_close(p);
+}
+
 int main(int argc, char **argv)
 {
     if (argc != 13) {
@@ -1131,6 +1247,7 @@ int main(int argc, char **argv)
     ranges(a, b);
     clip_sound(a, argv[9], out);
     stills(argv[10]);
+    titles(a, out);
     overlays(a, b, argv[9], out, argv[10], argv[11], argv[12]);
     video_overlays(a, b, argv[9], n, argv[5], out);
     char dir[512];

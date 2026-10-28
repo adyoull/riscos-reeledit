@@ -24,6 +24,7 @@
  */
 #include "engine.h"
 #include "still.h"
+#include "title.h"
 
 #include <framework/mlt.h>
 #include <libavutil/cpu.h>
@@ -112,6 +113,7 @@ int re_mlt_start(void)
         if (av_get_cpu_flags() & AV_CPU_FLAG_NEON)
             mlt_environment_set("MLT_NEON", "1");
         re_still_register();
+        re_title_register();
         mlt_started = 1;
     }
     return 0;

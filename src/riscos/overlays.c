@@ -21,6 +21,7 @@
  *   Fade in, Fade out    a second; ticked when it has one, chosen again it
  *              goes (a video's sound fades with it)
  *   Sound      a video's: Mute; Fade in, Fade out (the sound alone)
+ *   Edit title...   a title's: the Title window (titles.c)
  *   Delete
  * Adjust keeps the menu open, to try another.
  *
@@ -235,7 +236,7 @@ void ov_delete(int ov)
     app_edited();
 }
 
-enum { O_PLACE, O_SIZE, O_OPACITY, O_FADE_IN, O_FADE_OUT, O_SOUND, O_DELETE };
+enum { O_PLACE, O_SIZE, O_OPACITY, O_FADE_IN, O_FADE_OUT, O_SOUND, O_TITLE, O_DELETE };
 static const int SIZES[8] = {10, 15, 20, 25, 33, 50, 75, 100}, OPACITIES[4] = {100, 75, 50, 25};
 static MENU(RE_PLACES) m_place = {"Place", 7, 2, 7, 0, 260, 44, 0,
                                   {{0, -1, IT("Full frame")}, {0, -1, IT("Centre")}, {0, -1, IT("Top left")},
@@ -246,9 +247,10 @@ static MENU(8) m_size = {"Size", 7, 2, 7, 0, 160, 44, 0,
                           {0, -1, IT("33%")}, {0, -1, IT("50%")}, {0, -1, IT("75%")}, {0x80, -1, IT("100%")}}};
 static MENU(4) m_opacity = {"Opacity", 7, 2, 7, 0, 160, 44, 0,
                             {{0, -1, IT("100%")}, {0, -1, IT("75%")}, {0, -1, IT("50%")}, {0x80, -1, IT("25%")}}};
-static MENU(7) m_overlay = {"Overlay", 7, 2, 7, 0, 240, 44, 0,
+static MENU(8) m_overlay = {"Overlay", 7, 2, 7, 0, 260, 44, 0,
                             {{0, 0, IT("Place")}, {0, 0, IT("Size")}, {2, 0, IT("Opacity")}, {0, -1, IT("Fade in")},
-                             {0, -1, IT("Fade out")}, {2, 0, IT("Sound")}, {0x80, -1, IT("Delete")}}};
+                             {0, -1, IT("Fade out")}, {2, 0, IT("Sound")}, {2, -1, IT("Edit title...")},
+                             {0x80, -1, IT("Delete")}}};
 
 void ov_menu_open(int x, int y, int ov)
 {
@@ -270,7 +272,8 @@ void ov_menu_open(int x, int y, int ov)
         menu_tick(&m_size.item[i].flags, SIZES[i] == o.size);
     for (int i = 0; i < 4; i++)
         menu_tick(&m_opacity.item[i].flags, OPACITIES[i] == o.opacity);
-    menu_shade(&m_overlay.item[O_SIZE].iflags, o.place == RE_PLACE_FULL);
+    menu_shade(&m_overlay.item[O_SIZE].iflags, o.place == RE_PLACE_FULL || o.title); /* (a title's own size) */
+    menu_shade(&m_overlay.item[O_TITLE].iflags, !o.title);
     menu_tick(&m_overlay.item[O_FADE_IN].flags, o.fade_in > 0);
     menu_tick(&m_overlay.item[O_FADE_OUT].flags, o.fade_out > 0);
     m_overlay.item[O_SOUND].sub = fx_sound_menu(o.muted, o.sound_fade_in, o.sound_fade_out, 0, 0);
@@ -329,6 +332,7 @@ void ov_menu_select(int *b)
         }
         break;
     }
+    case O_TITLE: ti_open(i); break;
     case O_DELETE: ov_delete(i); break;
     }
     /* Adjust: the menu stays open, for the same overlay */

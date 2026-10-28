@@ -15,6 +15,9 @@
  * pictures come here whoever made the project, and projects saved here
  * open in Shotcut.
  *
+ * Pictures made rather than read (a title: title.c) are the same, made
+ * again when what they're made from (the producer's properties) changes.
+ *
  * Also: RGBA written as a PNG (by FFmpeg's encoder), for sprites.c.
  *
  * Part of riscos-reeledit. GPL version 2 or later.
@@ -38,6 +41,10 @@ typedef struct
     int image_size, alpha_size;
     mlt_image_format format, asked; /* (the form it's in; the form asked for, if it couldn't be made) */
     int w, h;
+    /* a picture made, not read (a title: re_still_made): how, and from what
+       it was last made */
+    const re_still_maker *maker;
+    char *made_from;
 } still;
 
 static void still_free(still *s)
@@ -47,6 +54,7 @@ static void still_free(still *s)
     free(s->rgba);
     free(s->image);
     free(s->alpha);
+    free(s->made_from);
     free(s);
 }
 
@@ -188,6 +196,37 @@ static int make(still *s, mlt_frame frame, mlt_image_format format, int w, int h
     return 0;
 }
 
+/* A made picture made again if what it's made from has changed (the
+   producer's properties). 0, or -1 (none). */
+static int ensure(mlt_producer producer, still *s)
+{
+    if (!s->maker)
+        return s->rgba ? 0 : -1;
+    mlt_properties pp = MLT_PRODUCER_PROPERTIES(producer);
+    char key[2048];
+    s->maker->key(pp, key, sizeof(key));
+    if (s->rgba && s->made_from && !strcmp(s->made_from, key))
+        return 0;
+    uint8_t *rgba = NULL;
+    int w = 0, h = 0;
+    if (s->maker->make(pp, &rgba, &w, &h) || !rgba || w < 1 || h < 1) {
+        free(rgba);
+        return -1;
+    }
+    free(s->rgba);
+    free(s->image);
+    free(s->alpha);
+    free(s->made_from);
+    s->rgba = rgba;
+    s->width = w;
+    s->height = h;
+    s->image = s->alpha = NULL;
+    s->made_from = strdup(key);
+    mlt_properties_set_int(pp, "meta.media.width", w);
+    mlt_properties_set_int(pp, "meta.media.height", h);
+    return 0;
+}
+
 static int get_image(mlt_frame frame, uint8_t **buffer, mlt_image_format *format, int *width, int *height,
                      int writable)
 {
@@ -195,6 +234,8 @@ static int get_image(mlt_frame frame, uint8_t **buffer, mlt_image_format *format
     mlt_producer producer = mlt_frame_pop_service(frame);
     still *s = mlt_properties_get_data(MLT_PRODUCER_PROPERTIES(producer), "_still", NULL);
     if (!s)
+        return 1;
+    if (!s->rgba)
         return 1;
     int w = *width > 0 ? *width : s->width, h = *height > 0 ? *height : s->height;
     /* (the loader's rescale filter asks for the picture at its own size and
@@ -209,7 +250,7 @@ static int get_image(mlt_frame frame, uint8_t **buffer, mlt_image_format *format
     }
     mlt_image_format want = *format == mlt_image_none ? mlt_image_rgba : *format;
     mlt_service_lock(MLT_PRODUCER_SERVICE(producer));
-    if (!s->image || s->w != w || s->h != h || s->asked != want) {
+    if (!s->image || s->w != w || s->h != h || s->asked != want || !s->rgba) {
         if (make(s, frame, want, w, h)) {
             mlt_service_unlock(MLT_PRODUCER_SERVICE(producer));
             return 1;
@@ -244,6 +285,8 @@ static int get_frame(mlt_producer producer, mlt_frame_ptr frame, int index)
 {
     (void) index;
     still *s = mlt_properties_get_data(MLT_PRODUCER_PROPERTIES(producer), "_still", NULL);
+    if (s)
+        ensure(producer, s); /* (mlt_service_get_frame holds the producer's lock) */
     *frame = mlt_frame_init(MLT_PRODUCER_SERVICE(producer));
     if (!*frame)
         return 1;
@@ -261,23 +304,17 @@ static int get_frame(mlt_producer producer, mlt_frame_ptr frame, int index)
     return 0;
 }
 
-static mlt_producer still_init(mlt_profile profile, mlt_service_type type, const char *id, char *arg)
+/* A producer of a still picture, s (its own from here) */
+static mlt_producer producer_of(mlt_profile profile, still *s, const char *service, const char *resource)
 {
-    (void) type;
-    (void) id;
-    if (!arg || !*arg)
-        return NULL;
-    still *s = calloc(1, sizeof(*s));
-    mlt_producer p = s ? mlt_producer_new(profile) : NULL;
-    if (!p || decode(s, arg)) {
+    mlt_producer p = mlt_producer_new(profile);
+    if (!p) {
         still_free(s);
-        if (p)
-            mlt_producer_close(p);
         return NULL;
     }
     mlt_properties pp = MLT_PRODUCER_PROPERTIES(p);
-    mlt_properties_set(pp, "resource", arg);
-    mlt_properties_set(pp, "mlt_service", "qimage");
+    mlt_properties_set(pp, "resource", resource);
+    mlt_properties_set(pp, "mlt_service", service);
     mlt_properties_set_position(pp, "length", LENGTH);
     mlt_properties_set_position(pp, "out", LENGTH - 1);
     mlt_properties_set_int(pp, "meta.media.width", s->width);
@@ -290,6 +327,45 @@ static mlt_producer still_init(mlt_profile profile, mlt_service_type type, const
     return p;
 }
 
+static mlt_producer still_init(mlt_profile profile, mlt_service_type type, const char *id, char *arg)
+{
+    (void) type;
+    (void) id;
+    if (!arg || !*arg)
+        return NULL;
+    still *s = calloc(1, sizeof(*s));
+    if (!s || decode(s, arg)) {
+        still_free(s);
+        return NULL;
+    }
+    return producer_of(profile, s, "qimage", arg);
+}
+
+mlt_producer re_still_made(mlt_profile profile, const char *service, const char *resource, const re_still_maker *maker)
+{
+    still *s = calloc(1, sizeof(*s));
+    if (!s)
+        return NULL;
+    s->maker = maker;
+    return producer_of(profile, s, service, resource ? resource : "");
+}
+
+int re_still_size(mlt_producer producer, int *width, int *height)
+{
+    mlt_producer parent = producer ? mlt_producer_cut_parent(producer) : NULL;
+    if (!parent)
+        parent = producer;
+    still *s = parent ? mlt_properties_get_data(MLT_PRODUCER_PROPERTIES(parent), "_still", NULL) : NULL;
+    if (!s)
+        return -1;
+    mlt_service_lock(MLT_PRODUCER_SERVICE(parent));
+    int bad = ensure(parent, s);
+    *width = s->width;
+    *height = s->height;
+    mlt_service_unlock(MLT_PRODUCER_SERVICE(parent));
+    return bad;
+}
+
 void re_still_register(void)
 {
     mlt_repository r = mlt_factory_repository();
@@ -297,13 +373,21 @@ void re_still_register(void)
         mlt_repository_register(r, mlt_service_producer_type, "qimage", (mlt_register_callback) still_init);
 }
 
+const char *re_still_kind[4] = {"qimage"};
+int re_still_kinds = 1;
+
 int re_still_is(mlt_producer producer)
 {
     if (!producer)
         return 0;
     mlt_producer parent = mlt_producer_cut_parent(producer);
     const char *s = mlt_properties_get(MLT_PRODUCER_PROPERTIES(parent ? parent : producer), "mlt_service");
-    return s && !strcmp(s, "qimage");
+    if (!s)
+        return 0;
+    for (int i = 0; i < re_still_kinds; i++)
+        if (!strcmp(s, re_still_kind[i]))
+            return 1;
+    return 0;
 }
 
 int re_still_open(const char *file, int *width, int *height)

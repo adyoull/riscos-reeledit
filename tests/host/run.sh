@@ -57,14 +57,14 @@ $CC $CFLAGS "$HERE/pull_test.c" -o "$O/pull_test" -Wl,--wrap=pthread_create $MLT
 $CC $CFLAGS "$HERE/prefer_test.c" -o "$O/prefer_test" \
   -Wl,--wrap=avcodec_find_decoder_by_name,--wrap=avcodec_open2,--wrap=avcodec_send_packet \
   -Wl,--wrap=avcodec_free_context,--wrap=av_opt_set_int $MLTLIBS $FFLIBS -lpthread -lm || bad=1
-$CC $CFLAGS -I"$TOP/src" "$TOP/src/engine.c" "$TOP/src/still.c" "$HERE/engine_test.c" -o "$O/engine_test" \
+$CC $CFLAGS -I"$TOP/src" "$TOP/src/engine.c" "$TOP/src/still.c" "$TOP/src/title.c" "$HERE/engine_test.c" -o "$O/engine_test" \
   -Wl,--wrap=pthread_create $MLTLIBS $FFLIBS -lpthread -lm || bad=1
 $CC $CFLAGS "$HERE/convert_test.c" -o "$O/convert_test" -Wl,--wrap=sws_scale,--wrap=mlt_frame_clone,--wrap=mlt_frame_clone_image,--wrap=avcodec_receive_frame $MLTLIBS $FFLIBS -lpthread -lm || bad=1
 $CC $CFLAGS "$HERE/render_test.c" -o "$O/render_test" $MLTLIBS $FFLIBS -lpthread -lm || bad=1
-$CC $CFLAGS -DRE_TEST -I"$HERE/fake" -I"$TOP/src" "$TOP/src/engine.c" "$TOP/src/project.c" "$TOP/src/dissolve.c" "$TOP/src/fade.c" "$TOP/src/clipsound.c" "$TOP/src/overlay.c" "$TOP/src/still.c" "$TOP/src/sprites.c" "$TOP/src/measure.c" "$TOP/src/riscos/viewer.c" \
-  "$TOP/src/riscos/timeline.c" "$TOP/src/riscos/savebox.c" "$TOP/src/riscos/info.c" "$TOP/src/riscos/effects.c" "$TOP/src/riscos/marks.c" "$TOP/src/riscos/overlays.c" "$TOP/src/riscos/display.c" \
+$CC $CFLAGS -DRE_TEST -I"$HERE/fake" -I"$TOP/src" "$TOP/src/engine.c" "$TOP/src/project.c" "$TOP/src/dissolve.c" "$TOP/src/fade.c" "$TOP/src/clipsound.c" "$TOP/src/overlay.c" "$TOP/src/still.c" "$TOP/src/title.c" "$TOP/src/sprites.c" "$TOP/src/measure.c" "$TOP/src/riscos/viewer.c" \
+  "$TOP/src/riscos/timeline.c" "$TOP/src/riscos/savebox.c" "$TOP/src/riscos/info.c" "$TOP/src/riscos/effects.c" "$TOP/src/riscos/marks.c" "$TOP/src/riscos/overlays.c" "$TOP/src/riscos/titles.c" "$TOP/src/riscos/display.c" \
   "$TOP/src/riscos/sound.c" "$HERE/editor_test.c" -o "$O/editor_test" $MLTLIBS $FFLIBS -lpthread -lm || bad=1
-$CC $CFLAGS -I"$TOP/src" "$TOP/src/engine.c" "$TOP/src/project.c" "$TOP/src/dissolve.c" "$TOP/src/fade.c" "$TOP/src/clipsound.c" "$TOP/src/overlay.c" "$TOP/src/still.c" "$TOP/src/sprites.c" "$TOP/src/measure.c" "$HERE/project_test.c" -o "$O/project_test" \
+$CC $CFLAGS -I"$TOP/src" "$TOP/src/engine.c" "$TOP/src/project.c" "$TOP/src/dissolve.c" "$TOP/src/fade.c" "$TOP/src/clipsound.c" "$TOP/src/overlay.c" "$TOP/src/still.c" "$TOP/src/title.c" "$TOP/src/sprites.c" "$TOP/src/measure.c" "$HERE/project_test.c" -o "$O/project_test" \
   $MLTLIBS $FFLIBS -lpthread -lm || bad=1
 $CC -shared -fPIC "$HERE/count_threads.c" -o "$O/count_threads.so" -ldl || bad=1
 

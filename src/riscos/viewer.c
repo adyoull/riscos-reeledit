@@ -1024,7 +1024,7 @@ static void save(int x, int y)
 
 static MENU(3) m_file = {"File", 7, 2, 7, 0, 280, 44, 0,
                          {{0, -1, IT("New")}, {0, -1, IT("Save          F3")}, {0x80, -1, IT("Save as...")}}};
-static MENU(13) m_edit = {"Edit", 7, 2, 7, 0, 520, 44, 0,
+static MENU(14) m_edit = {"Edit", 7, 2, 7, 0, 520, 44, 0,
                          {{0, -1, IT("Undo                     F8")}, {2, -1, IT("Redo                     F9")},
                           {0, -1, IT("Split at the playhead     S")}, {0, -1, IT("Trim the start to it      Q")},
                           {0, -1, IT("Trim the end to it        W")}, {2, -1, IT("Dissolve at the cut       D")},
@@ -1032,7 +1032,8 @@ static MENU(13) m_edit = {"Edit", 7, 2, 7, 0, 520, 44, 0,
                           {0, -1, IT("Delete               Delete")},
                           {2, -1, IT("Delete, leaving a gap   \x8b" "Del")},
                           {0, -1, IT("Extract the marked part   '")}, {2, -1, IT("Lift the marked part      ;")},
-                          {0x80, -1, IT("Clear the selection      ^Z")}}};
+                          {2, -1, IT("Clear the selection      ^Z")},
+                          {0x80, -1, IT("New title...              T")}}};
 static char play_item[24] = "Play           Space";
 static MENU(7) m_play = {"Play", 7, 2, 7, 0, 420, 44, 0,
                          {{0, -1, ITEM_FLAGS, play_item, (const char *) -1, sizeof(play_item)},
@@ -1048,7 +1049,8 @@ static MENU(5) m_main = {"Reel Edit", 7, 2, 7, 0, 340, 44, 0,
                           {0x80, -1, IT("Video information...")}}};
 static MENU(2) m_bar = {"Reel Edit", 7, 2, 7, 0, 160, 44, 0,
                         {{0, -1, IT("Info")}, {0x80, -1, IT("Quit")}}};
-static int menu_is; /* 0 none, 1 the icon bar's, 2 the editor's, 3 the Timeline's context menu (effects.c), 4 overlays.c's */
+static int menu_is; /* 0 none, 1 the icon bar's, 2 the editor's, 3 the Timeline's context menu (effects.c), 4 overlays.c's,
+                       5 titles.c's */
 static int menu_x, menu_y;
 
 void app_menu(int x, int y)
@@ -1078,6 +1080,7 @@ void app_menu(int x, int y)
     menu_shade(&m_edit.item[10].iflags, !marked);
     menu_shade(&m_edit.item[11].iflags, !marked);
     menu_shade(&m_edit.item[12].iflags, A.sel < 0 && A.ov_sel < 0);
+    menu_shade(&m_edit.item[13].iflags, !has);
     for (int i = 3; i <= 4; i++)
         menu_shade(&m_play.item[i].iflags, !has);
     menu_shade(&m_play.item[5].iflags, !marked);
@@ -1119,6 +1122,12 @@ void app_overlays_menu_opened(void)
     re_display_check_covered();
 }
 
+void app_titles_menu_opened(void)
+{
+    menu_is = 5;
+    re_display_check_covered();
+}
+
 static void menu_select(int *b)
 {
     _kernel_swi_regs r;
@@ -1129,6 +1138,10 @@ static void menu_select(int *b)
     }
     if (menu_is == 4) {
         ov_menu_select(b);
+        return;
+    }
+    if (menu_is == 5) {
+        ti_menu_select(b);
         return;
     }
     if (menu_is == 1) {
@@ -1168,6 +1181,7 @@ static void menu_select(int *b)
         case 10: mk_take(1); break;
         case 11: mk_take(0); break;
         case 12: tl_select(-1); break;
+        case 13: ti_open(-1); break;
         }
         break;
     case 2: /* Play */
@@ -1250,6 +1264,7 @@ int app_key(int k)
     case ';': mk_take(0); return 1;                /* Lift */
     case 'w': case 'W': trim(1); return 1;
     case 'n': case 'N': snap_toggle(); return 1;
+    case 't': case 'T': ti_open(-1); return 1;
     case 'Z': case '\\': tl_zoom(-1); return 1;    /* Shift-Z, \\: the whole project */
     case 0x183: {                                  /* F3: save */
         int p[5];
@@ -1268,6 +1283,10 @@ static void key(int *b)
     _kernel_swi_regs r;
     if (sb_window() && b[0] == sb_window()) {
         sb_key(b);
+        return;
+    }
+    if (ti_window() && b[0] == ti_window()) {
+        ti_key(b);
         return;
     }
     if ((b[0] == V.win || b[0] == tl_window()) && app_key(b[6]))
@@ -1314,6 +1333,10 @@ static void click(int *b)
     }
     if (sb_window() && w == sb_window()) {
         sb_click(b);
+        return;
+    }
+    if (ti_window() && w == ti_window()) {
+        ti_click(b);
         return;
     }
     if (w == tl_window()) {
@@ -1382,6 +1405,8 @@ static const char *help_for(int win, int icon, int y)
                "to the project, or an MLT project to open it.";
     if (win == info_window())
         return "This window shows the clip's and the project's video information.";
+    if (ti_window() && win == ti_window())
+        return ti_help(icon);
     if (win != V.win)
         return NULL;
     switch (icon) {
@@ -1606,6 +1631,9 @@ int reeledit_main(int argc, char **argv)
         return 1;
     A.task = (int) r.r[1];
     re_display_init(A.task);
+#ifdef __riscos__
+    re_title_set_font(fm_line); /* (titles' text by the Font Manager; the Linux tests' are blocks) */
+#endif
     iconbar_icon();
     V.idle_cs = -1;
 

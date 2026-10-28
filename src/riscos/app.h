@@ -10,6 +10,8 @@
  *   marks.c     the in and out marks: play them, take them out
  *   overlays.c  pictures and videos over the video (V2): dropped, their menu; sprites
  *               made PNGs
+ *   titles.c    the Title window: text over the video
+ *   fonts.c     titles' text drawn by the Font Manager
  *   info.c      the Video information window
  *   display.c, sound.c   the picture (overlay or sprite) and the sound
  *
@@ -135,6 +137,20 @@ void ov_menu_open(int x, int y, int ov);
 void ov_menu_select(int *block);
 int ov_fade_toggle(int ov, int end); /* a second's fade, or taken away. 1 changed */
 void ov_delete(int ov);
+
+/* ---- titles.c: the Title window ---- */
+int ti_window(void);
+void ti_open(int ov);          /* a new title (ov -1: at the playhead), or the title ov changed */
+void ti_close(void);
+void ti_click(int *block);
+void ti_key(int *block);
+void ti_menu_select(int *block);
+const char *ti_help(int icon);
+/* A menu of titles.c's open (its selections go there) */
+void app_titles_menu_opened(void);
+/* fonts.c (RISC OS only): a line of a title's text drawn by the Font
+   Manager (title.h's re_title_font_fn) */
+int fm_line(const char *font, int px, const char *line, uint8_t **mask, int *width, int *height);
 
 /* ---- info.c ---- */
 void info_open(void);          /* Video information: the selected clip (or the one at the playhead), the project */

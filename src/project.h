@@ -8,6 +8,7 @@
 #ifndef RE_PROJECT_H
 #define RE_PROJECT_H
 #include <framework/mlt.h>
+#include "title.h"
 
 typedef struct re_project re_project;
 
@@ -155,6 +156,7 @@ typedef struct
     int opacity;           /* % */
     int fade_in, fade_out; /* frames (0: none) */
     int video;             /* 1: a video (else a picture) */
+    int title;             /* 1: a title (a picture made from text: title.h) */
     int in;                /* a video's first frame in its file (a picture's: 0) */
     int source_length;     /* a video's file's length (frames; a picture's: 0) */
     int sound;             /* 1: a video with sound */
@@ -194,6 +196,17 @@ int re_project_overlay_mute(re_project *p, int i, int on);
 int re_project_overlay_sound_fade(re_project *p, int i, int end, int length);
 /* Taken away. 1 done, 0 not. */
 int re_project_overlay_remove(re_project *p, int i);
+
+/* Titles (title.h): text over the video, an overlay made from it. Put on
+   V2 from a frame, so long (0: 5 seconds), where there's room; at the
+   lower third (its place can be changed as any overlay's; not its size:
+   the title's own). Its index, or -1. */
+int re_project_title_add(re_project *p, const re_title *t, int frame, int length);
+/* A title's settings (an overlay that's a title). 0, or -1. */
+int re_project_title(re_project *p, int i, re_title *t);
+/* A title changed (its text, font, size, colour, style or lines'
+   alignment): made again, its box with it. 1 changed, 0 not. */
+int re_project_title_set(re_project *p, int i, const re_title *t);
 
 /* Undo and redo (up to 100 edits): the project as it was before the last
    edit, and back. 1 done, 0 nothing to do. The producer changes: an

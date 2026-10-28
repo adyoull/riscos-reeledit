@@ -32,6 +32,7 @@
  */
 #include "project_internal.h"
 #include "still.h"
+#include "title.h"
 
 #include <limits.h>
 #include <stdio.h>
@@ -92,6 +93,7 @@ int re_project_overlay(re_project *p, int i, re_overlay *o)
     o->start = info.start;
     o->length = info.frame_count;
     o->video = !re_still_is(info.cut);
+    o->title = re_title_is(info.cut);
     o->in = o->video ? info.frame_in : 0;
     o->source_length = o->video ? info.length : 0;
     o->place = place_of(mlt_properties_get(cp, "shotcut:reeledit_place"));
@@ -115,6 +117,13 @@ int re_project_overlay(re_project *p, int i, re_overlay *o)
         if (*c == '/' || *c == '\\')
             leaf = c + 1;
     snprintf(o->name, sizeof(o->name), "%.63s", leaf);
+    re_title t;
+    if (o->title && !re_title_get(info.cut, &t)) { /* (a title's name: its first line) */
+        char *nl = strchr(t.text, '\n');
+        if (nl)
+            *nl = 0;
+        snprintf(o->name, sizeof(o->name), "%.63s", t.text[0] ? t.text : "Title");
+    }
     return 0;
 }
 
@@ -235,6 +244,44 @@ static int by_start(const void *a, const void *b)
 /* ---- the composites ------------------------------------------------------------------------ */
 
 /* The box an overlay is fitted in (% of the frame), and how it sits in it */
+static void box(const re_overlay *o, double *x, double *y, double *w, double *h, const char **ha, const char **va);
+
+/* A title's box: its picture's size (as % of the frame), where its place
+   says (a lower third: at the bottom, across the middle), so it's shown at
+   its own size; kept within the frame (made smaller, if it must be) */
+static void title_box(re_project *p, mlt_producer cut, const re_overlay *o, double *x, double *y, double *w, double *h,
+                      const char **ha, const char **va)
+{
+    int iw = 0, ih = 0;
+    if (re_still_size(cut, &iw, &ih) || iw < 1 || ih < 1) {
+        box(o, x, y, w, h, ha, va);
+        return;
+    }
+    *w = 100.0 * iw / p->profile->width;
+    *h = 100.0 * ih / p->profile->height;
+    double most = 100 - 2 * MARGIN;
+    if (*w > most) {
+        *h *= most / *w;
+        *w = most;
+    }
+    if (*h > most) {
+        *w *= most / *h;
+        *h = most;
+    }
+    *ha = "centre";
+    *va = "middle";
+    double left = MARGIN, right = 100 - MARGIN - *w, top = MARGIN, bottom = 100 - MARGIN - *h;
+    double mid_x = (100 - *w) / 2, mid_y = (100 - *h) / 2;
+    switch (o->place) {
+    case RE_PLACE_TOP_LEFT: *x = left; *y = top; break;
+    case RE_PLACE_TOP_RIGHT: *x = right; *y = top; break;
+    case RE_PLACE_BOTTOM_LEFT: *x = left; *y = bottom; break;
+    case RE_PLACE_BOTTOM_RIGHT: *x = right; *y = bottom; break;
+    case RE_PLACE_LOWER_THIRD: *x = mid_x; *y = bottom; break;
+    default: *x = mid_x; *y = mid_y; break; /* (centre, full) */
+    }
+}
+
 static void box(const re_overlay *o, double *x, double *y, double *w, double *h, const char **ha, const char **va)
 {
     double s = o->size < 1 ? 1 : o->size > 100 ? 100 : o->size;
@@ -322,7 +369,13 @@ void rp_fit_overlays(re_project *p)
         mlt_properties tp = MLT_TRANSITION_PROPERTIES(t);
         double x, y, w, h;
         const char *ha, *va;
-        box(&o, &x, &y, &w, &h, &ha, &va);
+        if (o.title) {
+            mlt_playlist_clip_info info;
+            mlt_playlist_get_clip_info(p->v2, &info, entry(p, i));
+            title_box(p, info.cut, &o, &x, &y, &w, &h, &ha, &va);
+        } else {
+            box(&o, &x, &y, &w, &h, &ha, &va);
+        }
         double op = (o.opacity < 0 ? 0 : o.opacity > 100 ? 100 : o.opacity) / 100.0;
         char rect[96], g[400];
         snprintf(rect, sizeof(rect), "%g%%/%g%%:%g%%x%g%%", x, y, w, h);
@@ -368,6 +421,48 @@ void rp_fit_overlays(re_project *p)
 
 /* ---- edits -------------------------------------------------------------------------------- */
 
+/* A picture, a video or a title (pic: ours from here) put on V2 from a
+   frame, so long, where there's room, at a place and size. Its index, or
+   -1. */
+static int put(re_project *p, mlt_producer pic, int frame, int length, int place, int size)
+{
+    if (frame < 0)
+        frame = 0;
+    slot *s;
+    int n = read_v2(p, &s);
+    if (n < 0 || room(p, s, n, -1, &frame, &length)) {
+        for (int i = 0; i < n; i++)
+            mlt_producer_close(s[i].cut);
+        free(s);
+        mlt_producer_close(pic);
+        return -1;
+    }
+    rp_checkpoint(p);
+    if (make_v2(p) < 0) {
+        rp_no_edit(p);
+        for (int i = 0; i < n; i++)
+            mlt_producer_close(s[i].cut);
+        free(s);
+        mlt_producer_close(pic);
+        return -1;
+    }
+    mlt_producer cut = mlt_producer_cut(pic, 0, length - 1);
+    mlt_producer_close(pic);
+    mlt_properties cp = MLT_PRODUCER_PROPERTIES(cut);
+    mlt_properties_set(cp, "shotcut:reeledit_place", PLACES[place]);
+    mlt_properties_set_int(cp, "shotcut:reeledit_size", size);
+    mlt_properties_set_int(cp, "shotcut:reeledit_opacity", 100);
+    s[n].cut = cut;
+    s[n].start = frame;
+    s[n].length = length;
+    s[n].in = 0;
+    qsort(s, n + 1, sizeof(slot), by_start);
+    write_v2(p, s, n + 1);
+    free(s);
+    rp_changed(p);
+    return re_project_overlay_at(p, frame);
+}
+
 int re_project_overlay_add(re_project *p, const char *file, int frame, int length)
 {
     int pw = 0, ph = 0;
@@ -395,45 +490,9 @@ int re_project_overlay_add(re_project *p, const char *file, int frame, int lengt
         if (length <= 0)
             length = re_project_frames(p, 5.0);
     }
-    if (frame < 0)
-        frame = 0;
-    slot *s;
-    int n = read_v2(p, &s);
-    if (n < 0 || room(p, s, n, -1, &frame, &length)) {
-        for (int i = 0; i < n; i++)
-            mlt_producer_close(s[i].cut);
-        free(s);
-        mlt_producer_close(pic);
-        return -1;
-    }
-    rp_checkpoint(p);
-    if (make_v2(p) < 0) {
-        rp_no_edit(p);
-        for (int i = 0; i < n; i++)
-            mlt_producer_close(s[i].cut);
-        free(s);
-        mlt_producer_close(pic);
-        return -1;
-    }
-    mlt_producer cut = mlt_producer_cut(pic, 0, length - 1);
-    mlt_producer_close(pic);
-    mlt_properties cp = MLT_PRODUCER_PROPERTIES(cut);
-    /* (a picture as big as the frame, or near it: all of it; a smaller one
-       a logo, top right; a video a picture in the picture, bottom right) */
     int big = !video && (pw * 2 >= p->profile->width || ph * 2 >= p->profile->height);
-    mlt_properties_set(cp, "shotcut:reeledit_place",
-                       PLACES[video ? RE_PLACE_BOTTOM_RIGHT : big ? RE_PLACE_FULL : RE_PLACE_TOP_RIGHT]);
-    mlt_properties_set_int(cp, "shotcut:reeledit_size", video ? 33 : big ? 100 : 20);
-    mlt_properties_set_int(cp, "shotcut:reeledit_opacity", 100);
-    s[n].cut = cut;
-    s[n].start = frame;
-    s[n].length = length;
-    s[n].in = 0;
-    qsort(s, n + 1, sizeof(slot), by_start);
-    write_v2(p, s, n + 1);
-    free(s);
-    rp_changed(p);
-    return re_project_overlay_at(p, frame);
+    return put(p, pic, frame, length, video ? RE_PLACE_BOTTOM_RIGHT : big ? RE_PLACE_FULL : RE_PLACE_TOP_RIGHT,
+               video ? 33 : big ? 100 : 20);
 }
 
 int re_project_overlay_span(re_project *p, int i, int start, int length)
@@ -616,5 +675,46 @@ int re_project_overlay_remove(re_project *p, int i)
     if (n > 0 && mlt_playlist_is_blank(p->v2, n - 1))
         mlt_playlist_remove(p->v2, n - 1);
     rp_changed(p);
+    return 1;
+}
+
+/* ---- titles ------------------------------------------------------------------------------ */
+
+int re_project_title_add(re_project *p, const re_title *t, int frame, int length)
+{
+    if (!p->tractor || re_project_length(p) <= 0)
+        return -1;
+    mlt_producer pic = re_title_producer(p->profile, t);
+    if (!pic)
+        return -1;
+    if (length <= 0)
+        length = re_project_frames(p, 5.0);
+    return put(p, pic, frame, length, RE_PLACE_LOWER_THIRD, 100);
+}
+
+int re_project_title(re_project *p, int i, re_title *t)
+{
+    mlt_playlist_clip_info info;
+    int e = entry(p, i);
+    if (e < 0 || mlt_playlist_get_clip_info(p->v2, &info, e))
+        return -1;
+    return re_title_get(info.cut, t);
+}
+
+int re_project_title_set(re_project *p, int i, const re_title *t)
+{
+    mlt_playlist_clip_info info;
+    re_title now;
+    int e = entry(p, i);
+    if (e < 0 || mlt_playlist_get_clip_info(p->v2, &info, e) || re_title_get(info.cut, &now))
+        return 0;
+    if (!memcmp(&now, t, sizeof(now)) || (!strcmp(now.text, t->text) && !strcmp(now.font, t->font)
+                                           && now.size == t->size && now.colour == t->colour
+                                           && now.style == t->style && now.align == t->align))
+        return 0;
+    if (!p->in_edit)
+        rp_checkpoint(p);
+    re_title_put(info.cut, t);
+    rp_changed(p); /* (its composite's box made again: its new size) */
     return 1;
 }

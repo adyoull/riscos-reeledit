@@ -61,6 +61,7 @@ int re_test_measuring(void);
 int re_test_busy(void);
 const char *re_test_title(void);
 char *re_test_savebox_name(void);
+char *re_test_title_line(int n);
 
 static int fails;
 static int phase, phase_cs;
@@ -83,6 +84,7 @@ static char typed_path[300], dragged_path[300];
 #define TL     0x1100
 #define INFO   0x1200 /* (made before the save box in this script) */
 #define SAVEB  0x1300
+#define TITLEW 0x1400 /* (the Title window: drawn by the Wimp) */
 #define COVER  0x2000
 #define FILER  0x3000 /* a directory display */
 #define TASK   0x4321
@@ -97,12 +99,12 @@ typedef struct
 {
     int open, box[4], scroll_x, behind, redraw, extent_w;
 } fwin;
-static fwin W[4]; /* VIEWER, TL, INFO, SAVEB */
+static fwin W[5]; /* VIEWER, TL, INFO, SAVEB, TITLEW */
 static int windows_made;
 static fwin *win(int h)
 {
     int i = (h - VIEWER) / 0x100;
-    return h >= VIEWER && i < 4 && (h - VIEWER) % 0x100 == 0 ? &W[i] : NULL;
+    return h >= VIEWER && i < 5 && (h - VIEWER) % 0x100 == 0 ? &W[i] : NULL;
 }
 
 static unsigned fake_cs = 1000;
@@ -297,8 +299,8 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
     case 0x57288: r->r[0] = ssb_added; r->r[1] = ssb_heard(); break;
     case 0x400C0: r->r[0] = 380; r->r[1] = TASK; break;
     case 0x400C1:                                                   /* CreateWindow */
-        if (windows_made >= 4)
-            fail_quit("more than four windows made");
+        if (windows_made >= 5)
+            fail_quit("more than five windows made");
         scr_create_window(windows_made, (const void *) r->r[1]);
         r->r[0] = VIEWER + 0x100 * windows_made++;
         break;
@@ -328,8 +330,8 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
         last_mask = (int) r->r[0];
         if (++polls > 40000)
             fail_quit("too many polls: the script is stuck");
-        for (int i = 0; i < 4; i++)
-            if (W[i].redraw && W[i].open && i != 3) { /* (the save box is drawn by the Wimp) */
+        for (int i = 0; i < 5; i++)
+            if (W[i].redraw && W[i].open && i != 3 && i != 4) { /* (the save box is drawn by the Wimp) */
                 W[i].redraw = 0;
                 b[0] = VIEWER + 0x100 * i;
                 r->r[0] = 1;
@@ -503,9 +505,9 @@ static int shot_box(int i, int b[5])
 }
 static void shot(const char *name)
 {
-    static const int order[4] = {0, 1, 2, 3};
+    static const int order[5] = {0, 1, 2, 3, 4};
     int pitch = (ov_w + 31) & ~31;
-    snap(name, order, 4, shot_box, ov_shown_bank >= 0 ? ov_buf[ov_shown_bank] : NULL, ov_w, ov_h, pitch);
+    snap(name, order, 5, shot_box, ov_shown_bank >= 0 ? ov_buf[ov_shown_bank] : NULL, ov_w, ov_h, pitch);
 }
 
 static int grey(int frame)
@@ -1999,8 +2001,74 @@ static int script(int *b, int mask)
     case 44:
         if (nulls)
             return 0;
-        next(45);
+        next(240);
         return key_to(b, TL, 's'); /* a change */
+    /* ---- titles: T opens the Title window; two lines typed, Size > Large, Create; the overlay
+       menu's Edit title..., changed ---- */
+    case 240:
+        if (nulls)
+            return 0;
+        next(241);
+        return key_to(b, TL, 't');
+    case 241:
+        if (nulls)
+            return 0;
+        CHECK(windows_made == 5 && W[4].open, "T didn't open the Title window (%d windows, open %d)", windows_made,
+              W[4].open);
+        strcpy(re_test_title_line(0), "Hello");
+        strcpy(re_test_title_line(1), "Reel Edit");
+        mark = menus;
+        next(242);
+        b[0] = W[4].box[0] + 600; b[1] = W[4].box[3] - 170; b[2] = 4; b[3] = TITLEW; b[4] = 6; /* Size: its menu */
+        return 6;
+    case 242:
+        CHECK(menus == mark + 1, "the Size button gave no menu");
+        next(243);
+        b[0] = 3; b[1] = -1; /* Large */
+        return 9;
+    case 243:
+        shot("23-title-window");
+        mark = re_project_overlays(re_test_project());
+        next(244);
+        b[0] = W[4].box[2] - 50; b[1] = W[4].box[1] + 50; b[2] = 4; b[3] = TITLEW; b[4] = 16; /* Create */
+        return 6;
+    case 244: {
+        if (nulls)
+            return 0;
+        re_overlay o;
+        re_title t;
+        int i = re_project_overlays(re_test_project()) - 1;
+        CHECK(i == mark && !re_project_overlay(re_test_project(), i, &o) && o.title && !strcmp(o.name, "Hello")
+                  && !re_project_title(re_test_project(), i, &t) && !strcmp(t.text, "Hello\nReel Edit") && t.size == 11
+                  && o.place == RE_PLACE_LOWER_THIRD && !W[4].open,
+              "Create: %d overlays (%d before), \"%s\", size %d, place %d, window open %d", i + 1, mark, o.name, t.size,
+              o.place, W[4].open);
+        shot("24-title");
+        next(245);
+        return click_tl(b, o.start + 10, 2, 2); /* Menu over the title on V2 */
+    }
+    case 245:
+        next(246);
+        b[0] = 6; b[1] = -1; /* Edit title... */
+        return 9;
+    case 246:
+        if (nulls)
+            return 0;
+        CHECK(W[4].open && !strcmp(re_test_title_line(0), "Hello") && !strcmp(re_test_title_line(1), "Reel Edit"),
+              "Edit title...: open %d, \"%s\" / \"%s\"", W[4].open, re_test_title_line(0), re_test_title_line(1));
+        strcpy(re_test_title_line(0), "Bye");
+        next(247);
+        return key_to(b, TITLEW, 13); /* (Return on the second line: changed) */
+    case 247: {
+        if (nulls)
+            return 0;
+        re_overlay o;
+        int i = re_project_overlays(re_test_project()) - 1;
+        CHECK(!re_project_overlay(re_test_project(), i, &o) && !strcmp(o.name, "Bye") && i == mark && !W[4].open,
+              "Edit title... changed: \"%s\", %d overlays, open %d", o.name, i + 1, W[4].open);
+        next(45);
+        return key_to(b, TL, 0x18D); /* (Right: a frame on) */
+    }
     case 45: /* the desktop shutting down: asked, Discard; the shutdown started again; quit */
         if (nulls)
             return 0;
