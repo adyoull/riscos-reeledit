@@ -123,6 +123,16 @@ int re_project_audio(re_project *p, int k, int i, re_audio *o)
     return 0;
 }
 
+const char *re_project_audio_file(re_project *p, int k, int i)
+{
+    mlt_playlist_clip_info info;
+    mlt_playlist pl = track(p, k);
+    int e = rp_track_entry(pl, i);
+    if (e < 0 || mlt_playlist_get_clip_info(pl, &info, e))
+        return NULL;
+    return info.resource && *info.resource ? info.resource : NULL; /* (MLT keeps a picture's without "qimage:") */
+}
+
 int re_project_audio_at(re_project *p, int k, int frame)
 {
     re_audio o;

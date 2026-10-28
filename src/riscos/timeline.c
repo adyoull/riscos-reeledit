@@ -24,7 +24,8 @@
  * While dragging, the Viewer shows the frame of interest once the pointer
  * rests (show_later), so each step is cheap and the drag keeps up.
  * Each drag is one undo. Drawn with ColourTrans and OS_Plot, the names with
- * the desktop font (Wimp_TextOp).
+ * the desktop font (Wimp_TextOp). A clip shows its first and last frames
+ * and its waveform, a sound its waveform (previews.c).
  *
  * Part of riscos-reeledit. GPL version 2 or later.
  */
@@ -40,7 +41,7 @@
 #define Wimp_DragBox        0x400D0
 
 #define RULER_H 48   /* OS units */
-#define TRACK_H 128  /* (the top for fade handles, the bottom for dissolve marks, the middle to trim and move) */
+#define TRACK_H 160  /* (the top for fade handles, the bottom for dissolve marks, the middle to trim and move) */
 #define LEFT    16   /* frame 0's x */
 #define MIN_W   640
 #define LABEL_W 200  /* the playhead's timecode, beside it on the ruler */
@@ -58,6 +59,10 @@
 #define SOUND_COLOUR 0x50B05000u /* (80, 176, 80): a clip's sound fades, wedges along its bottom */
 #define MUTED_COLOUR 0x2828B000u /* (176, 40, 40): a muted clip's bottom edge */
 #define CORNER  32   /* OS units: the track's top (fade handles) and bottom (dissolve marks) strips */
+#define WAVE_H  32   /* a clip's waveform: along its bottom */
+#define THUMB_H (TRACK_H - CORNER - WAVE_H) /* its thumbnails (previews.c), between */
+#define WAVE_COLOUR  0xF0C89000u /* (144, 200, 240): a clip's waveform */
+#define AUDIO_WAVE   0x80D8A000u /* (160, 216, 128): a sound's */
 #define V2_H    64   /* V2's row: the overlays (pictures over the video), above V1 */
 #define V2_TOP (-RULER_H - 8) /* the rows' tops and bottoms (work area) */
 #define V2_BOTTOM (V2_TOP - V2_H)
@@ -671,6 +676,11 @@ static void draw_audio(int ox, int oy, int f0, int f1, int cx0, int cy0, int cx1
             int inset = sel ? 6 : 2;
             colour(AUDIO_COLOUR);
             rect(x0 + inset, y0 + inset, x1 - inset, y1 - inset);
+            pv_sound ps = {a.in, a.length, a.fade_in, a.fade_out, a.volume, a.muted};
+            ro_box wb = {x0 + inset > cx0 ? x0 + inset : cx0, cy0, x1 - inset < cx1 ? x1 - inset : cx1, cy1};
+            if (wb.x1 >= wb.x0)
+                pv_wave(re_project_audio_file(A.proj, k, i), &ps, ox + x_of(a.start), T.scale, y0 + inset,
+                        y1 - y0 - 2 * inset, AUDIO_WAVE, &wb);
             draw_sound(a.start, a.length, a.fade_in, a.fade_out, a.muted, ox, x0 + inset, x1 - inset, y0 + inset, 12);
             if (sel && x1 - x0 > 4 * inset) {
                 colour(0x2080F000);
@@ -775,6 +785,29 @@ static void draw(int *b)
                 rect(x0, track_y0 + CORNER, x0 + inset + 4, track_y1 - CORNER);
                 rect(x1 - inset - 4, track_y0 + CORNER, x1, track_y1 - CORNER);
             }
+            /* its waveform along the bottom; its first frame, and its last
+               if there's room, between that and its fades (previews.c) */
+            const char *file = re_project_item_file(A.proj, i);
+            ro_box in_box = {x0 + inset > cx0 ? x0 + inset : cx0, track_y0 + inset > cy0 ? track_y0 + inset : cy0,
+                             x1 - inset < cx1 ? x1 - inset : cx1, track_y1 - inset < cy1 ? track_y1 - inset : cy1};
+            int name_end = x1;
+            if (in_box.x1 >= in_box.x0 && in_box.y1 >= in_box.y0) {
+                if (it.sound) {
+                    pv_sound ps = {it.in, it.length, it.sound_fade_in, it.sound_fade_out, it.volume, it.muted};
+                    pv_wave(file, &ps, ox + x_of(it.start), T.scale, track_y0 + inset, WAVE_H - inset, WAVE_COLOUR,
+                            &in_box);
+                }
+                int head_x = ox + x_of(it.start) + inset, tw = pv_thumb_width(THUMB_H);
+                int tail_x = ox + x_of(it.start + it.length) - 2 - inset - tw;
+                if (tw > 0 && x1 - x0 >= tw + 2 * inset) {
+                    int w = pv_thumb(file, it.in, head_x, track_y1 - CORNER, THUMB_H, &in_box);
+                    if (w > 0 && name_x < head_x + w + 10)
+                        name_x = head_x + w + 10;
+                    if (tail_x >= head_x + 2 * tw + 160 && pv_thumb(file, it.out, tail_x, track_y1 - CORNER, THUMB_H,
+                                                                    &in_box) > 0)
+                        name_end = tail_x - 4;
+                }
+            }
             draw_fades(&it, ox, x0, x1, track_y1, cx0, cy0, cx1, cy1);
             draw_sound(it.start, it.length, it.sound_fade_in, it.sound_fade_out, it.muted, ox, x0 + inset, x1 - inset,
                        track_y0 + inset, 24);
@@ -785,12 +818,12 @@ static void draw(int *b)
                 clip(c0, r0, c1, r1);
                 /* the name at the start, and again along a long clip (so
                    it's in view however it's scrolled) */
-                for (int nx = name_x; nx == name_x || nx < x1 - 200; nx += 1000)
+                for (int nx = name_x; nx == name_x || nx < name_end - 200; nx += 1000)
                     if (nx < c1 && nx + 1000 > c0) {
                         char shown[64];
                         char name[80];
                         fit_text(shown, sizeof(shown), label(name, sizeof(name), it.name, it.muted, it.volume),
-                                 (x1 - nx < 1000 ? x1 - nx : 1000) - 12);
+                                 (name_end - nx < 1000 ? name_end - nx : 1000) - 12);
                         text(shown, nx, track_y1 - CORNER - 28, 0xFFFFFF00, fill); /* (below the fade handles) */
                     }
                 clip(cx0, cy0, cx1, cy1);
@@ -862,6 +895,7 @@ void tl_redraw(int *b)
     _kernel_swi_regs r;
     r.r[1] = (intptr_t) b;
     int more = ro_swi(Wimp_RedrawWindow, &r) ? 0 : (int) r.r[0];
+    pv_redraw_begin();
     while (more) {
         draw(b);
         r.r[1] = (intptr_t) b;
@@ -1439,6 +1473,11 @@ const char *tl_help(int screen_y)
                "plays goes on the track below); drag one to move it, its ends to trim it; Menu over it for its sound.";
     return "This is V1: the clips.|MClick a clip to select it; drag its edge to trim it, its middle to move it.|M"
            "Menu over a clip gives its effects (fades, sound, dissolves).|MCtrl and the wheel zoom.";
+}
+
+void tl_refresh(void)
+{
+    redraw_all();
 }
 
 int tl_scrubbing(void)

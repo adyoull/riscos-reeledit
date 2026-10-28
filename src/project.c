@@ -419,6 +419,14 @@ int re_project_item(re_project *p, int i, re_item *item)
     return 0;
 }
 
+const char *re_project_item_file(re_project *p, int i)
+{
+    mlt_playlist_clip_info info;
+    if (!p->v1 || mlt_playlist_get_clip_info(p->v1, &info, i) || mlt_playlist_is_blank(p->v1, i) || rp_mix_of(p, i))
+        return NULL;
+    return info.resource && *info.resource ? info.resource : NULL; /* (MLT keeps a picture's without "qimage:") */
+}
+
 int re_project_item_at(re_project *p, int frame)
 {
     if (!p->v1 || frame < 0 || frame >= re_project_length(p))

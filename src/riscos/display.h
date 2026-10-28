@@ -37,6 +37,12 @@ int re_display_overlay_shown(void);
    overlay is showing and it is, hide it (returns 1, as hide). */
 int re_display_check_covered(void);
 
+/* A 32bpp sprite's mode word, a pixel a screen pixel, in the screen's
+   colour order; the screen's eigen factors, and whether its colours are
+   TRGB (else TBGR: R in the low byte) */
+int re_display_sprite_mode(void);
+void re_display_screen(int *xeig, int *yeig, int *trgb);
+
 /* Frees the sprite and the overlay. */
 void re_display_close(void);
 

@@ -165,6 +165,8 @@ static void rect(int x0, int y0, int x1, int y1, unsigned colour)
 
 static const char *leaf(const char *name)
 {
+    if (!strncmp(name, "qimage:", 7)) /* (a picture, by the name it was added by) */
+        name += 7;
     const char *l = strrchr(name, '/');
     return l ? l + 1 : name;
 }

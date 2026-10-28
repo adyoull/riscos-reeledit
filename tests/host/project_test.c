@@ -18,6 +18,7 @@
 #include <libavformat/avformat.h>
 #include "project.h"
 #include "measure.h"
+#include "media.h"
 #include "sprites.h"
 #include "still.h"
 #include <math.h>
@@ -1227,6 +1228,124 @@ static void source_editing(const char *a, const char *b, const char *numbered, c
     re_project_close(p);
 }
 
+/* ---- media: thumbnails and waveforms, made a step at a time ---------------- */
+
+/* Steps until there's nothing to do: how many (or -1, too many) */
+static int media_run(re_media *m)
+{
+    for (int n = 0; n < 200000; n++)
+        if (re_media_step(m) < 0)
+            return n;
+    return -1;
+}
+
+/* numbered's frame f is grey 16 + 2f (video range): as RGB, full range */
+static int grey_of(int f)
+{
+    return (2 * f) * 255 / 219;
+}
+
+static void media(const char *numbered, const char *snd, const char *pic, const char *a)
+{
+    re_media *m = re_media_new(25, 64, 36);
+    unsigned s1 = 0, s2 = 0, s3 = 0;
+    CHECK(!re_media_thumb(m, numbered, 37, &s1) && re_media_pending(m) == 1, "media: a thumbnail made at once");
+    int steps = media_run(m);
+    const unsigned char *t = re_media_thumb(m, numbered, 37, &s1);
+    CHECK(steps > 0 && t && re_media_pending(m) == 0, "media: no thumbnail of 37 (%d steps)", steps);
+    if (t)
+        CHECK(abs(t[(18 * 64 + 32) * 4] - grey_of(37)) <= 4 && abs(t[(18 * 64 + 32) * 4 + 1] - grey_of(37)) <= 4
+                  && t[(18 * 64 + 32) * 4 + 3] == 255 && abs(t[(1 * 64 + 1) * 4] - grey_of(37)) <= 4,
+              "media: frame 37's thumbnail %d,%d (not %d), alpha %d", t[(18 * 64 + 32) * 4], t[(18 * 64 + 32) * 4 + 1],
+              grey_of(37), t[(18 * 64 + 32) * 4 + 3]);
+    re_media_thumb(m, numbered, 0, NULL);
+    re_media_thumb(m, numbered, 60, NULL);
+    re_media_thumb(m, numbered, 500, NULL); /* (past the end: the last frame) */
+    media_run(m);
+    const unsigned char *t0 = re_media_thumb(m, numbered, 0, &s2), *t60 = re_media_thumb(m, numbered, 60, &s3);
+    const unsigned char *tend = re_media_thumb(m, numbered, 500, NULL);
+    CHECK(t0 && t60 && tend && s2 != s1 && s3 != s2, "media: thumbnails 0, 60, past the end not made");
+    if (t0 && t60 && tend)
+        CHECK(t0[(18 * 64 + 32) * 4] <= 4 && abs(t60[(18 * 64 + 32) * 4] - grey_of(60)) <= 4
+                  && abs(tend[(18 * 64 + 32) * 4] - grey_of(74)) <= 4,
+              "media: frames 0, 60, the end: %d, %d (%d), %d (%d)", t0[(18 * 64 + 32) * 4], t60[(18 * 64 + 32) * 4],
+              grey_of(60), tend[(18 * 64 + 32) * 4], grey_of(74));
+    unsigned sn = 0;
+    CHECK(re_media_thumb_near(m, numbered, 40, &sn) == t && sn == s1 && !re_media_thumb_near(m, a, 40, NULL),
+          "media: the nearest thumbnail to 40 isn't 37's");
+    /* a file that isn't one: not made, not tried again */
+    re_media_thumb(m, "no-such-file.mp4", 0, NULL);
+    media_run(m);
+    CHECK(!re_media_thumb(m, "no-such-file.mp4", 0, NULL) && !re_media_thumb(m, "no-such-file.mp4", 5, NULL)
+              && re_media_pending(m) == 0,
+          "media: a missing file's thumbnail, or asked for again (%d waiting)", re_media_pending(m));
+    /* a picture, in a box of another shape: bars */
+    re_media *sq = re_media_new(25, 40, 40);
+    re_media_thumb(sq, pic, 0, NULL);
+    media_run(sq);
+    const unsigned char *g = re_media_thumb(sq, pic, 0, NULL);
+    CHECK(g && g[(20 * 40 + 20) * 4 + 1] > 100 && g[(20 * 40 + 20) * 4] < 60 && g[(2 * 40 + 20) * 4 + 1] < 10,
+          "media: the picture's thumbnail (green, black bars above): %d,%d / %d", g ? g[(20 * 40 + 20) * 4] : -1,
+          g ? g[(20 * 40 + 20) * 4 + 1] : -1, g ? g[(2 * 40 + 20) * 4 + 1] : -1);
+    re_media_free(sq);
+
+    /* peaks: a second of tone (an eighth of full scale: 32), a second of silence */
+    int n = 0, done = 0;
+    CHECK(!re_media_peaks(m, "half.wav", &n, &done) && !done, "media: peaks made at once");
+    media_run(m);
+    const unsigned char *pk = re_media_peaks(m, "half.wav", &n, &done);
+    CHECK(pk && done && n >= 49 && n <= 51, "media: half.wav's peaks: %d (done %d)", n, done);
+    if (pk && n >= 49)
+        CHECK(abs(pk[5] - 32) <= 2 && abs(pk[23] - 32) <= 2 && pk[26] <= 1 && pk[45] <= 1,
+              "media: half.wav's peaks %d %d %d %d", pk[5], pk[23], pk[26], pk[45]);
+    re_media_peaks(m, snd, &n, &done);
+    re_media_peaks(m, numbered, &n, &done);
+    media_run(m);
+    pk = re_media_peaks(m, snd, &n, &done);
+    CHECK(pk && done && n >= 74 && n <= 76 && abs(pk[37] - 32) <= 3, "media: numbered-snd's peaks: %d, %d", n,
+          pk && n > 37 ? pk[37] : -1);
+    CHECK(!re_media_peaks(m, numbered, &n, &done) && done && n == 0, "media: a silent video's peaks");
+
+    /* thumbnails before peaks: one asked for after is made first */
+    re_media_peaks(m, "tone880.wav", &n, &done);
+    re_media_thumb(m, numbered, 20, NULL);
+    for (int k = 0; k < 400 && !re_media_thumb(m, numbered, 20, NULL); k++)
+        re_media_step(m);
+    re_media_peaks(m, "tone880.wav", &n, &done);
+    CHECK(re_media_thumb(m, numbered, 20, NULL) && !done, "media: the thumbnail wasn't first (peaks done %d)", done);
+    media_run(m);
+
+    /* too many: the least recently asked for go */
+    re_media_free(m);
+    m = re_media_new(25, 64, 36);
+    for (int f = 0; f < 110; f++) {
+        re_media_thumb(m, numbered, f, NULL);
+        media_run(m);
+    }
+    CHECK(!re_media_thumb(m, numbered, 3, NULL) && re_media_thumb(m, numbered, 109, NULL),
+          "media: 110 asked for: the first not let go, or the last not kept");
+
+    /* the project's files */
+    re_project *p = re_project_new();
+    int k, i;
+    re_project_add(p, numbered, -1);
+    re_project_add(p, numbered, -1);
+    re_project_dissolve(p, 0, 10, 1);
+    re_project_audio_add(p, "half.wav", 0, 0, &k, &i);
+    CHECK(re_project_item_file(p, 0) && !strcmp(re_project_item_file(p, 0), numbered) && !re_project_item_file(p, 1)
+              && re_project_audio_file(p, 0, 0) && !strcmp(re_project_audio_file(p, 0, 0), "half.wav"),
+          "media: the project's files: %s, %s, %s", re_project_item_file(p, 0) ? re_project_item_file(p, 0) : "-",
+          re_project_item_file(p, 1) ? re_project_item_file(p, 1) : "-",
+          re_project_audio_file(p, 0, 0) ? re_project_audio_file(p, 0, 0) : "-");
+    char q[300];
+    snprintf(q, sizeof(q), "qimage:%s", pic); /* (a picture, as the desktop adds one) */
+    int at = re_project_add(p, q, -1);
+    CHECK(at >= 0 && re_project_item_file(p, at) && !strcmp(re_project_item_file(p, at), pic),
+          "media: a picture's file: %s", at >= 0 && re_project_item_file(p, at) ? re_project_item_file(p, at) : "-");
+    re_project_close(p);
+    re_media_free(m);
+}
+
 int main(int argc, char **argv)
 {
     if (argc != 13) {
@@ -1485,6 +1604,7 @@ int main(int argc, char **argv)
     export(a, argv[9], out, "export-test.mp4");
     audio_tracks(a, argv[9], argv[11], out);
     source_editing(a, b, n, out);
+    media(n, argv[9], argv[12], a);
     overlays(a, b, argv[9], out, argv[10], argv[11], argv[12]);
     video_overlays(a, b, argv[9], n, argv[5], out);
     char dir[512];

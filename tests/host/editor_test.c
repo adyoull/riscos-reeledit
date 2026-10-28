@@ -48,6 +48,10 @@
 #include "project.h"
 #include "fake/screens.h"
 int app_position(void); /* (viewer.c's) */
+int re_test_previews(int *thumbs, int *wave_rects); /* (previews.c's) */
+int re_test_previews_stand_ins(void);
+int re_test_previews_pending(void);
+static int thumb_plots; /* (the Timeline's thumbnails plotted) */
 
 int reeledit_main(int argc, char **argv);
 int re_test_position(void);
@@ -262,6 +266,12 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
         }
         break;
     case 0x2E:
+        if (!memcmp((const char *) ((int *) r->r[2] + 1), "thumbs", 6)) { /* (the Timeline's thumbnails: previews.c) */
+            if ((r->r[0] & 0xFF) == 52)
+                scr_sprite((const int *) r->r[2], (int) r->r[3], (int) r->r[4]);
+            thumb_plots++;
+            break;
+        }
         plots++;
         plot_area = (int *) r->r[1];
         if ((r->r[0] & 0xFF) == 52)
@@ -293,6 +303,8 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
         scr_colour((unsigned) r->r[0]);
         if ((unsigned) r->r[0] == 0x2080F000u)
             colours_seen |= 1;
+        if ((unsigned) r->r[0] == 0xF0C89000u) /* (a V1 clip's waveform: timeline.c's WAVE_COLOUR) */
+            colours_seen |= 2;
         break;
     case 0x55FC0: r->r[0] = 5; ssb_playing = 0; ssb_added = ssb_played = 0; break;
     case 0x55FC1: ssb_closes++; ssb_playing = 0; break;
@@ -624,7 +636,8 @@ static double tl_scale = 4; /* the Timeline's OS units a frame, as it should be 
 /* a click (Select: 0x400 for this window's button type) on the Timeline at a frame: the ruler (1), V1 (0),
    or V2 (2) */
 #define TL_V1_TOP (48 + 8 + 64 + 8) /* (the ruler, V2's row, the gaps: down to V1) */
-#define TL_A_TOP(k) (TL_V1_TOP + 128 + 8 + (k) * (56 + 8)) /* (an audio track's row: below V1) */
+#define TL_V1_H 160 /* (V1's row) */
+#define TL_A_TOP(k) (TL_V1_TOP + TL_V1_H + 8 + (k) * (56 + 8)) /* (an audio track's row: below V1) */
 static int click_audio(int *b, int frame, int k, int buttons)
 {
     b[0] = W[1].box[0] - W[1].scroll_x + 16 + (int) (frame * tl_scale);
@@ -654,7 +667,7 @@ static void next(int p)
 
 static char saved_layout[256];
 static int menus_mark;
-static int plots_mark, ovd_mark, ssb_mark, closes_mark, pos_mark, pos_min = 1000, mark, scroll_mark, rec;
+static int plots_mark, ovd_mark, ssb_mark, closes_mark, pos_mark, pos_min = 1000, mark, scroll_mark, rec, th, wr;
 
 static int script(int *b, int mask)
 {
@@ -1276,7 +1289,7 @@ static int script(int *b, int mask)
         CHECK(!strcmp(layout(), "c30 c75"), "undoing D: %s", layout());
         mark = drags;
         /* (the cut's mark: the bottom of the track, at the cut) */
-        b[0] = W[1].box[0] - W[1].scroll_x + 16 + 30 * 4 + 2; b[1] = W[1].box[3] - TL_V1_TOP - 128 + 10; b[2] = 0x40;
+        b[0] = W[1].box[0] - W[1].scroll_x + 16 + 30 * 4 + 2; b[1] = W[1].box[3] - TL_V1_TOP - TL_V1_H + 10; b[2] = 0x40;
         b[3] = TL; b[4] = -1;
         ptr[0] = b[0] + 10 * 4; ptr[1] = b[1];
         next(119);
@@ -2435,6 +2448,44 @@ static int script(int *b, int mask)
             return 0;
         CHECK(re_project_clips(re_test_project()) == mark - 1, "Delete in the Clips window: %d clips (%d)",
               re_project_clips(re_test_project()), mark);
+        re_test_previews(&th, &wr);
+        thumb_plots = 0;
+        colours_seen = 0;
+        next(323);
+        b[0] = TL; /* (the Timeline drawn: its thumbnails and waveforms asked for, then made) */
+        return 1;
+    case 323: /* thumbnails and waveforms (previews.c): made, then drawn */
+        if (nulls)
+            return 0;
+        mark = re_test_previews(&th, &wr);
+        CHECK(mark == 0 && th > 0 && thumb_plots > 0 && wr > 0 && (colours_seen & 2),
+              "previews: %d still to make; %d thumbnails (%d plotted), %d waveform bars drawn", mark, th, thumb_plots, wr);
+        shot("31-previews");
+        next(324);
+        return key_to(b, TL, ' ');
+    case 324: /* playing: split, so there's a new thumbnail to make */
+        CHECK(re_test_speed() != 0, "previews: not playing");
+        if (re_test_position() < 4)
+            return 0;
+        next(325);
+        return key_to(b, TL, 's');
+    case 325:
+        if (fake_cs - phase_cs < 30)
+            return 0;
+        mark = re_test_previews(&th, &wr);
+        CHECK(re_test_previews_stand_ins() > 0, "previews: no stand-in for the split's new thumbnail");
+        CHECK(mark > 0, "previews: made while playing (%d to make; %s at %d, speed %g)", mark, layout(), re_test_position(), re_test_speed());
+        next(326);
+        return key_to(b, TL, ' ');
+    case 326:
+        if (re_test_speed() == 0 && !re_test_busy() && re_test_previews_pending() > 0 && !nulls)
+            fail_quit("previews: some to make, but null events masked");
+        if (nulls)
+            return 0;
+        mark = re_test_previews(&th, &wr);
+        CHECK(re_test_speed() == 0 && mark == 0 && th > 0 && re_test_previews_stand_ins() == 0,
+              "previews: stopped, %d to make, %d drawn, %d stand-ins in the last redraw", mark, th,
+              re_test_previews_stand_ins());
         next(45);
         return key_to(b, TL, 0x18D);
     case 45: /* the desktop shutting down: asked, Discard; the shutdown started again; quit */

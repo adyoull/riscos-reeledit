@@ -16,6 +16,7 @@
  *   exportbox.c the Export window: the project made into a video, in a TaskWindow
  *   titles.c    the Title window: text over the video
  *   fonts.c     titles' text drawn by the Font Manager
+ *   previews.c  the Timeline's thumbnails and waveforms (src/media.c's)
  *   info.c      the Video information window
  *   display.c, sound.c   the picture (overlay or sprite) and the sound
  *
@@ -105,7 +106,8 @@ int tl_on_overlays(int screen_y); /* a drop at this height goes on V2 */
 const char *tl_help(int screen_y); /* interactive help: the ruler, V2 or V1 */
 /* The playhead dragged along the ruler: null events while it lasts, each
    moving the playhead to the pointer */
-int tl_scrubbing(void);
+int tl_scrubbing(void);         /* (any drag on the Timeline) */
+void tl_refresh(void);          /* drawn again (its thumbnails and waveforms made) */
 void tl_scrub_tick(void);
 void tl_drag_end(int *block);
 /* Scroll_Request: the wheel scrolls the Timeline sideways; Ctrl+wheel zooms
@@ -184,6 +186,27 @@ void app_project_view(void);
 int app_source_mode(void);
 void app_source_mark(int out);
 void app_source_put(int overwrite);
+
+/* ---- previews.c: the Timeline's thumbnails and waveforms ---- */
+typedef struct
+{
+    int in, length;          /* its first frame in its file, its length (frames) */
+    int fade_in, fade_out;   /* its sound's fades (frames) */
+    int volume, muted;       /* dB; muted: no waveform */
+} pv_sound;
+/* A thumbnail's width (OS units) at a height (0: none can be made) */
+int pv_thumb_width(int h_os);
+/* A file's frame's thumbnail, top left at x, y1 (screen), within a box:
+   its width, or 0 (none made yet, nor of a frame near it: asked for) */
+int pv_thumb(const char *file, int frame, int x, int y1, int h_os, const ro_box *clip);
+/* A sound's waveform: x0 the screen x of its first frame, scale OS units
+   a frame, from y0 (h high), within a box (asked for if not made yet) */
+void pv_wave(const char *file, const pv_sound *s, int x0, double scale, int y0, int h, unsigned colour,
+             const ro_box *clip);
+int pv_busy(void);  /* things to make, and nothing playing or being dragged: null events wanted */
+void pv_tick(void); /* a null event: some made (the Timeline drawn again when there's something to see) */
+void pv_close(void); /* the editor closed: all forgotten */
+void pv_redraw_begin(void); /* (the Timeline's redraw starting) */
 
 /* ---- exportbox.c: the Export window ---- */
 int ex_window(void);

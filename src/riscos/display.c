@@ -425,7 +425,7 @@ static void sprite_free(void)
 static int sprite_make(int w, int h)
 {
     size_t rows = h, bytes;
-    int *spr, mode;
+    int *spr;
     if (w < 1) w = 1;
     if (h < 1) h = 1;
     if (D.area && D.spr_w == w && D.spr_h == h)
@@ -449,19 +449,31 @@ static int sprite_make(int w, int h)
     spr[7] = 31;
     spr[8] = 44;
     spr[9] = 44;
-    mode = 1 | ((180 >> D.xeig) << 1) | ((180 >> D.yeig) << 14) | (6 << 27); /* 32bpp TBGR */
+    spr[10] = re_display_sprite_mode();
+    D.spr_w = w;
+    D.spr_h = h;
+    D.spr_rows = (int) rows;
+    D.last_w = D.last_h = 0;
+    return 0;
+}
+
+int re_display_sprite_mode(void)
+{
+    int mode = 1 | ((180 >> D.xeig) << 1) | ((180 >> D.yeig) << 14) | (6 << 27); /* 32bpp TBGR */
     if (D.trgb) {
         _kernel_swi_regs r;
         r.r[0] = 1; /* the current mode's specifier */
         if (!ro_swi(OS_ScreenMode, &r))
             mode = r.r[1];
     }
-    spr[10] = mode;
-    D.spr_w = w;
-    D.spr_h = h;
-    D.spr_rows = (int) rows;
-    D.last_w = D.last_h = 0;
-    return 0;
+    return mode;
+}
+
+void re_display_screen(int *xeig, int *yeig, int *trgb)
+{
+    *xeig = D.xeig;
+    *yeig = D.yeig;
+    *trgb = D.trgb;
 }
 
 /* The picture into the sprite, fitted, with black bars */

@@ -54,6 +54,9 @@ int re_project_items(re_project *p);
 int re_project_item(re_project *p, int i, re_item *item);
 /* The item at a frame, -1 past the end. */
 int re_project_item_at(re_project *p, int frame);
+/* A clip's file (for its thumbnails and waveform, media.h): NULL for a
+   gap or a dissolve. Good until the next edit. */
+const char *re_project_item_file(re_project *p, int i);
 
 /* Adds a clip (a video file) to V1 at a frame: at the end (-1, or past the
    end), else at the start of the item there (or, if the frame is nearer
@@ -236,6 +239,7 @@ int re_project_audio_tracks(re_project *p);
 int re_project_audio_count(re_project *p, int track);
 int re_project_audio(re_project *p, int track, int i, re_audio *s);
 int re_project_audio_at(re_project *p, int track, int frame); /* -1: none */
+const char *re_project_audio_file(re_project *p, int track, int i); /* (as re_project_item_file) */
 /* A sound (a file with sound: an audio file, or a video's sound) put from
    a frame, so long (0: all of it), kept to the project's end. 0 and where
    it went (*track, *i); -1 (an empty project, past its end), or: */

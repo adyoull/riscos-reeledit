@@ -935,6 +935,7 @@ static int close_editor(void)
     V.src_prod = NULL;
     V.source = 0;
     cl_close();
+    pv_close();
     as_forget(); /* (kept or discarded: closed as asked) */
     if (V.win) {
         _kernel_swi_regs r;
@@ -1887,6 +1888,7 @@ void re_test_crash(void)
         ro_swi(Wimp_CloseWindow, &r);
     }
     tl_close();
+    pv_close();
     re_project_close(A.proj);
     A.proj = NULL;
     A.path[0] = 0;
@@ -1933,7 +1935,8 @@ int reeledit_main(int argc, char **argv)
            playing at the next picture's time; else none at all. */
         if (A.proj && re_project_changes(A.proj) != V.changes)
             app_edited();
-        int ev, busy = (A.e && re_engine_busy(A.e)) || tl_scrubbing() || V.ms; /* (scrubbing: the pointer followed) */
+        int ev, busy = (A.e && re_engine_busy(A.e)) || tl_scrubbing() || V.ms /* (scrubbing: the pointer followed) */
+                       || pv_busy(); /* (thumbnails and waveforms to make) */
         unsigned before = ro_now_cs();
         r.r[0] = busy ? 0 : 1;
         r.r[1] = (intptr_t) block;
@@ -1955,6 +1958,8 @@ int reeledit_main(int argc, char **argv)
                 measure_tick();
             if (A.e)
                 tick();
+            if (pv_busy())
+                pv_tick();
             break;
         case 1: redraw(block); break;
         case 2:
