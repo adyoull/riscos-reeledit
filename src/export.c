@@ -105,17 +105,28 @@ static int encode(re_project *p, const char *out, const re_export_settings *s, c
     mlt_properties_set_int(cp, "progressive", 1);
     mlt_properties_set_int(cp, "terminate_on_pause", 1);
     mlt_properties_set_int(cp, "real_time", -1);
+    mlt_producer cut = NULL; /* (frames in to out: a cut of them, played from its start) */
+    if (s->range) {
+        cut = mlt_producer_cut(prod, s->in, s->out);
+        if (!cut) {
+            mlt_consumer_close(c);
+            return -1;
+        }
+        prod = cut;
+    }
     mlt_consumer_connect(c, MLT_PRODUCER_SERVICE(prod));
     mlt_producer_seek(prod, 0);
     mlt_producer_set_speed(prod, 1);
     r->producer = prod;
     r->done = 0;
-    r->total = re_project_length(p);
+    r->total = mlt_producer_get_length(prod);
     mlt_events_listen(cp, r, "consumer-frame-show", (mlt_listener) on_show); /* (closed with the consumer) */
     mlt_consumer_start(c); /* (no threads: returns at the end) */
     mlt_consumer_stop(c);
     mlt_consumer_close(c);
     mlt_producer_set_speed(prod, 0);
+    if (cut)
+        mlt_producer_close(cut);
     return r->done;
 }
 
@@ -168,7 +179,13 @@ int re_export(const char *project, const char *out, const re_export_settings *s,
             codecs[n++] = "libx264";
         codecs[n++] = "mpeg4";
     }
-    int made = -1, total = re_project_length(p);
+    int len = re_project_length(p);
+    if (s->range && (s->in < 0 || s->out < s->in || s->out >= len)) {
+        snprintf(err, errsize, "frames %d to %d aren't in the project", s->in, s->out);
+        re_project_close(p);
+        return -1;
+    }
+    int made = -1, total = s->range ? s->out - s->in + 1 : len;
     const char *used = codecs[0];
     for (int i = 0; i < n && !r.stopped; i++) {
         used = codecs[i];
@@ -205,11 +222,12 @@ static void say_progress(void *ctx, int done, int total)
 int re_export_main(int argc, char **argv)
 {
     if (argc < 4) {
-        printf("failed: usage: -export project out [height [quality [hardware]]]\n");
+        printf("failed: usage: -export project out [height [quality [hardware [in out]]]]\n");
         return 2;
     }
     re_export_settings s = {argc > 4 ? atoi(argv[4]) : 0, argc > 5 ? atoi(argv[5]) : RE_EXPORT_NORMAL,
-                            argc > 6 ? atoi(argv[6]) : 0, NULL};
+                            argc > 6 ? atoi(argv[6]) : 0, NULL, argc > 8, argc > 8 ? atoi(argv[7]) : 0,
+                            argc > 8 ? atoi(argv[8]) : 0};
     if (re_mlt_start() < 0) {
         printf("failed: MLT couldn't start\n");
         return 2;

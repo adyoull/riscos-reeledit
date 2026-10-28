@@ -19,6 +19,7 @@ typedef struct
     int quality;         /* RE_EXPORT_: the bit rate (and libx264's rate factor) */
     int hardware;        /* 1: the VideoCore's H.264 encoder (h264_encvchiq), if FFmpeg has it */
     const char *vcodec;  /* (NULL: the VideoCore's when hardware, else libx264, else mpeg4) */
+    int range, in, out;  /* range: only the project's frames in to out (render previews: render.h) */
 } re_export_settings;
 
 /* The project file exported to out. progress (if given) is told each
@@ -32,7 +33,7 @@ int re_export(const char *project, const char *out, const re_export_settings *s,
 /* The video bit rate (bits a second) for a size, frame rate and quality */
 int re_export_bitrate(int width, int height, double fps, int quality);
 
-/* !RunImage -export project out height quality hardware: re_export, the
+/* !RunImage -export project out height quality hardware [in out]: re_export, the
    progress written as "progress DONE TOTAL" lines (at most four a second),
    then "done" or "failed: why" (stopped: killed by its TaskWindow; the
    caller deletes what was written). The exit status: 0, or 2. */

@@ -18,6 +18,7 @@
  *   fonts.c     titles' text drawn by the Font Manager
  *   previews.c  the Timeline's thumbnails and waveforms (src/media.c's)
  *   copypaste.c Cut, Copy and Paste
+ *   renders.c   render previews: costly stretches made into files, played from them
  *   info.c      the Video information window
  *   display.c, sound.c   the picture (overlay or sprite) and the sound
  *
@@ -217,6 +218,19 @@ int cp_copy(int cut);  /* the selection copied (cut: then deleted). 1 done, 0 no
 void cp_paste(void);   /* at the playhead; selected, the playhead after it */
 int cp_have(void);     /* there's something to paste */
 void cp_close(void);   /* the editor closed: the copy forgotten */
+
+/* ---- renders.c: render previews ---- */
+void rr_start(void);   /* Play > Render previews (Ctrl-R): the stretches without one, one after another */
+void rr_stop(void);
+int rr_running(void);
+int rr_message(int *block); /* 1: it was a render's (TaskWindow's) */
+/* The i'th costly stretch (frames): -1 none; 0 to render, 1 rendered, 2
+   being rendered (*made frames so far) */
+int rr_stretches(int i, int *start, int *length, int *made);
+/* What to play: the project with its rendered stretches from their files
+   (the caller closes it), or NULL (none: the project) */
+mlt_producer rr_playlist(int *rendered);
+void rr_close(void);   /* the editor closed: stopped, the files deleted */
 
 /* ---- exportbox.c: the Export window ---- */
 int ex_window(void);

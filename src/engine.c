@@ -266,6 +266,19 @@ void re_engine_invalidate(re_engine *e)
     refresh(e, 0);
 }
 
+void re_engine_set_producer(re_engine *e, mlt_producer producer)
+{
+    if (!producer || producer == e->producer)
+        return;
+    if (e->producer && !e->borrowed)
+        mlt_producer_close(e->producer);
+    e->producer = producer;
+    e->borrowed = 1;
+    mlt_consumer_connect(e->consumer, MLT_PRODUCER_SERVICE(producer));
+    e->last_fetched = -2; /* (the next frame a seek, not the one after) */
+    refresh(e, 0);
+}
+
 static re_engine *setup(re_engine *e, double preview_scale)
 {
     e->consumer = mlt_factory_consumer(e->profile, "null", NULL);

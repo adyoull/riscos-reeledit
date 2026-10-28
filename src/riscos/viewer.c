@@ -136,6 +136,7 @@ static struct
     unsigned ms_cs;
     struct { char path[256]; int filetype, frame; } queue[16];
     int queued;
+    mlt_producer pl;      /* playing: the render previews' playlist the engine plays (NULL: the project) */
 } V;
 
 /* (&88 and &89: the left and right arrows of RISC OS's character set) */
@@ -625,6 +626,32 @@ int app_position(void)
     return A.e ? re_engine_position(A.e) : 0;
 }
 
+/* Render previews (renders.c): while playing, the engine plays their
+   playlist (the rendered stretches from their files); stopped, or the
+   project edited, the project again */
+static void previews_off(void)
+{
+    if (!V.pl)
+        return;
+    if (A.e && A.proj && re_project_producer(A.proj))
+        re_engine_set_producer(A.e, re_project_producer(A.proj));
+    mlt_producer_close(V.pl);
+    V.pl = NULL;
+}
+
+static void previews_on(void)
+{
+    int n = 0;
+    if (V.pl || !A.e || V.source)
+        return;
+    mlt_producer pl = rr_playlist(&n);
+    if (!pl)
+        return;
+    re_engine_set_producer(A.e, pl);
+    V.pl = pl;
+    app_log("playing %d frames from render previews", n);
+}
+
 void app_set_speed(double speed)
 {
     if (!A.e)
@@ -632,6 +659,10 @@ void app_set_speed(double speed)
     double was = re_engine_speed(A.e);
     if (speed == was)
         return;
+    if (speed == 0)
+        previews_off();
+    else if (was == 0)
+        previews_on();
     re_sound_clear(V.snd);
     re_sound_pause(V.snd, speed != 1);
     if (speed > 0 && re_engine_position(A.e) >= re_engine_length(A.e) - 1)
@@ -675,6 +706,10 @@ static void engine_close(void)
     if (A.e) {
         re_engine_close(A.e);
         A.e = NULL;
+    }
+    if (V.pl) { /* (after the engine: it was playing it) */
+        mlt_producer_close(V.pl);
+        V.pl = NULL;
     }
     re_sound_close(V.snd);
     V.snd = NULL;
@@ -728,6 +763,7 @@ static void edited(int picture)
     if (!A.proj)
         return;
     V.changes = re_project_changes(A.proj);
+    previews_off(); /* (the project changed: played as it is now) */
     if (V.source) {
         /* (the source's engine stays: the project's is made again when it's shown) */
     } else if (re_project_length(A.proj) <= 0) {
@@ -937,6 +973,7 @@ static int close_editor(void)
     cl_close();
     pv_close();
     cp_close();
+    rr_close();
     as_forget(); /* (kept or discarded: closed as asked) */
     if (V.win) {
         _kernel_swi_regs r;
@@ -1235,11 +1272,12 @@ static MENU(E_N) m_edit = {"Edit", 7, 2, 7, 0, 520, 44, 0,
                           {2, -1, IT("Clear the selection      ^Z")},
                           {0x80, -1, IT("New title...              T")}}};
 static char play_item[24] = "Play           Space";
-static MENU(7) m_play = {"Play", 7, 2, 7, 0, 420, 44, 0,
+static MENU(9) m_play = {"Play", 7, 2, 7, 0, 420, 44, 0,
                          {{0, -1, ITEM_FLAGS, play_item, (const char *) -1, sizeof(play_item)},
                           {0, -1, IT("To the start   Home")}, {2, -1, IT("To the end     Copy")},
                           {0, -1, IT("Mark in            I")}, {0, -1, IT("Mark out           O")},
-                          {0, -1, IT("Play in to out Return")}, {0x80, -1, IT("Clear the marks")}}};
+                          {0, -1, IT("Play in to out Return")}, {2, -1, IT("Clear the marks")},
+                          {0, -1, IT("Render previews  ^R")}, {0x80, -1, IT("Stop rendering")}}};
 static MENU(3) m_viewer_size = {"Viewer size", 7, 2, 7, 0, 200, 44, 0,
                                 {{0, -1, IT("Small")}, {0, -1, IT("Medium")}, {0x80, -1, IT("Large")}}};
 static MENU(7) m_view = {"View", 7, 2, 7, 0, 520, 44, 0,
@@ -1318,6 +1356,8 @@ void app_menu(int x, int y)
         menu_shade(&m_play.item[i].iflags, !has);
     menu_shade(&m_play.item[5].iflags, !marked);
     menu_shade(&m_play.item[6].iflags, !marked);
+    menu_shade(&m_play.item[7].iflags, !has || rr_running());
+    menu_shade(&m_play.item[8].iflags, !rr_running());
     m_view.item[4].flags = (m_view.item[4].flags & ~1) | (A.snap ? 1 : 0);
     m_view.item[5].sub = (intptr_t) &m_viewer_size;
     for (int i = 0; i < 3; i++)
@@ -1458,6 +1498,8 @@ static void menu_select(int *b)
         else if (b[1] == 3 || b[1] == 4) mk_set(b[1] == 4);
         else if (b[1] == 5) mk_play();
         else if (b[1] == 6) mk_clear();
+        else if (b[1] == 7) rr_start();
+        else if (b[1] == 8) rr_stop();
         break;
     case 3: /* View */
         if (b[1] >= 0 && b[1] <= 2)
@@ -1527,6 +1569,7 @@ int app_key(int k)
     case 3: cp_copy(0); return 1;                 /* Ctrl-C */
     case 24: cp_copy(1); return 1;                /* Ctrl-X */
     case 22: cp_paste(); return 1;                /* Ctrl-V */
+    case 18: rr_start(); return 1;                /* Ctrl-R: render previews */
     case 0x7F: case 8: app_delete_selection(!shift_down()); return 1; /* Delete, Backspace */
     case '+': case '=': tl_zoom(1); return 1;
     case '-': case '_': tl_zoom(0); return 1;
@@ -1737,7 +1780,7 @@ static const char *help_for(int win, int icon, int y)
 static void message(int *b, int event)
 {
     _kernel_swi_regs r;
-    if (sb_message(b) || ex_message(b))
+    if (sb_message(b) || ex_message(b) || rr_message(b))
         return;
     switch (b[4]) {
     case MSG_QUIT:
@@ -1919,6 +1962,7 @@ int re_test_snap(void) { return A.snap; }
 int re_test_measuring(void) { return V.ms != NULL; }
 int re_test_busy(void) { return A.e && re_engine_busy(A.e); }
 const char *re_test_title(void) { return V.title; }
+int re_test_previews_playing(void) { return V.pl != NULL; }
 /* Reel Edit stopping without closing anything (as a reset would): the
    editor gone, its autosaved copy left */
 void re_test_crash(void)
@@ -1932,6 +1976,7 @@ void re_test_crash(void)
     tl_close();
     pv_close();
     cp_close();
+    rr_close();
     re_project_close(A.proj);
     A.proj = NULL;
     A.path[0] = 0;

@@ -19,6 +19,7 @@
 #include "project.h"
 #include "measure.h"
 #include "media.h"
+#include "render.h"
 #include "sprites.h"
 #include "still.h"
 #include <math.h>
@@ -1497,6 +1498,113 @@ static void speeds(const char *numbered, const char *snd, const char *pic, const
     re_project_close(p);
 }
 
+/* ---- render previews: the costly stretches, their signatures, a stretch
+   exported, a playlist playing the files made ------------------------------ */
+static void render_previews(const char *a, const char *b, const char *numbered, const char *pic, const char *out)
+{
+    re_engine_io io = {show, NULL, clk, NULL, 48000, 2, NULL};
+    re_project *p = re_project_new();
+    re_stretch s[8];
+    re_project_add(p, numbered, -1);
+    re_project_add(p, b, -1);
+    re_project_add(p, numbered, -1); /* 0-74 numbered, 75-149 blue, 150-224 numbered */
+    CHECK(re_render_stretches(p, s, 8) == 0, "render: costly stretches with no effects");
+    re_project_speed(p, 1, 200);
+    CHECK(re_render_stretches(p, s, 8) == 1 && s[0].start == 75 && s[0].length == 38, "render: a clip at 200%%: %d+%d",
+          s[0].start, s[0].length);
+    re_project_speed(p, 1, 100);
+    re_project_fade(p, 0, 0, 10);
+    int ov = re_project_overlay_add(p, pic, 150, 25);
+    int n = re_render_stretches(p, s, 8);
+    CHECK(ov >= 0 && n == 2 && s[0].start == 0 && s[0].length == 10 && s[1].start == 150 && s[1].length == 25,
+          "render: stretches: %d: %d+%d, %d+%d", n, s[0].start, s[0].length, s[1].start, s[1].length);
+    /* near: one */
+    re_project_overlay_add(p, pic, 30, 10);
+    n = re_render_stretches(p, s, 8);
+    CHECK(n == 2 && s[0].start == 0 && s[0].length == 40, "render: near ones joined: %d, %d+%d", n, s[0].start,
+          s[0].length);
+    uint64_t sig = s[1].sig;
+    CHECK(sig == re_render_signature(p, 150, 25) && sig != s[0].sig, "render: signatures");
+    /* an edit elsewhere: the same; in it: another; moved along: the same */
+    re_project_fade(p, 0, 1, 5);
+    CHECK(re_render_signature(p, 150, 25) == sig, "render: an edit elsewhere changed the signature");
+    re_project_overlay_set(p, re_project_overlay_at(p, 160), -1, -1, 50);
+    uint64_t sig50 = re_render_signature(p, 150, 25);
+    CHECK(sig50 != sig, "render: the overlay's opacity didn't change the signature");
+    re_project_overlay_set(p, re_project_overlay_at(p, 160), -1, -1, 100);
+    CHECK(re_render_signature(p, 150, 25) == sig, "render: back as it was: another signature");
+    re_project_set_in_out(p, 2, 1, 74);
+    CHECK(re_render_signature(p, 150, 25) != sig, "render: the clip's in didn't change the signature");
+    re_project_set_in_out(p, 2, 0, 74);
+    sig = re_render_signature(p, 150, 25);
+
+    /* a stretch exported: its frames only */
+    CHECK(!re_project_save(p, out), "render: not saved");
+    re_export_settings es = {90, RE_EXPORT_NORMAL, 0, "mpeg4", 1, 150, 174};
+    char err[200];
+    int r = re_export(out, "render-test.mp4", &es, NULL, NULL, NULL, err, sizeof(err));
+    re_project *made = r == 0 ? re_project_open("render-test.mp4", 0) : NULL;
+    CHECK(r == 0 && made && re_project_length(made) == 25, "render: exported %d (%s), %d frames", r, err,
+          made ? re_project_length(made) : -1);
+    if (made)
+        re_project_close(made);
+    es.in = 200;
+    es.out = 300;
+    CHECK(re_export(out, "render-test2.mp4", &es, NULL, NULL, NULL, err, sizeof(err)) < 0, "render: past the end");
+
+    /* the files played in place of their stretches: b.mp4 (blue) "made" of the second */
+    re_previews *v = re_previews_new();
+    int got = -1;
+    CHECK(re_previews_producer(v, p, &got) == NULL && got == 0, "render: a playlist with nothing rendered");
+    char copy[300];
+    snprintf(copy, sizeof(copy), "render-copy.mp4");
+    FILE *in = fopen(b, "rb"), *o = fopen(copy, "wb");
+    char buf[8192];
+    size_t k;
+    while (in && o && (k = fread(buf, 1, sizeof(buf), in)) > 0)
+        fwrite(buf, 1, k, o);
+    if (in) fclose(in);
+    if (o) fclose(o);
+    CHECK(!re_previews_add(v, sig, 25, copy) && re_previews_find(v, sig, 25) && !re_previews_find(v, sig, 24)
+              && re_previews_count(v) == 1,
+          "render: a file kept");
+    mlt_producer pl = re_previews_producer(v, p, &got);
+    CHECK(pl && got == 25 && mlt_producer_get_length(pl) == re_project_length(p), "render: the playlist: %d frames, %d",
+          got, pl ? mlt_producer_get_length(pl) : -1);
+    re_engine *e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    int live = luma_at(e, 160);
+    re_engine_set_producer(e, pl);
+    int red = luma_at(e, 160), before = luma_at(e, 100), after = luma_at(e, 200);
+    CHECK(abs(red - 41) <= 3 && abs(live - red) > 20 && abs(before - luma_at(e, 100)) <= 1
+              && abs(after - (16 + 2 * 50)) <= 3,
+          "render: played: %d at 160 (live %d), %d at 100, %d at 200", red, live, before, after);
+    re_engine_set_producer(e, re_project_producer(p));
+    CHECK(abs(luma_at(e, 160) - live) <= 2, "render: back to the project: %d (%d)", luma_at(e, 160), live);
+    re_engine_close(e);
+    mlt_producer_close(pl);
+    /* the stretch changed: its file not played */
+    re_project_overlay_set(p, re_project_overlay_at(p, 160), -1, -1, 50);
+    CHECK(re_previews_producer(v, p, &got) == NULL, "render: a changed stretch played from its old file");
+    /* a stretch of V1's moved along (V2's stay where they are): played still */
+    re_project_overlay_remove(p, re_project_overlay_at(p, 160));
+    re_project_fade(p, 2, 0, 10);
+    n = re_render_stretches(p, s, 8);
+    CHECK(n == 2 && s[1].start == 150 && s[1].length == 10, "render: a fade: %d, %d+%d", n, s[1].start, s[1].length);
+    re_previews_add(v, s[1].sig, 10, copy);
+    re_project_insert(p, numbered, 0, 49, 75); /* (50 frames in before it, outside it) */
+    n = re_render_stretches(p, s, 8);
+    pl = re_previews_producer(v, p, &got);
+    CHECK(n == 2 && s[1].start == 200 && pl && got == 10, "render: moved along: at %d, %d from files", s[1].start, got);
+    if (pl)
+        mlt_producer_close(pl);
+    re_previews_free(v);
+    FILE *gone = fopen(copy, "rb");
+    CHECK(!gone, "render: the file kept after the list was freed");
+    if (gone)
+        fclose(gone);
+    re_project_close(p);
+}
+
 /* ---- media: thumbnails and waveforms, made a step at a time ---------------- */
 
 /* Steps until there's nothing to do: how many (or -1, too many) */
@@ -1877,6 +1985,7 @@ int main(int argc, char **argv)
     rolls(n, b);
     copy_paste(a, argv[9], argv[11]);
     speeds(n, argv[9], argv[12], a, out);
+    render_previews(a, b, n, argv[12], out);
     overlays(a, b, argv[9], out, argv[10], argv[11], argv[12]);
     video_overlays(a, b, argv[9], n, argv[5], out);
     char dir[512];

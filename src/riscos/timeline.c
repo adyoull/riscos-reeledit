@@ -64,6 +64,9 @@
 #define THUMB_H (TRACK_H - CORNER - WAVE_H) /* its thumbnails (previews.c), between */
 #define WAVE_COLOUR  0xF0C89000u /* (144, 200, 240): a clip's waveform */
 #define AUDIO_WAVE   0x80D8A000u /* (160, 216, 128): a sound's */
+#define RENDER_H 8   /* render previews' bar, under the ruler */
+#define RENDER_COLOUR   0x3030D000u /* (208, 48, 48): a stretch to render */
+#define RENDERED_COLOUR 0x40B04000u /* (64, 176, 64): rendered */
 #define V2_H    64   /* V2's row: the overlays (pictures over the video), above V1 */
 #define V2_TOP (-RULER_H - 8) /* the rows' tops and bottoms (work area) */
 #define V2_BOTTOM (V2_TOP - V2_H)
@@ -752,6 +755,20 @@ static void draw(int *b)
             char tc[40];
             mark_label(tc, sizeof(tc), f, fps);
             text(tc, x + 6, ruler_y0 + 20, 0x00000000, 0xDDDDDD00);
+        }
+    }
+    /* render previews (renders.c): under the ruler, each costly stretch red
+       (to render), green (rendered) or amber (being rendered, as far as it's made) */
+    int rs, rl, rm, st;
+    for (int i = 0; A.proj && (st = rr_stretches(i, &rs, &rl, &rm)) >= 0; i++) {
+        if (rs > f1 || rs + rl < f0)
+            continue;
+        int x0 = ox + x_of(rs), x1 = ox + x_of(rs + rl) - 1;
+        colour(st == 1 ? RENDERED_COLOUR : RENDER_COLOUR);
+        rect(x0, ruler_y0, x1, ruler_y0 + RENDER_H - 1);
+        if (st == 2 && rm > 0) {
+            colour(0x2080F000);
+            rect(x0, ruler_y0, ox + x_of(rs + (rm < rl ? rm : rl)) - 1, ruler_y0 + RENDER_H - 1);
         }
     }
     /* the tracks */

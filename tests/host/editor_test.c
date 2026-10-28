@@ -46,11 +46,16 @@
 #include <unistd.h>
 
 #include "project.h"
+#include "export.h"
 #include "fake/screens.h"
 int app_position(void); /* (viewer.c's) */
 int re_test_previews(int *thumbs, int *wave_rects); /* (previews.c's) */
 int re_test_previews_stand_ins(void);
 int re_test_previews_pending(void);
+int re_test_renders(void); /* (renders.c's) */
+int re_test_previews_playing(void);
+int rr_stretches(int i, int *start, int *length, int *made);
+static int render_starts, render_jobs, render_progress_seen;
 static int thumb_plots; /* (the Timeline's thumbnails plotted) */
 
 int reeledit_main(int argc, char **argv);
@@ -305,6 +310,8 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
             colours_seen |= 1;
         if ((unsigned) r->r[0] == 0xF0C89000u) /* (a V1 clip's waveform: timeline.c's WAVE_COLOUR) */
             colours_seen |= 2;
+        if ((unsigned) r->r[0] == 0x40B04000u) /* (a rendered stretch: RENDERED_COLOUR) */
+            colours_seen |= 4;
         break;
     case 0x55FC0: r->r[0] = 5; ssb_playing = 0; ssb_added = ssb_played = 0; break;
     case 0x55FC1: ssb_closes++; ssb_playing = 0; break;
@@ -2658,9 +2665,95 @@ static int script(int *b, int mask)
         re_item it;
         re_project_item(re_test_project(), 0, &it);
         CHECK(it.speed == 200, "Speed: F8: %d%%", it.speed);
+        /* ---- render previews: Ctrl-R; each stretch's TaskWindow played by
+           the script (the export made here, from the command); played from them ---- */
+        render_starts = starts;
+        colours_seen = 0;
+        next(346);
+        return key_to(b, TL, 18); /* Ctrl-R */
+    }
+    case 346: { /* a render started: made here; the TaskWindow's messages */
+        char proj[300], outf[300];
+        int h = 0, q = 0, hw = 0, in = 0, out = 0;
+        const char *x = strstr(start_cmd, "-export ");
+        CHECK(starts == render_starts + 1 && x && sscanf(x, "-export %299s %299s %d %d %d %d %d", proj, outf, &h, &q, &hw, &in, &out) == 7
+                  && q == 2 && out >= in,
+              "render: %d started (%d before): \"%s\"", starts, render_starts, start_cmd);
+        if (!x)
+            fail_quit("render: not started");
+        re_export_settings es = {h, q, 0, "mpeg4", 1, in, out};
+        char err[200];
+        CHECK(re_export(proj, outf, &es, NULL, NULL, NULL, err, sizeof(err)) == 0, "render: frames %d-%d: %s", in, out, err);
+        render_jobs++;
+        render_starts = starts;
+        next(347);
+        memset(b, 0, 24);
+        b[0] = 24; b[1] = 0x780 + render_jobs; b[2] = 80; b[4] = 0x808C2; b[5] = 0x52455056; /* TaskWindow_Ego */
+        return 17;
+    }
+    case 347: {
+        int s0, l0, m0;
+        CHECK(rr_stretches(0, &s0, &l0, &m0) >= 0, "render: no stretches");
+        next(348);
+        memset(b, 0, 64);
+        b[1] = 0x780 + render_jobs; b[2] = 81; b[4] = 0x808C1;
+        b[5] = (int) strlen("progress 1 2\ndone\n");
+        memcpy(&b[6], "progress 1 2\ndone\n", b[5]);
+        b[0] = 24 + ((b[5] + 3) & ~3);
+        return 17;
+    }
+    case 348:
+        for (int i = 0, s0, l0, m0, st; (st = rr_stretches(i, &s0, &l0, &m0)) >= 0; i++)
+            render_progress_seen |= st == 2 && m0 == 1;
+        next(349);
+        memset(b, 0, 24);
+        b[0] = 20; b[1] = 0x780 + render_jobs; b[2] = 82; b[4] = 0x808C3; /* TaskWindow_Morio */
+        return 17;
+    case 349:
+        CHECK(re_test_renders() == render_jobs, "render: %d previews kept after %d jobs", re_test_renders(), render_jobs);
+        if (starts > render_starts && render_jobs < 20) { /* (the next stretch started) */
+            render_starts = starts - 1;
+            next(346);
+            return script(b, mask);
+        }
+        {
+            int all = 1, n = 0;
+            for (int i = 0, s0, l0, m0, st; (st = rr_stretches(i, &s0, &l0, &m0)) >= 0; i++, n++)
+                all &= st == 1;
+            CHECK(all && n == render_jobs && render_progress_seen, "render: %d stretches, %d rendered, all %d, progress %d",
+                  n, render_jobs, all, render_progress_seen);
+        }
+        CHECK(colours_seen & 4, "render: the rendered stretches not drawn green");
+        shot("34-rendered");
+        next(350);
+        return key_to(b, TL, ' '); /* play: from the previews */
+    case 350:
+        if (fake_cs - phase_cs < 20)
+            return 0;
+        CHECK(re_test_speed() != 0 && re_test_previews_playing(), "render: playing from the previews: %d",
+              re_test_previews_playing());
+        next(351);
+        return key_to(b, TL, ' ');
+    case 351:
+        if (nulls)
+            return 0;
+        CHECK(!re_test_previews_playing(), "render: stopped, still the previews");
+        next(352);
+        return key_to(b, TL, ' ');
+    case 352: /* an edit while playing: the project again */
+        if (fake_cs - phase_cs < 10)
+            return 0;
+        next(353);
+        return key_to(b, TL, 's');
+    case 353:
+        CHECK(!re_test_previews_playing(), "render: edited while playing, still the previews");
+        next(354);
+        return key_to(b, TL, ' ');
+    case 354:
+        if (nulls)
+            return 0;
         next(45);
         return key_to(b, TL, 0x18D);
-    }
     case 45: /* the desktop shutting down: asked, Discard; the shutdown started again; quit */
         if (nulls)
             return 0;
