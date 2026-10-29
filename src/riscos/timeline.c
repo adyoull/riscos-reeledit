@@ -843,7 +843,16 @@ static void draw(int *b)
                 }
                 int head_x = ox + x_of(it.start) + inset, tw = pv_thumb_width(THUMB_H);
                 int tail_x = ox + x_of(it.start + it.length) - 2 - inset - tw;
-                if (tw > 0 && x1 - x0 >= tw + 2 * inset) {
+                if (it.fill >= 0 && x1 - x0 >= THUMB_H + 2 * inset) { /* (a colour clip: its colour where a picture would be) */
+                    unsigned f = (unsigned) it.fill;
+                    int sw = THUMB_H * 16 / 9 < x1 - x0 - 2 * inset ? THUMB_H * 16 / 9 : x1 - x0 - 2 * inset;
+                    colour(0x20202000);
+                    rect(head_x, track_y1 - CORNER - THUMB_H, head_x + sw, track_y1 - CORNER);
+                    colour(((f & 0xFF) << 24) | ((f & 0xFF00) << 8) | ((f >> 8) & 0xFF00));
+                    rect(head_x + 2, track_y1 - CORNER - THUMB_H + 2, head_x + sw - 2, track_y1 - CORNER - 2);
+                    if (name_x < head_x + sw + 10)
+                        name_x = head_x + sw + 10;
+                } else if (tw > 0 && x1 - x0 >= tw + 2 * inset) {
                     int w = pv_thumb(file, re_item_file_frame(&it, it.in), head_x, track_y1 - CORNER, THUMB_H, &in_box);
                     if (w > 0 && name_x < head_x + w + 10)
                         name_x = head_x + w + 10;

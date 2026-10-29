@@ -1729,7 +1729,7 @@ static int script(int *b, int mask)
         CHECK(re_colour_is_none(&c) && !it.coloured, "Inspector: Reset: brightness %d", c.brightness);
         mark = it.muted;
         next(4020);
-        return in_row(b, 0, 450, 0x400); /* the Sound page */
+        return in_row(b, 0, 300, 0x400); /* the Sound page (Colour, Sound, Motion) */
     }
     case 4020:
         if (nulls)
@@ -1807,7 +1807,7 @@ static int script(int *b, int mask)
             return 0;
         }
         next(4018);
-        b[0] = 1; b[1] = 18; b[2] = -1; /* Edit > Normalise all the sound */
+        b[0] = 1; b[1] = 20; b[2] = -1; /* Edit > Normalise all the sound */
         return 9;
     }
     case 4018: {
@@ -1833,9 +1833,115 @@ static int script(int *b, int mask)
               it.volume, a.volume);
         re_project_audio_remove(re_test_project(), 0, 0); /* (as it was) */
         app_edited();
+        next(4030);
+        re_project_item(re_test_project(), 1, &it);
+        return click_tl(b, it.start + 5, 0, 0x400);
+    }
+    /* ---- the Motion page: Zoom in from its menu, How far to its end; F freezes the frame at the playhead; Edit >
+       Colour clip, its Fill from the Inspector's menu ---- */
+    case 4030:
+        if (nulls)
+            return 0;
+        next(4031);
+        return in_row(b, 0, 500, 0x400); /* the Motion page */
+    case 4031:
+        if (nulls)
+            return 0;
+        mark = menus;
+        next(4032);
+        return in_row(b, 1, 300, 0x400); /* Motion: its menu */
+    case 4032:
+        CHECK(menus == mark + 1, "Inspector: Motion gave no menu");
+        next(4033);
+        b[0] = 1; b[1] = -1; /* Zoom in */
+        return 9;
+    case 4033: {
+        if (nulls)
+            return 0;
+        re_motion m;
+        re_project_motion(re_test_project(), 1, &m);
+        CHECK(m.kind == 1 && m.amount == RE_MOTION_AMOUNT, "Inspector: Motion > Zoom in: %d, %d", m.kind, m.amount);
+        shot("37-motion");
+        next(4034);
+        return in_row(b, 2, 480, 0x400); /* How far: its end */
+    }
+    case 4034: {
+        if (nulls)
+            return 0;
+        re_motion m;
+        re_project_motion(re_test_project(), 1, &m);
+        CHECK(m.kind == 1 && m.amount == 100, "Inspector: How far to its end: %d", m.amount);
+        re_motion_none(&m);
+        re_project_set_motion(re_test_project(), 1, &m); /* (as it was) */
+        app_edited();
+        next(4035);
+        return click_tl(b, 40, 1, 0x400); /* the playhead to 40, in the second clip */
+    }
+    case 4035:
+        if (nulls)
+            return 0;
+        CHECK(pos == 40 && !strcmp(layout(), "c30 c75"), "before freezing: at %d, %s", pos, layout());
+        next(4036);
+        return key_to(b, TL, 'F');
+    case 4036: {
+        if (nulls)
+            return 0;
+        re_item it;
+        re_project_item(re_test_project(), 2, &it);
+        CHECK(!strcmp(layout(), "c30 c10 c50 c65") && it.held && it.held_frame == 10 && re_test_selected() == 2,
+              "F: frozen: %s, held %d at %d, sel %d", layout(), it.held, it.held_frame, re_test_selected());
+        shot("38-freeze");
+        next(4037);
+        return key_to(b, TL, 0x188); /* F8 */
+    }
+    case 4037:
+        if (nulls)
+            return 0;
+        CHECK(!strcmp(layout(), "c30 c75"), "the freeze undone: %s", layout());
+        next(4043);
+        b[0] = W[0].box[0] + 200; b[1] = W[0].box[3] - 100; b[2] = 2; b[3] = VIEWER; b[4] = -1; /* Menu */
+        return 6;
+    case 4043:
+        next(4038);
+        b[0] = 1; b[1] = 19; b[2] = -1; /* Edit > Colour clip at the playhead */
+        return 9;
+    case 4038: {
+        if (nulls)
+            return 0;
+        re_item it;
+        re_project_item(re_test_project(), 2, &it);
+        CHECK(!strcmp(layout(), "c30 c10 c50 c65") && it.fill == 0 && re_test_selected() == 2,
+              "Edit > Colour clip: %s, colour %d, sel %d", layout(), it.fill, re_test_selected());
+        mark = menus;
+        next(4039);
+        return in_row(b, 1, 300, 0x400); /* Fill: its menu (the Colour page) */
+    }
+    case 4039:
+        CHECK(menus == mark + 1, "Inspector: Fill gave no menu");
+        next(4040);
+        b[0] = 7; b[1] = -1; /* Blue */
+        return 9;
+    case 4040: {
+        if (nulls)
+            return 0;
+        re_item it;
+        re_project_item(re_test_project(), 2, &it);
+        CHECK(it.fill == 0x2050C0 && !strcmp(it.name, "Blue"), "Inspector: Fill > Blue: %06x (%s)", it.fill, it.name);
+        shot("39-colour-clip");
+        next(4041);
+        return key_to(b, TL, 0x188);
+    }
+    case 4041:
+        if (nulls)
+            return 0;
+        next(4042);
+        return key_to(b, TL, 0x188);
+    case 4042:
+        if (nulls)
+            return 0;
+        CHECK(!strcmp(layout(), "c30 c75"), "the colour clip undone: %s", layout());
         next(144);
         return click_tl(b, 15, 0, 2);
-    }
     case 144:
         next(145);
         b[0] = 5; b[1] = -1; /* Dissolve into the clip after */

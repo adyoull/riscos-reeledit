@@ -54,6 +54,8 @@ const char *rp_speed_file(mlt_producer parent, const char *resource)
 
 int re_item_file_frame(const re_item *it, int f)
 {
+    if (it->held)
+        return it->held_frame;
     double s = it->speed / 100.0;
     if (s == 0)
         s = 1;
@@ -67,7 +69,7 @@ int re_project_speed(re_project *p, int item, int percent)
     if (percent == 0 || abs(percent) < 10 || abs(percent) > 2000 || re_project_item(p, item, &it) || it.gap
         || it.mix || it.speed == percent || (item > 0 && !re_project_item(p, item - 1, &n) && n.mix)
         || (!re_project_item(p, item + 1, &n) && n.mix) || mlt_playlist_get_clip_info(p->v1, &info, item)
-        || re_still_is(info.producer))
+        || it.picture)
         return 0;
     const char *file = rp_speed_file(info.producer, info.resource);
     if (!file)
@@ -103,6 +105,8 @@ int re_project_speed(re_project *p, int item, int percent)
     re_project_colour(p, item, &colour);
     re_sound_fx fx;
     re_project_sound_fx(p, item, &fx);
+    re_motion motion;
+    re_project_motion(p, item, &motion);
     re_project_begin(p); /* (one undo: the clip taken out, put back at its speed, its effects) */
     int removed = re_project_remove(p, item, 1), ok = 0;
     if (removed)
@@ -123,6 +127,8 @@ int re_project_speed(re_project *p, int item, int percent)
             re_project_volume(p, item, it.volume);
         re_project_set_colour(p, item, &colour);
         re_project_set_sound_fx(p, item, &fx);
+        if (motion.kind > 0)
+            re_project_set_motion(p, item, &motion);
     }
     re_project_end(p);
     if (!ok && removed) /* (half done: undone) */

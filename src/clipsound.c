@@ -30,6 +30,9 @@ int rp_cut_has_sound(mlt_producer cut)
     if (!cut || re_still_is(cut))
         return 0;
     mlt_producer parent = mlt_producer_cut_parent(cut);
+    const char *service = mlt_properties_get(MLT_PRODUCER_PROPERTIES(parent ? parent : cut), "mlt_service");
+    if (service && (!strcmp(service, "color") || !strcmp(service, "colour"))) /* (a colour clip) */
+        return 0;
     const char *a = mlt_properties_get(MLT_PRODUCER_PROPERTIES(parent ? parent : cut), "audio_index");
     return !a || atoi(a) >= 0; /* (avformat's -1: none; not avformat: assumed) */
 }

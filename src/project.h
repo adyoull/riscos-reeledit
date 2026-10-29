@@ -51,6 +51,11 @@ typedef struct
                             another speed, its length at that speed */
     int speed;           /* % (100: as it is; 200 twice as fast; negative: reversed) */
     int coloured;        /* 1: its colour changed (re_project_colour) */
+    int moving;          /* 1: it pans or zooms (re_project_motion) */
+    int picture;         /* 1: a still picture (a picture file, a freeze frame or a colour clip) */
+    int held;            /* 1: a freeze frame (re_project_freeze) */
+    int held_frame;      /* its frame of its file (as re_item_file_frame's) */
+    int fill;            /* a colour clip's colour (0xRRGGBB), or -1: not one */
     char name[64];       /* the clip's file's leaf name */
 } re_item;
 int re_project_items(re_project *p);
@@ -185,6 +190,45 @@ int re_colour_look_of(const re_colour *c);
    changed, 0 not. Between begin and end too. */
 int re_project_colour(re_project *p, int item, re_colour *c);
 int re_project_set_colour(re_project *p, int item, const re_colour *c);
+
+/* Freeze frames and colour clips (freeze.c). A frame of the clip at a
+   frame held for length frames (0: 2 seconds), put in there (the clip
+   split there, what follows moving on); not a picture's. A colour clip
+   put in at a frame, so long (0: 2 seconds), as a freeze frame is; not in
+   an empty project (it says nothing of the size). Each: its item's index,
+   or -1. A colour clip's colour changed: 1, or 0 (not a colour clip, or
+   that colour already; a colour clip split or copied keeps one colour for
+   all its parts). Either is a still: trimmed to any length, faded and
+   coloured as a clip is; no sound, no speed. */
+int re_project_freeze(re_project *p, int frame, int length);
+int re_project_add_fill(re_project *p, int frame, int length, unsigned rgb);
+int re_project_set_fill(re_project *p, int item, unsigned rgb);
+#define RE_FILLS 9
+extern const char *const re_fill_names[RE_FILLS]; /* Black, White, Grey, Red... */
+extern const unsigned re_fill_rgbs[RE_FILLS];
+const char *re_fill_name(unsigned rgb);            /* (NULL: not one of those) */
+/* The producer that makes freeze frames, registered with MLT (re_mlt_start does it) */
+void re_hold_register(void);
+
+/* Pan and zoom (motion.c): a clip's picture moving over its length. kind:
+   re_motions' (0 None, Zoom in, Zoom out, Pan left to right, right to left,
+   upwards, downwards; -1: a motion of Shotcut's own, kept as it is); amount:
+   how far in it's zoomed at most, % (10..100: 1.1 to 2 times) */
+typedef struct
+{
+    int kind;
+    int amount;
+} re_motion;
+#define RE_MOTIONS 7
+#define RE_MOTION_AMOUNT 30
+extern const char *const re_motions[RE_MOTIONS];
+void re_motion_none(re_motion *m);
+/* A clip's (0, or -1: not a clip), and set: 1 changed, 0 not. Between
+   begin and end too. */
+int re_project_motion(re_project *p, int item, re_motion *m);
+int re_project_set_motion(re_project *p, int item, const re_motion *m);
+/* The filter that does it, registered with MLT (re_mlt_start does it) */
+void re_motion_register(void);
 
 /* Sound clean-up (soundfx.c): a clip's, a video overlay's or a sound's */
 typedef struct

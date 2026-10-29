@@ -125,6 +125,15 @@ void rp_cut_mute(re_project *p, mlt_producer cut, int on);
 int rp_cut_colour(mlt_producer cut, re_colour *c);
 void rp_cut_set_colour(re_project *p, mlt_producer cut, const re_colour *c);
 void rp_fit_colour(re_project *p);
+/* freeze.c: a cut is a colour clip (1, its colour), or a freeze frame (1,
+   the frame's time in its file) */
+int rp_cut_fill(mlt_producer cut, unsigned *rgb);
+int rp_cut_held(mlt_producer cut, double *time);
+/* motion.c: a cut's pan and zoom (1: it has a filter for it), set; the
+   dissolves' ends held at their clips' last and first rects */
+int rp_cut_motion(mlt_producer cut, re_motion *m);
+void rp_cut_set_motion(re_project *p, mlt_producer cut, const re_motion *m);
+void rp_fit_motion(re_project *p);
 /* soundfx.c: a cut's sound clean-up (1: any), set; the dissolves' ends
    given their clips' */
 int rp_cut_sound_fx(mlt_producer cut, re_sound_fx *fx);

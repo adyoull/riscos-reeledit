@@ -5,7 +5,9 @@
  * (part of the workspace).
  *
  *   a clip     Colour: Look (a menu), Brightness, Contrast, Saturation,
- *              Warmth, Midtones (sliders), Reset; Sound: Volume, Mute
+ *              Warmth, Midtones (sliders), Reset (a colour clip's colour
+ *              first: a menu); Sound: Volume, Mute, the clean-up; Motion:
+ *              pan and zoom (a menu) and how far
  *   an overlay Place (a menu), Size, Opacity; a video's Volume and Mute;
  *              a title's Edit title...
  *   a sound    Volume, Mute
@@ -33,11 +35,11 @@
 #define ColourTrans_SetGCOL 0x40743
 #define OS_Plot             0x45
 
-enum { K_HEADING, K_SLIDER, K_BUTTON, K_TOGGLE, K_TEXT, K_TABS }; /* (tabs: label and text the two names) */
+enum { K_HEADING, K_SLIDER, K_BUTTON, K_TOGGLE, K_TEXT, K_TABS }; /* (tabs: label, text and third the names; hi + 1 of them) */
 enum { C_LOOK = 1, C_BRIGHTNESS, C_CONTRAST, C_SATURATION, C_WARMTH, C_MIDTONES, C_RESET, C_VOLUME, C_MUTE,
        O_PLACE, O_SIZE, O_OPACITY, O_TITLE, O_VOLUME, O_MUTE, A_VOLUME, A_MUTE,
        F_PAN, F_RUMBLE, F_VOICE, F_GATE, F_NORMAL, /* (F_: the sound's clean-up, of whatever is selected) */
-       T_TABS };
+       T_TABS, M_MOTION, M_AMOUNT, C_FILL };
 
 typedef struct
 {
@@ -45,6 +47,7 @@ typedef struct
     const char *label;
     int lo, hi, value;
     char text[48];   /* a button's, a toggle's or a value's words */
+    const char *third; /* (tabs: the third's name) */
 } control;
 
 #define MAX_CONTROLS 26
@@ -55,9 +58,9 @@ static struct
     char title[16];
     int drag_id;     /* the slider being dragged (0: none) */
     int drag_value;  /* its value when last set */
-    int menu;        /* the menu open: C_LOOK or O_PLACE */
+    int menu;        /* the menu open: C_LOOK, O_PLACE, M_MOTION or C_FILL */
     int closed;      /* closed by the user: not opened with the editor */
-    int tab;         /* the page shown: 0 Colour (or Overlay), 1 Sound */
+    int tab;         /* the page shown: 0 Colour (or Overlay), 1 Sound, 2 Motion (a clip's) */
 } I = {0, "Inspector", 0, 0, 0, 0, 0};
 
 static const char *const PLACE_NAMES[RE_PLACES] = {"Full frame", "Centre", "Top left", "Top right", "Bottom left",
@@ -81,6 +84,7 @@ static int add(control *c, int n, int kind, int id, const char *label, int lo, i
     c[n].hi = hi;
     c[n].value = value < lo ? lo : value > hi ? hi : value;
     snprintf(c[n].text, sizeof(c[n].text), "%s", text ? text : "");
+    c[n].third = NULL;
     return n + 1;
 }
 
@@ -149,8 +153,22 @@ static int controls(control *c)
     if (!A.proj)
         return 0;
     if (A.sel >= 0 && !re_project_item(A.proj, A.sel, &it) && !it.gap && !it.mix) {
-        n = add(c, n, K_TABS, T_TABS, "Colour", 0, 1, I.tab, "Sound");
-        if (I.tab == 0) {
+        n = add(c, n, K_TABS, T_TABS, "Colour", 0, 2, I.tab, "Sound");
+        c[n - 1].third = "Motion";
+        if (I.tab == 0 && it.fill >= 0) {
+            const char *f = re_fill_name((unsigned) it.fill);
+            n = add(c, n, K_BUTTON, C_FILL, "Fill", 0, 0, 0, f ? f : "Your own");
+        }
+        if (I.tab == 2) {
+            re_motion m;
+            re_project_motion(A.proj, A.sel, &m);
+            n = add(c, n, K_BUTTON, M_MOTION, "Motion", 0, 0, 0, m.kind < 0 ? "Shotcut's own" : re_motions[m.kind]);
+            if (m.kind > 0)
+                n = add(c, n, K_SLIDER, M_AMOUNT, "How far", 10, 100, m.amount, NULL);
+            n = add(c, n, K_TEXT, 0, "", 0, 0, 0, "Over the whole of the clip.");
+            if (!it.picture && m.kind != 0)
+                n = add(c, n, K_TEXT, 0, "", 0, 0, 0, "On a video: render previews to play it smoothly.");
+        } else if (I.tab == 0) {
             re_colour col;
             re_project_colour(A.proj, A.sel, &col);
             int look = re_colour_look_of(&col);
@@ -209,6 +227,9 @@ static void value_text(const control *c, char *t, int size)
         break;
     case C_VOLUME: case O_VOLUME: case A_VOLUME:
         snprintf(t, size, "%+d dB", c->value);
+        break;
+    case M_AMOUNT: /* (how much bigger at its biggest) */
+        snprintf(t, size, "%d.%02dx", (100 + c->value) / 100, (100 + c->value) % 100);
         break;
     case F_PAN:
         if (c->value == 0)
@@ -296,6 +317,13 @@ static void redraw_all(void)
     ro_swi(Wimp_SetExtent, &r);
     r.r[0] = I.win; r.r[1] = 0; r.r[2] = ext[1]; r.r[3] = WIDTH; r.r[4] = 0;
     ro_swi(Wimp_ForceRedraw, &r);
+}
+
+void in_show_page(int tab)
+{
+    I.tab = tab;
+    if (is_open())
+        redraw_all();
 }
 
 void in_edited(void)
@@ -463,9 +491,13 @@ void in_redraw(int *b)
                 text(k->text, ox + 32, y0 + 14, DARK, GREY);
                 break;
             case K_TABS: {
-                int mid = ox + WIDTH / 2;
-                button(ox + 16, y0 + 6, mid - 4, y1 - 2, k->label, k->value == 0 ? 0xE0C09000u : WHITE);
-                button(mid + 4, y0 + 6, ox + WIDTH - 24, y1 - 2, k->text, k->value == 1 ? 0xE0C09000u : WHITE);
+                const char *names[3] = {k->label, k->text, k->third};
+                int tabs = k->hi + 1, x = ox + 16, span = WIDTH - 40;
+                for (int t = 0; t < tabs; t++) {
+                    int a = x + span * t / tabs, z = x + span * (t + 1) / tabs;
+                    button(a + (t ? 4 : 0), y0 + 6, z - (t < tabs - 1 ? 4 : 0), y1 - 2, names[t] ? names[t] : "",
+                           k->value == t ? 0xE0C09000u : WHITE);
+                }
                 break;
             }
             }
@@ -519,6 +551,14 @@ static int set(int id, int value)
     case A_VOLUME:
         done = re_project_audio_volume(A.proj, A.au_track, A.au_sel, value);
         break;
+    case M_AMOUNT: {
+        re_motion m;
+        if (re_project_motion(A.proj, A.sel, &m) || m.kind <= 0)
+            return 0;
+        m.amount = value;
+        done = re_project_set_motion(A.proj, A.sel, &m);
+        break;
+    }
     case F_PAN: case F_RUMBLE: case F_VOICE: case F_GATE: {
         re_sound_fx fx;
         if (sel_fx(&fx))
@@ -554,21 +594,34 @@ static int value_at(const control *k, int wx)
 
 static void open_menu(int which, int x, int y)
 {
-    static MENU(RE_PLACES > RE_LOOKS ? RE_PLACES : RE_LOOKS) m;
+    static MENU(RE_FILLS) m; /* (the longest: RE_FILLS 9, RE_LOOKS 8, RE_PLACES and RE_MOTIONS 7) */
     re_colour col;
     re_overlay o;
-    int n = which == C_LOOK ? RE_LOOKS : RE_PLACES, ticked = -1;
+    re_motion mo;
+    re_item it;
+    int n = which == C_LOOK ? RE_LOOKS : which == O_PLACE ? RE_PLACES : which == M_MOTION ? RE_MOTIONS : RE_FILLS;
+    int ticked = -1;
     if (which == C_LOOK && !re_project_colour(A.proj, A.sel, &col))
         ticked = re_colour_look_of(&col);
     if (which == O_PLACE && !re_project_overlay(A.proj, A.ov_sel, &o))
         ticked = o.place;
+    if (which == M_MOTION && !re_project_motion(A.proj, A.sel, &mo))
+        ticked = mo.kind;
+    if (which == C_FILL && !re_project_item(A.proj, A.sel, &it))
+        for (int i = 0; i < RE_FILLS; i++)
+            if ((int) re_fill_rgbs[i] == it.fill)
+                ticked = i;
     memset(&m, 0, sizeof(m));
-    snprintf(m.title, sizeof(m.title), "%s", which == C_LOOK ? "Look" : "Place");
+    snprintf(m.title, sizeof(m.title), "%s",
+             which == C_LOOK ? "Look" : which == O_PLACE ? "Place" : which == M_MOTION ? "Motion" : "Fill");
     m.tfg = 7, m.tbg = 2, m.wfg = 7, m.wbg = 0;
     m.w = 320, m.h = 44;
     for (int i = 0; i < n; i++) {
         menu_item *it = &m.item[i];
-        const char *name = which == C_LOOK ? re_colour_looks[i] : PLACE_NAMES[i];
+        const char *name = which == C_LOOK    ? re_colour_looks[i]
+                           : which == O_PLACE ? PLACE_NAMES[i]
+                           : which == M_MOTION ? re_motions[i]
+                                               : re_fill_names[i];
         it->flags = (i == n - 1 ? 0x80 : 0) | (i == ticked ? 1 : 0);
         it->sub = -1;
         it->iflags = ITEM_FLAGS;
@@ -599,6 +652,18 @@ void in_menu_select(int *b)
     } else if (I.menu == O_PLACE && k < RE_PLACES) {
         done = re_project_overlay_set(A.proj, A.ov_sel, k, -1, -1);
         app_log("inspector: place %s", PLACE_NAMES[k]);
+    } else if (I.menu == M_MOTION && k < RE_MOTIONS) {
+        re_motion m;
+        if (!re_project_motion(A.proj, A.sel, &m)) {
+            if (m.kind <= 0)
+                m.amount = RE_MOTION_AMOUNT;
+            m.kind = k;
+            done = re_project_set_motion(A.proj, A.sel, &m);
+        }
+        app_log("inspector: motion %s", re_motions[k]);
+    } else if (I.menu == C_FILL && k < RE_FILLS) {
+        done = re_project_set_fill(A.proj, A.sel, re_fill_rgbs[k]);
+        app_log("inspector: fill %s", re_fill_names[k]);
     }
     if (done)
         app_edited();
@@ -745,11 +810,13 @@ void in_click(int *b)
     if (!(b[2] & 0x500))
         return;
     switch (k->id) {
-    case T_TABS:
-        I.tab = wx < WIDTH / 2 ? 0 : 1;
+    case T_TABS: {
+        int t = (wx - 16) * (k->hi + 1) / (WIDTH - 40);
+        I.tab = t < 0 ? 0 : t > k->hi ? k->hi : t;
         redraw_all();
         break;
-    case C_LOOK: case O_PLACE:
+    }
+    case C_LOOK: case O_PLACE: case M_MOTION: case C_FILL:
         open_menu(k->id, b[0], b[1]);
         break;
     case C_RESET: {

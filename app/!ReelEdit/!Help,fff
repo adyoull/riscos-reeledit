@@ -42,7 +42,15 @@ Sound tab for a video with sound; a sound's Volume, Mute and the same
 clean-up. Rumble cuts below 100 Hz; Voices lifts about 3 kHz; Background
 turns quiet stretches down; Normalise sets the Volume so the loud parts
 come to -3 dB (from the waveform, so it has to be made first). Edit >
-Normalise all the sound does every clip and sound in one undo. Click or drag along a slider (the Viewer shows it as you
+Normalise all the sound does every clip and sound in one undo.
+A clip's Motion tab: pan and zoom over its length (Zoom in, Zoom out, Pan
+left to right, right to left, upwards, downwards; How far: 1.1 to 2
+times). A colour clip's Colour tab starts with Fill, its colour.
+
+Freeze frames: F (Edit > Freeze the frame) holds the frame at the
+playhead for 2 seconds there, the clip split around it. Edit > Colour
+clip at the playhead puts in 2 seconds of black (its Fill in the
+Inspector). Both are stills: trimmed, faded, coloured as pictures are. Click or drag along a slider (the Viewer shows it as you
 drag; a drag is one step for Undo). Ctrl-I (View > Inspector) closes and
 opens it.
 

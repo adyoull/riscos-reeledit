@@ -24,6 +24,7 @@ struct re_copy
     re_item item;
     re_colour colour;     /* (a clip's) */
     re_sound_fx fx;       /* (a clip's, a video overlay's, a sound's) */
+    re_motion motion;     /* (a clip's) */
     re_overlay overlay;
     re_title title;
     re_audio sound;
@@ -71,6 +72,7 @@ re_copy *re_project_copy(re_project *p, int kind, int track, int i)
         c->length = c->item.length;
         re_project_colour(p, i, &c->colour);
         re_project_sound_fx(p, i, &c->fx);
+        re_project_motion(p, i, &c->motion);
         c->parent = parent_of(p->v1, i);
         if (c->parent)
             return c;
@@ -149,6 +151,8 @@ int re_project_paste(re_project *p, const re_copy *c, int frame, int *track)
             re_project_volume(p, i, it->volume);
         re_project_set_colour(p, i, &c->colour);
         re_project_set_sound_fx(p, i, &c->fx);
+        if (c->motion.kind > 0)
+            re_project_set_motion(p, i, &c->motion);
         break;
     }
     case RE_COPY_OVERLAY: {

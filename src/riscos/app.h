@@ -68,6 +68,7 @@ void in_close(void);
 void in_toggle(void);
 void in_normalise_all(void);                  /* Edit > Normalise all the sound */
 void in_edited(void);                         /* the project or the selection changed */
+void in_show_page(int tab);                    /* a clip's page shown: 0 Colour, 1 Sound, 2 Motion */
 void in_place(int x1, int y0, int y1, int behind); /* to the right of x1, from y0 to y1 */
 void in_redraw(int *block);
 void in_click(int *block);

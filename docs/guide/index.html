@@ -66,7 +66,7 @@ a { color:#1f5fa8; }
 <li><a href="#part2">Part II: Editing Basics</a>
 <ul><li><a href="#ch4">4. Adding clips</a></li><li><a href="#ch5">5. Playing and moving about</a></li><li><a href="#ch6">6. Cutting, trimming and moving</a></li><li><a href="#ch7">7. Marks, extract and lift</a></li><li><a href="#ch8">8. Cut, copy and paste</a></li></ul></li>
 <li><a href="#part3">Part III: Pictures and Sound</a>
-<ul><li><a href="#ch9">9. Fades and dissolves</a></li><li><a href="#ch10">10. Colour and looks</a></li><li><a href="#ch11">11. Sound</a></li><li><a href="#ch12">12. Logos and picture in picture</a></li><li><a href="#ch13">13. Titles</a></li><li><a href="#ch14">14. Speed and reverse</a></li></ul></li>
+<ul><li><a href="#ch9">9. Fades and dissolves</a></li><li><a href="#ch10">10. Colour and looks</a></li><li><a href="#ch11">11. Sound</a></li><li><a href="#ch12">12. Logos and picture in picture</a></li><li><a href="#ch13">13. Titles</a></li><li><a href="#ch14">14. Speed, motion and freeze frames</a></li></ul></li>
 <li><a href="#part4">Part IV: Working Faster</a>
 <ul><li><a href="#ch15">15. The Clips window and three-point editing</a></li><li><a href="#ch16">16. Smooth playback: render previews and proxies</a></li><li><a href="#ch17">17. Saving, autosave and recovery</a></li><li><a href="#ch18">18. Exporting your film</a></li></ul></li>
 <li><a href="#part5">Part V: The Part of Tens</a>
@@ -197,7 +197,7 @@ a { color:#1f5fa8; }
 <h4>The Inspector</h4>
 <p>To the right of the Viewer is the <b>Inspector</b>. It shows the settings of whatever you've selected on the Timeline, so you can change them while you watch the picture:</p>
 <ul>
-<li>for a clip: its colour (<a href="#ch10">Chapter 10</a>) and, on its <b>Sound</b> tab, its sound (<a href="#ch11">Chapter 11</a>);</li>
+<li>for a clip: its colour (<a href="#ch10">Chapter 10</a>), on its <b>Sound</b> tab its sound (<a href="#ch11">Chapter 11</a>), and on its <b>Motion</b> tab pan and zoom (<a href="#ch14">Chapter 14</a>);</li>
 <li>for a logo, picture or title: where it goes, its size and how see-through it is (<a href="#ch12">Chapter 12</a>). A video with sound has a Sound tab too;</li>
 <li>for a sound on an audio track: its volume and clean-up.</li>
 </ul>
@@ -368,7 +368,7 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <div class="box tech"><b class="label">TECHNICAL STUFF</b>If the clips have spare frames beyond the cut (because they've been trimmed), the dissolve uses those, and the project stays the same length. If they don't, the clips are overlapped and the project gets shorter by the length of the dissolve.</div>
 
 <h3 class="chapter" id="ch10"><span>10</span> Colour and looks</h3>
-<p class="intro">In this chapter: making a clip brighter, warmer or black and white, in the Inspector.</p>
+<p class="intro">In this chapter: making a clip brighter, warmer or black and white, in the Inspector, and putting in clips of plain colour.</p>
 <p>Select a clip on the Timeline and its colour settings appear in the <b>Inspector</b>, to the right of the Viewer (<a href="#ch3">Chapter 3</a>):</p>
 <figure><img src="images/inspector-sepia.png" alt="The Inspector with the Sepia look"><figcaption>A clip with the Sepia look. The Inspector shows the settings the look uses.</figcaption></figure>
 <h4>Looks</h4>
@@ -399,6 +399,12 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <div class="box try"><b class="label">TRY IT</b><b>Rescue a dull clip.</b> Select it and choose Look &gt; Vivid. If the shadows are now too dark, drag Midtones a little to the right. Then press <kbd>F8</kbd> to see the difference, and <kbd>F9</kbd> to put your changes back.</div>
 <div class="box rem"><b class="label">REMEMBER</b>A clip keeps its colour when you split it (both parts get it), change its speed, copy and paste it, or make a dissolve: the colour lasts right through the dissolve.</div>
 <div class="box tech"><b class="label">TECHNICAL STUFF</b>The colour settings become a single FFmpeg <code>lutyuv</code> filter on the clip (<code>avfilter.lutyuv</code> in the project file, marked <code>shotcut:filter=reeleditColour</code>). It works in the same picture format the Viewer uses, so each pixel costs one look-up in a table: on the testbed a Sepia clip still played at 13 to 29 milliseconds a picture. ReelEdit's copy of MLT has a fix so that FFmpeg's filters work with the FFmpeg 5.1 that RISC OS has.</div>
+
+<h4>Colour clips</h4>
+<p>A plain colour fills a gap nicely: black before a title, or a colour behind some words. Put the playhead where you want it and choose <b>Edit &gt; Colour clip at the playhead</b>. A black clip two seconds long goes in there and is selected. Choose its colour from <b>Fill</b> in the Inspector:</p>
+<figure><img src="images/inspector-fill.png" alt="The Inspector for a colour clip"><figcaption>A colour clip with Fill set to Blue.</figcaption></figure>
+<p>Trim a colour clip to any length, as you would a picture. To put a title on one, add the title over it (<a href="#ch13">Chapter 13</a>).</p>
+<div class="box rem"><b class="label">REMEMBER</b>If you split a colour clip, or copy and paste it, the parts share one colour: changing one changes them all.</div>
 
 <h3 class="chapter" id="ch11"><span>11</span> Sound</h3>
 <h4>A clip's own sound</h4>
@@ -477,7 +483,8 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <p>To change a title, press Menu over it and choose <b>Edit title…</b>. Make your changes and click <b>Change</b>. One press of <kbd>F8</kbd> undoes all of them.</p>
 <div class="box rem"><b class="label">REMEMBER</b>A title is an overlay, so you can move it, trim it, fade it and change its opacity like any other. The only difference is that its size is set in the Title window, not on the overlay menu.</div>
 
-<h3 class="chapter" id="ch14"><span>14</span> Speed and reverse</h3>
+<h3 class="chapter" id="ch14"><span>14</span> Speed, motion and freeze frames</h3>
+<h4>Speed and reverse</h4>
 <p>Press Menu over a clip and open <b>Speed</b>:</p>
 <figure><img src="images/speed-submenu.png" alt="The Speed submenu"><figcaption>Clip &gt; Speed.</figcaption></figure>
 <ul>
@@ -487,6 +494,23 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 </ul>
 <div class="box warn"><b class="label">WARNING</b>The pitch of the sound changes with the speed: at 50% it's an octave lower, at 200% an octave higher. If that doesn't suit, mute the clip (Sound &gt; Mute) and put music under it instead.</div>
 <div class="box rem"><b class="label">REMEMBER</b>You can't change the speed of a picture, or of a clip with a dissolve at either end (the Speed item is greyed out). Delete the dissolve, change the speed, then add the dissolve again.</div>
+
+<h4>Pan and zoom</h4>
+<p>A still photo on screen for five seconds can look flat. Making the picture move slowly helps: zooming in towards the middle, or panning across it. Select the clip and click <b>Motion</b> at the top of the Inspector.</p>
+<figure><img src="images/motion-zoom.png" alt="A photo zoomed in, with the Inspector's Motion page"><figcaption>A photo set to Zoom in, at 1.97 times. This is its last frame; it starts showing the whole picture.</figcaption></figure>
+<ul>
+<li><b>Motion</b> is a menu: <b>Zoom in</b>, <b>Zoom out</b>, <b>Pan left to right</b>, <b>Pan right to left</b>, <b>Pan upwards</b> and <b>Pan downwards</b>. <b>None</b> takes it off.</li>
+<li><b>How far</b> sets how big the picture gets: 1.10 times (a gentle move) up to 2 times. A pan is zoomed in that far all the way, so there's room to move across.</li>
+</ul>
+<p>The motion lasts the whole clip. If you trim the clip, it moves faster to fit; if you split it, each part does the whole motion.</p>
+<div class="box tip"><b class="label">TIP</b>Pan and zoom works on videos too, to make a close-up from a wide shot. It's slower to play, so use <b>Play &gt; Render previews</b> (<a href="#ch16">Chapter 16</a>) to watch it smoothly.</div>
+<div class="box rem"><b class="label">REMEMBER</b>The picture holds still during a dissolve: the clip before stays where it ended, and the clip after waits where it starts.</div>
+
+<h4>Freeze frames</h4>
+<p>To hold one moment of a video, put the playhead on that frame and press <kbd>F</kbd> (or choose <b>Edit &gt; Freeze the frame</b>). ReelEdit splits the clip there and puts in two seconds of that frame, held still. The rest of the clip carries on after it.</p>
+<figure><img src="images/freeze-frame.png" alt="A freeze frame on the Timeline"><figcaption>The selected clip is a freeze frame, called "Freeze: clipa.mp4". The clip carries on after it.</figcaption></figure>
+<p>A freeze frame works like a picture: trim it to make it longer or shorter, fade it, colour it or give it a motion. It has no sound.</p>
+<div class="box tech"><b class="label">TECHNICAL STUFF</b>A freeze frame is a still made from the video when it's first shown (<code>reeleditFreeze</code> in the project file, with the frame's time). Shotcut doesn't know it. Pan and zoom is MLT's <code>affine</code> filter with a moving <code>transition.rect</code>, the way Shotcut's Size, Position &amp; Rotate filter is saved (not yet tried in Shotcut).</div>
 
 <!-- ======================================================================= -->
 <h2 class="part" id="part4">Part IV: Working Faster<small>Quicker editing, smoother playback, saving and exporting</small></h2>
@@ -645,6 +669,7 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <tr><td><kbd>Ctrl-Z</kbd></td><td>Clear the selection</td></tr>
 <tr><td><kbd>F8</kbd> / <kbd>F9</kbd></td><td>Undo / redo</td></tr>
 <tr><td><kbd>T</kbd></td><td>New title</td></tr>
+<tr><td><kbd>F</kbd></td><td>Freeze the frame at the playhead</td></tr>
 <tr><td><kbd>I</kbd> / <kbd>O</kbd></td><td>Set the in / out mark</td></tr>
 <tr><td><kbd>Shift-I</kbd> / <kbd>Shift-O</kbd></td><td>Go to the in / out mark</td></tr>
 <tr><td><kbd>Return</kbd></td><td>Play from in to out (in the Clips window: show the clip as a source)</td></tr>

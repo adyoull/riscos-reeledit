@@ -134,6 +134,9 @@ uint64_t re_render_signature(re_project *p, int start, int length)
         re_sound_fx fx;
         if (!it.gap && !it.mix && !re_project_sound_fx(p, i, &fx))
             h = fnv(h, "S %d %d %d %d|", fx.pan, fx.rumble, fx.voice, fx.gate);
+        re_motion m;
+        if (it.moving && !re_project_motion(p, i, &m))
+            h = fnv(h, "M %d %d|", m.kind, m.amount);
     }
     for (int i = 0; i < re_project_overlays(p); i++) {
         re_overlay o;

@@ -46,6 +46,8 @@ mk -f lavfi -i color=c=yellow:s=2560x1440:r=25:d=1 -c:v libx264 -bf 0 -pix_fmt y
 mk -f lavfi -i "color=c=white:s=320x180,format=rgba,geq=r='255':g='255':b='255':a='if(lt(X,160),0,255)'" -frames:v 1 "$O/full.png"
 mk -f lavfi -i color=c=white:s=32x16 -frames:v 1 "$O/logo.png"
 mk -f lavfi -i color=c=green:s=160x90 -frames:v 1 "$O/pic.jpg"
+# (for pan and zoom: dark at the left to light at the right)
+mk -f lavfi -i "color=c=black:s=320x180,format=rgb24,geq=r='X*255/319':g='X*255/319':b='X*255/319'" -frames:v 1 "$O/ramp.png"
 # (sounds for the audio tracks: two tones, 2 seconds each)
 mk -f lavfi -i sine=frequency=880:sample_rate=48000:duration=2 -ac 2 "$O/tone880.wav"
 mk -f lavfi -i sine=frequency=1320:sample_rate=48000:duration=2 -ac 2 "$O/tone1320.wav"
@@ -67,14 +69,14 @@ $CC $CFLAGS "$HERE/pull_test.c" -o "$O/pull_test" -Wl,--wrap=pthread_create $MLT
 $CC $CFLAGS "$HERE/prefer_test.c" -o "$O/prefer_test" \
   -Wl,--wrap=avcodec_find_decoder_by_name,--wrap=avcodec_open2,--wrap=avcodec_send_packet \
   -Wl,--wrap=avcodec_free_context,--wrap=av_opt_set_int $MLTLIBS $FFLIBS -lpthread -lm || bad=1
-$CC $CFLAGS -I"$TOP/src" "$TOP/src/engine.c" "$TOP/src/still.c" "$TOP/src/title.c" "$HERE/engine_test.c" -o "$O/engine_test" \
+$CC $CFLAGS -I"$TOP/src" "$TOP/src/engine.c" "$TOP/src/still.c" "$TOP/src/affine.c" "$TOP/src/hold.c" "$TOP/src/title.c" "$HERE/engine_test.c" -o "$O/engine_test" \
   -Wl,--wrap=pthread_create $MLTLIBS $FFLIBS -lpthread -lm || bad=1
 $CC $CFLAGS "$HERE/convert_test.c" -o "$O/convert_test" -Wl,--wrap=sws_scale,--wrap=mlt_frame_clone,--wrap=mlt_frame_clone_image,--wrap=avcodec_receive_frame $MLTLIBS $FFLIBS -lpthread -lm || bad=1
 $CC $CFLAGS "$HERE/render_test.c" -o "$O/render_test" $MLTLIBS $FFLIBS -lpthread -lm || bad=1
-$CC $CFLAGS -DRE_TEST -I"$HERE/fake" -I"$TOP/src" "$TOP/src/engine.c" "$TOP/src/project.c" "$TOP/src/dissolve.c" "$TOP/src/fade.c" "$TOP/src/clipsound.c" "$TOP/src/overlay.c" "$TOP/src/track.c" "$TOP/src/audio.c" "$TOP/src/source.c" "$TOP/src/clipboard.c" "$TOP/src/speed.c" "$TOP/src/colour.c" "$TOP/src/soundfx.c" "$TOP/src/render.c" "$TOP/src/proxy.c" "$TOP/src/still.c" "$TOP/src/title.c" "$TOP/src/export.c" "$TOP/src/sprites.c" "$TOP/src/measure.c" "$TOP/src/media.c" "$TOP/src/riscos/viewer.c" \
+$CC $CFLAGS -DRE_TEST -I"$HERE/fake" -I"$TOP/src" "$TOP/src/engine.c" "$TOP/src/project.c" "$TOP/src/dissolve.c" "$TOP/src/fade.c" "$TOP/src/clipsound.c" "$TOP/src/overlay.c" "$TOP/src/track.c" "$TOP/src/audio.c" "$TOP/src/source.c" "$TOP/src/clipboard.c" "$TOP/src/speed.c" "$TOP/src/colour.c" "$TOP/src/soundfx.c" "$TOP/src/motion.c" "$TOP/src/freeze.c" "$TOP/src/render.c" "$TOP/src/proxy.c" "$TOP/src/still.c" "$TOP/src/affine.c" "$TOP/src/hold.c" "$TOP/src/title.c" "$TOP/src/export.c" "$TOP/src/sprites.c" "$TOP/src/measure.c" "$TOP/src/media.c" "$TOP/src/riscos/viewer.c" \
   "$TOP/src/riscos/timeline.c" "$TOP/src/riscos/savebox.c" "$TOP/src/riscos/info.c" "$TOP/src/riscos/effects.c" "$TOP/src/riscos/marks.c" "$TOP/src/riscos/overlays.c" "$TOP/src/riscos/titles.c" "$TOP/src/riscos/exportbox.c" "$TOP/src/riscos/audiotracks.c" "$TOP/src/riscos/autosave.c" "$TOP/src/riscos/clips.c" "$TOP/src/riscos/previews.c" "$TOP/src/riscos/copypaste.c" "$TOP/src/riscos/renders.c" "$TOP/src/riscos/proxies.c" "$TOP/src/riscos/logging.c" "$TOP/src/riscos/guide.c" "$TOP/src/riscos/inspector.c" "$TOP/src/riscos/display.c" \
   "$TOP/src/riscos/sound.c" "$HERE/editor_test.c" -o "$O/editor_test" $MLTLIBS $FFLIBS -lpthread -lm || bad=1
-$CC $CFLAGS -I"$TOP/src" "$TOP/src/engine.c" "$TOP/src/project.c" "$TOP/src/dissolve.c" "$TOP/src/fade.c" "$TOP/src/clipsound.c" "$TOP/src/overlay.c" "$TOP/src/track.c" "$TOP/src/audio.c" "$TOP/src/source.c" "$TOP/src/clipboard.c" "$TOP/src/speed.c" "$TOP/src/colour.c" "$TOP/src/soundfx.c" "$TOP/src/render.c" "$TOP/src/proxy.c" "$TOP/src/still.c" "$TOP/src/title.c" "$TOP/src/export.c" "$TOP/src/sprites.c" "$TOP/src/measure.c" "$TOP/src/media.c" "$HERE/project_test.c" -o "$O/project_test" \
+$CC $CFLAGS -I"$TOP/src" "$TOP/src/engine.c" "$TOP/src/project.c" "$TOP/src/dissolve.c" "$TOP/src/fade.c" "$TOP/src/clipsound.c" "$TOP/src/overlay.c" "$TOP/src/track.c" "$TOP/src/audio.c" "$TOP/src/source.c" "$TOP/src/clipboard.c" "$TOP/src/speed.c" "$TOP/src/colour.c" "$TOP/src/soundfx.c" "$TOP/src/motion.c" "$TOP/src/freeze.c" "$TOP/src/render.c" "$TOP/src/proxy.c" "$TOP/src/still.c" "$TOP/src/affine.c" "$TOP/src/hold.c" "$TOP/src/title.c" "$TOP/src/export.c" "$TOP/src/sprites.c" "$TOP/src/measure.c" "$TOP/src/media.c" "$HERE/project_test.c" -o "$O/project_test" \
   $MLTLIBS $FFLIBS -lpthread -lm || bad=1
 $CC -shared -fPIC "$HERE/count_threads.c" -o "$O/count_threads.so" -ldl || bad=1
 
@@ -110,7 +112,7 @@ echo "== engine_test"
 "$O/engine_test" project.mlt || bad=1
 echo "== project_test"
 "$O/project_test" a.mp4 b.mp4 numbered.mp4 project_test.mlt numbered.m2v four3-709.mp4 big.mp4 wide-dvd.mp4 numbered-snd.mp4 \
-  full.png logo.png pic.jpg 2>&1 | grep -v "^\[" || bad=1
+  full.png logo.png pic.jpg ramp.png 2>&1 | grep -v "^\[" || bad=1
 echo "== editor_test"
 env -u SCREENS "$O/editor_test" numbered-snd.mp4 numbered.mp4 numbered.m2v big.mp4 2>&1 | grep -v "^\[" || bad=1
 # (screenshots, when asked for: SCREENS=dir tests/host/run.sh; PNGs of the editor at points in the script)

@@ -25,6 +25,7 @@
 #include "engine.h"
 #include "still.h"
 #include "title.h"
+#include "project.h"
 
 #include <framework/mlt.h>
 #include <libavutil/cpu.h>
@@ -114,6 +115,8 @@ int re_mlt_start(void)
             mlt_environment_set("MLT_NEON", "1");
         re_still_register();
         re_title_register();
+        re_motion_register();
+        re_hold_register();
         mlt_started = 1;
     }
     return 0;

@@ -1049,6 +1049,180 @@ static void colours(const char *a, const char *b, const char *out)
    tone louder), its quiet background turned down (a quiet tone quieter);
    kept by a split, copy and paste, saving and opening; one undo each;
    the normalising level from peaks */
+/* ---- pan and zoom: a clip zoomed in or panned across over its length,
+   through trims, splits, undo, saving, a speed change and a dissolve */
+static int ramp_y(int x) /* (ramp.png's luma at x, as the engine shows it: video range) */
+{
+    return 16 + (219 * (x * 255 / 319) + 127) / 255;
+}
+
+static void motion(const char *a, const char *ramp, const char *out)
+{
+    re_engine_io io = {show, NULL, clk, NULL, 48000, 2, NULL};
+    re_project *p = re_project_new();
+    re_project_add(p, a, -1);    /* (320x180: the project's size) */
+    re_project_add(p, ramp, -1); /* 1 */
+    re_item it;
+    re_project_item(p, 1, &it);
+    int s = it.start, n = it.length;
+    re_engine *e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    int l0 = luma_xy(e, s + 2, 2, 90), m0 = luma_xy(e, s + 2, 160, 90);
+    CHECK(it.picture && !it.moving && abs(l0 - ramp_y(2)) <= 3 && abs(m0 - ramp_y(160)) <= 3,
+          "motion: the picture as it is: %d at the left, %d in the middle (picture %d)", l0, m0, it.picture);
+    re_motion m, g;
+    CHECK(!re_project_motion(p, 1, &g) && g.kind == 0 && re_project_motion(p, 9, &g) == -1, "motion: none at first");
+    m.kind = 1; /* zoom in, to twice the size */
+    m.amount = 100;
+    CHECK(re_project_set_motion(p, 1, &m) == 1 && re_project_set_motion(p, 1, &m) == 0, "motion: zoom in (once)");
+    re_engine_refresh(e);
+    int la = luma_xy(e, s, 2, 90), lh = luma_xy(e, s + n / 2, 2, 90), lz = luma_xy(e, s + n - 1, 2, 90);
+    int mz = luma_xy(e, s + n - 1, 160, 90);
+    /* (at the end the left edge shows the picture's x 80; halfway, 1.5 times: x 54) */
+    CHECK(abs(la - ramp_y(2)) <= 3 && abs(lh - ramp_y(54)) <= 4 && abs(lz - ramp_y(81)) <= 4 && abs(mz - ramp_y(160)) <= 3,
+          "motion: zoomed in: the left edge %d, %d, %d (want %d, %d, %d); the middle %d", la, lh, lz, ramp_y(2),
+          ramp_y(54), ramp_y(81), mz);
+    re_project_item(p, 1, &it);
+    CHECK(it.moving, "motion: the item doesn't say it moves");
+    /* trimmed: all of the motion still there */
+    re_project_begin(p);
+    re_project_set_in_out(p, 1, it.in, it.in + n / 2 - 1);
+    re_project_end(p);
+    re_engine_refresh(e);
+    lz = luma_xy(e, s + n / 2 - 1, 2, 90);
+    CHECK(abs(lz - ramp_y(81)) <= 4, "motion: trimmed: the left edge at its end %d (want %d)", lz, ramp_y(81));
+    re_project_undo(p);
+    re_engine_close(e);
+    e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    /* pan left to right */
+    m.kind = 3;
+    m.amount = 100;
+    re_project_set_motion(p, 1, &m);
+    re_engine_refresh(e);
+    la = luma_xy(e, s, 2, 90);
+    int ra = luma_xy(e, s, 317, 90);
+    lz = luma_xy(e, s + n - 1, 2, 90);
+    int rz = luma_xy(e, s + n - 1, 317, 90);
+    CHECK(abs(la - ramp_y(1)) <= 4 && abs(ra - ramp_y(158)) <= 4 && abs(lz - ramp_y(161)) <= 4 && abs(rz - ramp_y(318)) <= 4,
+          "motion: panned: left %d right %d at first, %d %d at the end", la, ra, lz, rz);
+    /* split: each part all of it */
+    re_project_split(p, s + n / 2);
+    re_engine_refresh(e);
+    int l1 = luma_xy(e, s + n / 2 - 1, 2, 90), l2 = luma_xy(e, s + n / 2, 2, 90), l3 = luma_xy(e, s + n - 1, 2, 90);
+    re_project_motion(p, 2, &g);
+    CHECK(g.kind == 3 && g.amount == 100 && abs(l1 - ramp_y(161)) <= 4 && abs(l2 - ramp_y(1)) <= 4
+              && abs(l3 - ramp_y(161)) <= 4,
+          "motion: split: the second part %d; left edges %d %d %d", g.kind, l1, l2, l3);
+    re_project_undo(p);
+    re_project_motion(p, 1, &g);
+    CHECK(g.kind == 3 && re_project_items(p) == 2, "motion: split undone");
+    /* saved and opened: kept (MLT's affine, as Shotcut's) */
+    CHECK(!re_project_save(p, out) && count(out, "mlt_service\">affine<") == 1 && count(out, "affineSizePosition") == 1,
+          "motion: saved: %d affine filters", count(out, "mlt_service\">affine<"));
+    re_engine_close(e);
+    re_project_close(p);
+    p = re_project_open(out, 1);
+    CHECK(p && !re_project_motion(p, 1, &g) && g.kind == 3 && g.amount == 100, "motion: opened: %d", p ? g.kind : -9);
+    e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    lz = luma_xy(e, s + n - 1, 2, 90);
+    CHECK(abs(lz - ramp_y(161)) <= 4, "motion: opened: the left edge at the end %d", lz);
+    /* a dissolve into the next clip: the picture held at its last rect through it (nothing jumps) */
+    re_project_add(p, ramp, -1);
+    int d = re_project_dissolve(p, 1, 10, 0);
+    re_engine_refresh(e);
+    re_item di;
+    re_project_item(p, d, &di);
+    re_project_item(p, 1, &it);
+    int before = luma_xy(e, it.start + it.length - 1, 2, 90), during = luma_xy(e, di.start + di.length / 2, 2, 90);
+    /* (half the held picture's x 161, half the next one's x 2) */
+    int want = (ramp_y(161) + ramp_y(2)) / 2;
+    CHECK(d > 0 && abs(before - ramp_y(161)) <= 4 && abs(during - want) <= 8,
+          "motion: through a dissolve: %d before it, %d in it (want about %d)", before, during, want);
+    /* none: taken off */
+    re_motion_none(&m);
+    re_project_set_motion(p, 1, &m);
+    re_engine_refresh(e);
+    re_project_item(p, 1, &it);
+    lz = luma_xy(e, it.start + it.length - 1, 2, 90);
+    CHECK(!it.moving && abs(lz - ramp_y(2)) <= 3, "motion: none again: %d", lz);
+    /* a video clip at another speed keeps its motion */
+    m.kind = 1;
+    m.amount = 50;
+    re_project_set_motion(p, 0, &m);
+    CHECK(re_project_speed(p, 0, 200) == 1 && !re_project_motion(p, 0, &g) && g.kind == 1 && g.amount == 50,
+          "motion: kept through a speed change: %d %d", g.kind, g.amount);
+    re_engine_close(e);
+    re_project_close(p);
+}
+
+/* ---- freeze frames and colour clips: put in, played, saved, opened, undone */
+static void freezes(const char *numbered, const char *pic, const char *out)
+{
+    re_engine_io io = {show, NULL, clk, NULL, 48000, 2, NULL};
+    CHECK(re_project_add_fill(re_project_new(), 0, 0, 0) == -1, "colour clip: put in an empty project"); /* (leaked) */
+    re_project *p = re_project_new();
+    re_project_add(p, numbered, -1);
+    int len = re_project_length(p), two = re_project_frames(p, 2);
+    re_engine *e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    int y10 = luma_at(e, 10), y11 = luma_at(e, 11), y30 = luma_at(e, 30);
+    int f = re_project_freeze(p, 10, 0);
+    re_item it;
+    re_project_item(p, f, &it);
+    CHECK(f == 1 && re_project_items(p) == 3 && it.held && it.held_frame == 10 && it.picture && !it.sound
+              && it.length == two && re_project_length(p) == len + two && re_item_file_frame(&it, 5) == 10
+              && !strncmp(it.name, "Freeze: ", 8),
+          "freeze: at 10: item %d of %d, held %d (frame %d), %d long (%s)", f, re_project_items(p), it.held,
+          it.held_frame, it.length, it.name);
+    re_engine_close(e);
+    e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    int h0 = luma_at(e, 10), h1 = luma_at(e, 10 + two - 1), after = luma_at(e, 10 + two), next = luma_at(e, 11 + two);
+    CHECK(y10 != y11 && y10 != y30 && abs(h0 - y10) <= 2 && abs(h1 - y10) <= 2 && abs(after - y10) <= 2
+              && abs(next - y11) <= 2,
+          "freeze: played: %d %d (frame 10's %d), then %d %d (10 and 11: %d %d)", h0, h1, y10, after, next, y10, y11);
+    CHECK(re_project_speed(p, f, 200) == 0 && re_project_freeze(p, 12, 0) == -1, "freeze: a speed, or frozen again");
+    CHECK(!re_project_save(p, out) && count(out, "reeleditFreeze") == 1, "freeze: saved");
+    re_engine_close(e);
+    re_project_close(p);
+    p = re_project_open(out, 1);
+    re_project_item(p, 1, &it);
+    CHECK(p && it.held && it.held_frame == 10 && it.length == two, "freeze: opened: held %d at %d", it.held, it.held_frame);
+    e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    h1 = luma_at(e, 10 + two - 1);
+    CHECK(abs(h1 - y10) <= 2, "freeze: opened, played: %d (%d)", h1, y10);
+    CHECK(re_project_undo(p) == 0 && re_project_remove(p, 1, 1) && re_project_length(p) == len, "freeze: taken out");
+    /* a colour clip at the end, white, then blue */
+    int c = re_project_add_fill(p, len, 25, 0xFFFFFF);
+    re_project_item(p, c, &it);
+    CHECK(c == 2 && it.fill == 0xFFFFFF && it.picture && !it.sound && it.length == 25 && !strcmp(it.name, "White")
+              && !re_project_item_file(p, c),
+          "colour clip: item %d, colour %06x, %d long, %s; picture %d, sound %d, file %s", c, it.fill, it.length,
+          it.name, it.picture, it.sound, re_project_item_file(p, c) ? re_project_item_file(p, c) : "none");
+    re_engine_refresh(e);
+    int w = luma_at(e, len + 5);
+    CHECK(w >= 230, "colour clip: white: %d", w);
+    CHECK(re_project_set_fill(p, c, 0x2050C0) == 1 && re_project_set_fill(p, c, 0x2050C0) == 0, "colour clip: blue (once)");
+    re_engine_refresh(e);
+    int b = luma_at(e, len + 5), cb = chroma(0);
+    re_project_item(p, c, &it);
+    CHECK(b > 40 && b < 120 && cb > 150 && it.fill == 0x2050C0 && !strcmp(it.name, "Blue"),
+          "colour clip: blue: luma %d Cb %d (%s)", b, cb, it.name);
+    CHECK(re_project_speed(p, c, 50) == 0 && re_project_freeze(p, len + 5, 0) == -1, "colour clip: a speed, or frozen");
+    re_project_undo(p);
+    re_project_item(p, c, &it);
+    CHECK(it.fill == 0xFFFFFF, "colour clip: undone: %06x", it.fill);
+    CHECK(!re_project_save(p, out), "colour clip: saved");
+    re_engine_close(e);
+    re_project_close(p);
+    p = re_project_open(out, 1);
+    re_project_item(p, 2, &it);
+    CHECK(p && it.fill == 0xFFFFFF && it.length == 25, "colour clip: opened: %06x, %d long", it.fill, it.length);
+    re_project_close(p);
+    /* a picture isn't frozen */
+    p = re_project_new();
+    re_project_add(p, pic, -1);
+    CHECK(re_project_freeze(p, 5, 0) == -1, "freeze: a picture");
+    re_project_close(p);
+}
+
 static int chan_peak(re_project *p, int frame, int which)
 {
     mlt_producer prod = re_project_producer(p);
@@ -2083,9 +2257,9 @@ static void media(const char *numbered, const char *snd, const char *pic, const 
 
 int main(int argc, char **argv)
 {
-    if (argc != 13) {
+    if (argc != 14) {
         fprintf(stderr, "usage: project_test a.mp4 b.mp4 numbered.mp4 out.mlt numbered.m2v four3-709.mp4 big.mp4 "
-                        "wide-dvd.mp4 numbered-snd.mp4 full.png logo.png pic.jpg\n");
+                        "wide-dvd.mp4 numbered-snd.mp4 full.png logo.png pic.jpg ramp.png\n");
         return 2;
     }
     const char *a = argv[1], *b = argv[2], *n = argv[3], *out = argv[4];
@@ -2338,6 +2512,8 @@ int main(int argc, char **argv)
     titles(a, argv[10], out);
     colours(a, b, out);
     sound_fx(argv[9], out);
+    motion(a, argv[13], out);
+    freezes(n, argv[12], out);
     export(a, argv[9], out, "export-test.mp4");
     audio_tracks(a, argv[9], argv[11], out);
     source_editing(a, b, n, out);
