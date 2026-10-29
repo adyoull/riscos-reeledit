@@ -47,6 +47,10 @@ A clip's Motion tab: pan and zoom over its length (Zoom in, Zoom out, Pan
 left to right, right to left, upwards, downwards; How far: 1.1 to 2
 times). A colour clip's Colour tab starts with Fill, its colour.
 
+Wipes: select a dissolve and choose its Transition in the Inspector
+(Dissolve, Wipe from the left, from the top, Barn doors, Diagonal,
+Circle, Box, Clock), with Softness (its edge) and Direction.
+
 Freeze frames: F (Edit > Freeze the frame) holds the frame at the
 playhead for 2 seconds there, the clip split around it. Edit > Colour
 clip at the playhead puts in 2 seconds of black (its Fill in the

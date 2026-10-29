@@ -435,7 +435,9 @@ int re_project_item(re_project *p, int i, re_item *item)
     if (item->mix) {
         item->in = 0;
         item->out = item->length - 1;
-        snprintf(item->name, sizeof(item->name), "Dissolve");
+        re_wipe w;
+        snprintf(item->name, sizeof(item->name), "%s",
+                 !rp_mix_wipe(rp_mix_of(p, i), &w) && w.kind > 0 ? re_wipes[w.kind] : w.kind < 0 ? "Wipe" : "Dissolve");
     } else if (!item->gap) {
         mlt_producer cut = mlt_playlist_get_clip(p->v1, i);
         item->fade_in = rp_fade_of(p, i, RP_PICTURE, 0);

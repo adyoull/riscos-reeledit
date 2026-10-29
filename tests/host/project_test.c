@@ -1223,6 +1223,80 @@ static void freezes(const char *numbered, const char *pic, const char *out)
     re_project_close(p);
 }
 
+/* ---- wipes: a dissolve's picture changing by a shape, the other way round, softer; kept through a length change,
+   undo, saving and opening */
+static void wipes(const char *a, const char *b, const char *out)
+{
+    re_engine_io io = {show, NULL, clk, NULL, 48000, 2, NULL};
+    re_project *p = re_project_new();
+    re_project_add(p, a, -1);
+    re_project_add(p, b, -1);
+    int d = re_project_dissolve(p, 0, 20, 1);
+    re_item m;
+    re_project_item(p, d, &m);
+    int mid = m.start + 10;
+    re_engine *e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    int ya = luma_xy(e, 2, 160, 90), yb = luma_xy(e, re_project_length(p) - 2, 160, 90);
+    int l = luma_xy(e, mid, 10, 90), r = luma_xy(e, mid, 310, 90);
+    re_wipe w;
+    CHECK(abs(ya - yb) > 30 && abs(l - (ya + yb) / 2) <= 5 && abs(r - (ya + yb) / 2) <= 5 && !re_project_wipe(p, d, &w)
+              && w.kind == 0 && re_project_wipe(p, 0, &w) == -1 && !strcmp(m.name, "Dissolve"),
+          "wipe: a plain dissolve: %d %d halfway (the clips %d, %d); %s", l, r, ya, yb, m.name);
+    w.kind = 1;
+    w.softness = 0;
+    w.reverse = 0;
+    CHECK(re_project_set_wipe(p, d, &w) == 1 && re_project_set_wipe(p, d, &w) == 0, "wipe: from the left (once)");
+    re_engine_refresh(e);
+    l = luma_xy(e, mid, 10, 90), r = luma_xy(e, mid, 310, 90);
+    re_project_item(p, d, &m);
+    CHECK(abs(l - yb) <= 6 && abs(r - ya) <= 6 && !strcmp(m.name, "Wipe from the left"),
+          "wipe: from the left: %d at the left (the next clip's %d), %d at the right (%d); %s", l, yb, r, ya, m.name);
+    w.reverse = 1;
+    re_project_set_wipe(p, d, &w);
+    re_engine_refresh(e);
+    l = luma_xy(e, mid, 10, 90), r = luma_xy(e, mid, 310, 90);
+    CHECK(abs(l - ya) <= 6 && abs(r - yb) <= 6, "wipe: the other way round: %d %d", l, r);
+    w.kind = 2;
+    w.reverse = 0;
+    re_project_set_wipe(p, d, &w);
+    re_engine_refresh(e);
+    int t = luma_xy(e, mid, 160, 5), bt = luma_xy(e, mid, 160, 175);
+    CHECK(abs(t - yb) <= 6 && abs(bt - ya) <= 6, "wipe: from the top: %d at the top, %d at the bottom", t, bt);
+    w.kind = 5;
+    re_project_set_wipe(p, d, &w);
+    re_engine_refresh(e);
+    int c = luma_xy(e, mid, 160, 90), k = luma_xy(e, mid, 3, 3);
+    CHECK(abs(c - yb) <= 6 && abs(k - ya) <= 6, "wipe: a circle: %d in the middle, %d in the corner", c, k);
+    /* softer: the edge blurred (halfway across a bar, a mix of the two) */
+    w.kind = 1;
+    w.softness = 100;
+    re_project_set_wipe(p, d, &w);
+    re_engine_refresh(e);
+    int edge = luma_xy(e, mid, 160, 90);
+    CHECK(abs(edge - (ya + yb) / 2) <= 8, "wipe: soft: %d at the middle (between %d and %d)", edge, ya, yb);
+    /* kept through a length change, saving, opening; undone */
+    CHECK(re_project_dissolve_length(p, d, 30) == 1 && !re_project_wipe(p, d, &w) && w.kind == 1 && w.softness == 100,
+          "wipe: a longer dissolve: %d", w.kind);
+    CHECK(!re_project_save(p, out) && count(out, "luma01") == 1, "wipe: saved");
+    re_engine_close(e);
+    re_project_close(p);
+    p = re_project_open(out, 1);
+    CHECK(p && !re_project_wipe(p, d, &w) && w.kind == 1 && w.softness == 100 && w.reverse == 0, "wipe: opened: %d %d %d",
+          w.kind, w.softness, w.reverse);
+    e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    re_project_item(p, d, &m);
+    w.softness = 0;
+    re_project_set_wipe(p, d, &w);
+    re_engine_refresh(e);
+    l = luma_xy(e, m.start + m.length / 2, 10, 90);
+    CHECK(abs(l - yb) <= 6, "wipe: opened, played: %d (%d)", l, yb);
+    re_project_undo(p);
+    re_project_wipe(p, d, &w);
+    CHECK(w.kind == 1 && w.softness == 100, "wipe: undone: softness %d", w.softness);
+    re_engine_close(e);
+    re_project_close(p);
+}
+
 static int chan_peak(re_project *p, int frame, int which)
 {
     mlt_producer prod = re_project_producer(p);
@@ -2514,6 +2588,7 @@ int main(int argc, char **argv)
     sound_fx(argv[9], out);
     motion(a, argv[13], out);
     freezes(n, argv[12], out);
+    wipes(a, b, out);
     export(a, argv[9], out, "export-test.mp4");
     audio_tracks(a, argv[9], argv[11], out);
     source_editing(a, b, n, out);

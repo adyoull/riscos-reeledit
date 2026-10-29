@@ -1951,8 +1951,43 @@ static int script(int *b, int mask)
             return 0;
         CHECK(!strcmp(layout(), "c30 m25 c50") && re_test_selected() == 1, "the context menu's dissolve: %s, sel %d",
               layout(), re_test_selected());
+        mark = menus;
+        next(4050);
+        return in_row(b, 0, 300, 0x400); /* the Inspector: Transition, its menu */
+    /* ---- a dissolve in the Inspector: Transition > Circle, Softness to its end, Direction ---- */
+    case 4050:
+        CHECK(menus == mark + 1, "Inspector: Transition gave no menu");
+        next(4051);
+        b[0] = 5; b[1] = -1; /* Circle */
+        return 9;
+    case 4051: {
+        if (nulls)
+            return 0;
+        re_wipe w;
+        re_project_wipe(re_test_project(), 1, &w);
+        CHECK(w.kind == 5 && !w.softness && !w.reverse, "Inspector: Transition > Circle: %d", w.kind);
+        next(4052);
+        return in_row(b, 1, 480, 0x400); /* Softness: its end */
+    }
+    case 4052: {
+        if (nulls)
+            return 0;
+        re_wipe w;
+        re_project_wipe(re_test_project(), 1, &w);
+        CHECK(w.kind == 5 && w.softness == 100, "Inspector: Softness to its end: %d", w.softness);
+        next(4053);
+        return in_row(b, 2, 300, 0x400); /* Direction */
+    }
+    case 4053: {
+        if (nulls)
+            return 0;
+        re_wipe w;
+        re_project_wipe(re_test_project(), 1, &w);
+        CHECK(w.kind == 5 && w.reverse, "Inspector: Direction: %d", w.reverse);
+        shot("40-wipe");
         next(146);
         return click_tl(b, 40, 0, 2); /* Menu over the dissolve */
+    }
     case 146:
         next(147);
         b[0] = 0; b[1] = -1; /* Delete */

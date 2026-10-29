@@ -66,7 +66,7 @@ a { color:#1f5fa8; }
 <li><a href="#part2">Part II: Editing Basics</a>
 <ul><li><a href="#ch4">4. Adding clips</a></li><li><a href="#ch5">5. Playing and moving about</a></li><li><a href="#ch6">6. Cutting, trimming and moving</a></li><li><a href="#ch7">7. Marks, extract and lift</a></li><li><a href="#ch8">8. Cut, copy and paste</a></li></ul></li>
 <li><a href="#part3">Part III: Pictures and Sound</a>
-<ul><li><a href="#ch9">9. Fades and dissolves</a></li><li><a href="#ch10">10. Colour and looks</a></li><li><a href="#ch11">11. Sound</a></li><li><a href="#ch12">12. Logos and picture in picture</a></li><li><a href="#ch13">13. Titles</a></li><li><a href="#ch14">14. Speed, motion and freeze frames</a></li></ul></li>
+<ul><li><a href="#ch9">9. Fades, dissolves and wipes</a></li><li><a href="#ch10">10. Colour and looks</a></li><li><a href="#ch11">11. Sound</a></li><li><a href="#ch12">12. Logos and picture in picture</a></li><li><a href="#ch13">13. Titles</a></li><li><a href="#ch14">14. Speed, motion and freeze frames</a></li></ul></li>
 <li><a href="#part4">Part IV: Working Faster</a>
 <ul><li><a href="#ch15">15. The Clips window and three-point editing</a></li><li><a href="#ch16">16. Smooth playback: render previews and proxies</a></li><li><a href="#ch17">17. Saving, autosave and recovery</a></li><li><a href="#ch18">18. Exporting your film</a></li></ul></li>
 <li><a href="#part5">Part V: The Part of Tens</a>
@@ -112,11 +112,13 @@ a { color:#1f5fa8; }
 <h4>What you can do with it</h4>
 <ul>
 <li><b>Cut and arrange:</b> split clips, trim them, move them, delete them. Undo goes back 100 edits.</li>
-<li><b>Fades and dissolves</b> between clips.</li>
-<li><b>Sound:</b> mute a clip, fade its sound or change its volume, and add music and sound effects on separate audio tracks.</li>
+<li><b>Fades, dissolves and wipes</b> between clips.</li>
+<li><b>Colour:</b> looks such as black and white or sepia, and sliders for brightness, warmth and more.</li>
+<li><b>Sound:</b> mute a clip, fade its sound or change its volume, clean it up (rumble, hiss between words), even out the levels, and add music and sound effects on separate audio tracks.</li>
 <li><b>Overlays:</b> a logo in the corner, a second video in a small box (picture in picture), or a picture over the whole frame.</li>
 <li><b>Titles</b> in RISC OS fonts.</li>
-<li><b>Slow motion, fast motion and reverse.</b></li>
+<li><b>Slow motion, fast motion and reverse</b>, freeze frames, and pan and zoom across photos.</li>
+<li><b>Colour clips</b> of black or any of nine colours.</li>
 <li><b>Editing tools from the professional editors:</b> marks, three-point editing, rolling edits, copy and paste.</li>
 <li><b>Help with smooth playback:</b> render previews, and proxies (small working copies of big files) made for you automatically.</li>
 <li><b>Export</b> to MP4, using the Raspberry Pi's hardware encoder when it's available.</li>
@@ -350,8 +352,8 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <!-- ======================================================================= -->
 <h2 class="part" id="part3">Part III: Pictures and Sound<small>Transitions, sound, overlays, titles and speed</small></h2>
 
-<h3 class="chapter" id="ch9"><span>9</span> Fades and dissolves</h3>
-<p class="intro">These two transitions are all most films need.</p>
+<h3 class="chapter" id="ch9"><span>9</span> Fades, dissolves and wipes</h3>
+<p class="intro">Fades and dissolves are all most films need; wipes are there for when you want something bolder.</p>
 <p>Press Menu over a clip to see its menu:</p>
 <figure><img src="images/clip-menu.png" alt="The clip menu"><figcaption>The Clip menu.</figcaption></figure>
 <h4>Fades</h4>
@@ -366,6 +368,16 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <figure><img src="images/fade-dissolve.png" alt="A fade-in and a dissolve"><figcaption>A fade in at the start of the first clip, and a dissolve (the purple box with a diagonal line) between the two clips. The red bar under the ruler shows stretches you could render for smoother playback (<a href="#ch16">Chapter 16</a>).</figcaption></figure>
 <p>Drag either end of a dissolve to change its length. To remove it, press Menu over it and choose <b>Delete</b>; the clips go back to their original lengths.</p>
 <div class="box tech"><b class="label">TECHNICAL STUFF</b>If the clips have spare frames beyond the cut (because they've been trimmed), the dissolve uses those, and the project stays the same length. If they don't, the clips are overlapped and the project gets shorter by the length of the dissolve.</div>
+
+<h4>Wipes</h4>
+<p>A dissolve doesn't have to fade the whole picture at once. Click a dissolve on the Timeline to select it, and the Inspector shows its <b>Transition</b>. Choose a wipe from that menu: <b>Wipe from the left</b>, <b>Wipe from the top</b>, <b>Barn doors</b>, <b>Diagonal</b>, <b>Circle</b>, <b>Box</b> or <b>Clock</b>. The next clip then comes in by that shape.</p>
+<figure><img src="images/wipe-circle.png" alt="A circle wipe halfway through"><figcaption>A dissolve set to Circle, halfway through: the next clip opens out from the middle.</figcaption></figure>
+<ul>
+<li><b>Softness</b> blurs the edge of the shape. At 0% the edge is sharp; turn it up for a gentler change.</li>
+<li><b>Direction</b> runs the wipe the other way round: a circle that closes in instead of opening out, or a wipe from the right.</li>
+</ul>
+<p>Choose <b>Dissolve</b> from the menu to go back to a plain dissolve. To change how long a wipe takes, drag its ends on the Timeline as you would a dissolve's.</p>
+<div class="box tech"><b class="label">TECHNICAL STUFF</b>A wipe is the dissolve's luma transition given one of MLT's standard wipe shapes by name (<code>%luma01.pgm</code> and so on, as Shotcut names them). MLT draws the shape itself, so there are no extra files.</div>
 
 <h3 class="chapter" id="ch10"><span>10</span> Colour and looks</h3>
 <p class="intro">In this chapter: making a clip brighter, warmer or black and white, in the Inspector, and putting in clips of plain colour.</p>

@@ -10,6 +10,8 @@
  *              pan and zoom (a menu) and how far
  *   an overlay Place (a menu), Size, Opacity; a video's Volume and Mute;
  *              a title's Edit title...
+ *   a dissolve Transition: the dissolve or a wipe (a menu), its edge's
+ *              softness and its direction
  *   a sound    Volume, Mute
  *
  * A slider is set by clicking on it or dragging along it: the Viewer shows
@@ -39,7 +41,7 @@ enum { K_HEADING, K_SLIDER, K_BUTTON, K_TOGGLE, K_TEXT, K_TABS }; /* (tabs: labe
 enum { C_LOOK = 1, C_BRIGHTNESS, C_CONTRAST, C_SATURATION, C_WARMTH, C_MIDTONES, C_RESET, C_VOLUME, C_MUTE,
        O_PLACE, O_SIZE, O_OPACITY, O_TITLE, O_VOLUME, O_MUTE, A_VOLUME, A_MUTE,
        F_PAN, F_RUMBLE, F_VOICE, F_GATE, F_NORMAL, /* (F_: the sound's clean-up, of whatever is selected) */
-       T_TABS, M_MOTION, M_AMOUNT, C_FILL };
+       T_TABS, M_MOTION, M_AMOUNT, C_FILL, W_KIND, W_SOFT, W_REVERSE };
 
 typedef struct
 {
@@ -58,7 +60,7 @@ static struct
     char title[16];
     int drag_id;     /* the slider being dragged (0: none) */
     int drag_value;  /* its value when last set */
-    int menu;        /* the menu open: C_LOOK, O_PLACE, M_MOTION or C_FILL */
+    int menu;        /* the menu open: C_LOOK, O_PLACE, M_MOTION, C_FILL or W_KIND */
     int closed;      /* closed by the user: not opened with the editor */
     int tab;         /* the page shown: 0 Colour (or Overlay), 1 Sound, 2 Motion (a clip's) */
 } I = {0, "Inspector", 0, 0, 0, 0, 0};
@@ -135,6 +137,8 @@ static void what(char *t, int size)
         snprintf(t, size, "No project");
     else if (A.sel >= 0 && !re_project_item(A.proj, A.sel, &it) && !it.gap && !it.mix)
         snprintf(t, size, "Clip: %s", it.name);
+    else if (A.sel >= 0 && !re_project_item(A.proj, A.sel, &it) && it.mix)
+        snprintf(t, size, "Transition: %s, %.1f seconds", it.name, it.length / re_project_fps(A.proj));
     else if (A.ov_sel >= 0 && !re_project_overlay(A.proj, A.ov_sel, &o))
         snprintf(t, size, "%s: %s", o.title ? "Title" : o.video ? "Picture in picture" : "Overlay", o.name);
     else if (A.au_sel >= 0 && !re_project_audio(A.proj, A.au_track, A.au_sel, &a))
@@ -191,6 +195,15 @@ static int controls(control *c)
         } else {
             n = add(c, n, K_TEXT, 0, "", 0, 0, 0, "This clip has no sound.");
         }
+    } else if (A.sel >= 0 && !re_project_item(A.proj, A.sel, &it) && it.mix) {
+        re_wipe w;
+        re_project_wipe(A.proj, A.sel, &w);
+        n = add(c, n, K_BUTTON, W_KIND, "Transition", 0, 0, 0, w.kind < 0 ? "Another wipe" : re_wipes[w.kind]);
+        if (w.kind > 0) {
+            n = add(c, n, K_SLIDER, W_SOFT, "Softness", 0, 100, w.softness, NULL);
+            n = add(c, n, K_TOGGLE, W_REVERSE, "Direction", 0, 1, w.reverse, w.reverse ? "The other way" : "As it is");
+        }
+        n = add(c, n, K_TEXT, 0, "", 0, 0, 0, "Drag its ends to change its length.");
     } else if (A.ov_sel >= 0 && !re_project_overlay(A.proj, A.ov_sel, &o)) {
         int sound = o.video && o.sound;
         if (sound)
@@ -222,7 +235,7 @@ static int controls(control *c)
 static void value_text(const control *c, char *t, int size)
 {
     switch (c->id) {
-    case C_CONTRAST: case C_SATURATION: case O_SIZE: case O_OPACITY:
+    case C_CONTRAST: case C_SATURATION: case O_SIZE: case O_OPACITY: case W_SOFT:
         snprintf(t, size, "%d%%", c->value);
         break;
     case C_VOLUME: case O_VOLUME: case A_VOLUME:
@@ -551,6 +564,15 @@ static int set(int id, int value)
     case A_VOLUME:
         done = re_project_audio_volume(A.proj, A.au_track, A.au_sel, value);
         break;
+    case W_SOFT: case W_REVERSE: {
+        re_wipe w;
+        if (re_project_wipe(A.proj, A.sel, &w) || w.kind <= 0)
+            return 0;
+        if (id == W_SOFT) w.softness = value;
+        if (id == W_REVERSE) w.reverse = !w.reverse;
+        done = re_project_set_wipe(A.proj, A.sel, &w);
+        break;
+    }
     case M_AMOUNT: {
         re_motion m;
         if (re_project_motion(A.proj, A.sel, &m) || m.kind <= 0)
@@ -599,7 +621,8 @@ static void open_menu(int which, int x, int y)
     re_overlay o;
     re_motion mo;
     re_item it;
-    int n = which == C_LOOK ? RE_LOOKS : which == O_PLACE ? RE_PLACES : which == M_MOTION ? RE_MOTIONS : RE_FILLS;
+    int n = which == C_LOOK ? RE_LOOKS : which == O_PLACE ? RE_PLACES : which == M_MOTION ? RE_MOTIONS
+          : which == W_KIND ? RE_WIPES : RE_FILLS;
     int ticked = -1;
     if (which == C_LOOK && !re_project_colour(A.proj, A.sel, &col))
         ticked = re_colour_look_of(&col);
@@ -607,13 +630,17 @@ static void open_menu(int which, int x, int y)
         ticked = o.place;
     if (which == M_MOTION && !re_project_motion(A.proj, A.sel, &mo))
         ticked = mo.kind;
+    re_wipe wi;
+    if (which == W_KIND && !re_project_wipe(A.proj, A.sel, &wi))
+        ticked = wi.kind;
     if (which == C_FILL && !re_project_item(A.proj, A.sel, &it))
         for (int i = 0; i < RE_FILLS; i++)
             if ((int) re_fill_rgbs[i] == it.fill)
                 ticked = i;
     memset(&m, 0, sizeof(m));
     snprintf(m.title, sizeof(m.title), "%s",
-             which == C_LOOK ? "Look" : which == O_PLACE ? "Place" : which == M_MOTION ? "Motion" : "Fill");
+             which == C_LOOK ? "Look" : which == O_PLACE ? "Place" : which == M_MOTION ? "Motion"
+             : which == W_KIND ? "Transition" : "Fill");
     m.tfg = 7, m.tbg = 2, m.wfg = 7, m.wbg = 0;
     m.w = 320, m.h = 44;
     for (int i = 0; i < n; i++) {
@@ -621,6 +648,7 @@ static void open_menu(int which, int x, int y)
         const char *name = which == C_LOOK    ? re_colour_looks[i]
                            : which == O_PLACE ? PLACE_NAMES[i]
                            : which == M_MOTION ? re_motions[i]
+                           : which == W_KIND   ? re_wipes[i]
                                                : re_fill_names[i];
         it->flags = (i == n - 1 ? 0x80 : 0) | (i == ticked ? 1 : 0);
         it->sub = -1;
@@ -661,6 +689,13 @@ void in_menu_select(int *b)
             done = re_project_set_motion(A.proj, A.sel, &m);
         }
         app_log("inspector: motion %s", re_motions[k]);
+    } else if (I.menu == W_KIND && k < RE_WIPES) {
+        re_wipe w;
+        if (!re_project_wipe(A.proj, A.sel, &w)) {
+            w.kind = k;
+            done = re_project_set_wipe(A.proj, A.sel, &w);
+        }
+        app_log("inspector: transition %s", re_wipes[k]);
     } else if (I.menu == C_FILL && k < RE_FILLS) {
         done = re_project_set_fill(A.proj, A.sel, re_fill_rgbs[k]);
         app_log("inspector: fill %s", re_fill_names[k]);
@@ -816,7 +851,7 @@ void in_click(int *b)
         redraw_all();
         break;
     }
-    case C_LOOK: case O_PLACE: case M_MOTION: case C_FILL:
+    case C_LOOK: case O_PLACE: case M_MOTION: case C_FILL: case W_KIND:
         open_menu(k->id, b[0], b[1]);
         break;
     case C_RESET: {
@@ -834,7 +869,7 @@ void in_click(int *b)
     case F_NORMAL:
         normalise();
         break;
-    case C_MUTE: case O_MUTE: case A_MUTE: case F_RUMBLE: case F_VOICE: case F_GATE:
+    case C_MUTE: case O_MUTE: case A_MUTE: case F_RUMBLE: case F_VOICE: case F_GATE: case W_REVERSE:
         if (set(k->id, 0)) {
             app_log("inspector: %s", k->label);
             app_edited();

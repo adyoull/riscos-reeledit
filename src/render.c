@@ -134,6 +134,9 @@ uint64_t re_render_signature(re_project *p, int start, int length)
         re_sound_fx fx;
         if (!it.gap && !it.mix && !re_project_sound_fx(p, i, &fx))
             h = fnv(h, "S %d %d %d %d|", fx.pan, fx.rumble, fx.voice, fx.gate);
+        re_wipe w;
+        if (it.mix && !re_project_wipe(p, i, &w))
+            h = fnv(h, "W %d %d %d|", w.kind, w.softness, w.reverse);
         re_motion m;
         if (it.moving && !re_project_motion(p, i, &m))
             h = fnv(h, "M %d %d|", m.kind, m.amount);

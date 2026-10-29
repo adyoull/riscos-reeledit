@@ -125,6 +125,8 @@ void rp_cut_mute(re_project *p, mlt_producer cut, int on);
 int rp_cut_colour(mlt_producer cut, re_colour *c);
 void rp_cut_set_colour(re_project *p, mlt_producer cut, const re_colour *c);
 void rp_fit_colour(re_project *p);
+/* wipe.c: a dissolve's wipe (0, or -1: no luma transition) */
+int rp_mix_wipe(mlt_tractor t, re_wipe *w);
 /* freeze.c: a cut is a colour clip (1, its colour), or a freeze frame (1,
    the frame's time in its file) */
 int rp_cut_fill(mlt_producer cut, unsigned *rgb);

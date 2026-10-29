@@ -140,6 +140,20 @@ int re_project_dissolve(re_project *p, int item, int length, int overlap);
 int re_project_dissolve_length(re_project *p, int mix, int length);
 /* The longest a dissolve can be */
 int re_project_dissolve_max(re_project *p, int mix);
+/* Wipes (wipe.c): a dissolve's picture changing by a shape. kind:
+   re_wipes' (0 Dissolve, Wipe from the left, from the top, Barn doors,
+   Diagonal, Circle, Box, Clock; -1: another of MLT's, kept as it is);
+   softness: its edge, 0 (sharp) .. 100; reverse: 1, the other way round.
+   A dissolve's (0, or -1: not a dissolve), and set: 1 changed, 0 not. */
+typedef struct
+{
+    int kind, softness, reverse;
+} re_wipe;
+#define RE_WIPES 8
+extern const char *const re_wipes[RE_WIPES];
+void re_wipe_none(re_wipe *w);
+int re_project_wipe(re_project *p, int mix, re_wipe *w);
+int re_project_set_wipe(re_project *p, int mix, const re_wipe *w);
 /* The cut between two clips (no dissolve there yet) nearest a frame: the
    clip before it, or -1 if there's none */
 int re_project_dissolve_cut(re_project *p, int frame);
