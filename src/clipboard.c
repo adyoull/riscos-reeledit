@@ -27,6 +27,8 @@ struct re_copy
     re_motion motion;     /* (a clip's) */
     int effect;           /* (a clip's) */
     re_key key;           /* (an overlay's) */
+    re_okey okeys[RE_OKEYS]; /* (an overlay's keyframes) */
+    int n_okeys;
     re_overlay overlay;
     re_title title;
     re_audio sound;
@@ -85,6 +87,7 @@ re_copy *re_project_copy(re_project *p, int kind, int track, int i)
             break;
         c->in = c->overlay.in;
         c->length = c->overlay.length;
+        c->n_okeys = re_project_overlay_keys(p, i, c->okeys, RE_OKEYS);
         if (c->overlay.title)
             return re_project_title(p, i, &c->title) ? (free(c), NULL) : c;
         re_project_overlay_sound_fx(p, i, &c->fx);
@@ -176,6 +179,8 @@ int re_project_paste(re_project *p, const re_copy *c, int frame, int *track)
             re_project_overlay_volume(p, i, o->volume);
         re_project_overlay_set_sound_fx(p, i, &c->fx);
         re_project_overlay_set_key(p, i, &c->key);
+        for (int k = 0; k < c->n_okeys; k++)
+            re_project_overlay_key_set(p, i, &c->okeys[k]);
         break;
     }
     case RE_COPY_SOUND: {

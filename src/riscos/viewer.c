@@ -448,6 +448,7 @@ static void update_controls(int force)
         force_redraw((old < fill ? old : fill) - 4, y0, (old > fill ? old : fill) + 4, y1);
     }
     tl_playhead(app_position());
+    in_playhead(app_position());
 }
 
 #define Wimp_GetWindowOutline 0x400E0

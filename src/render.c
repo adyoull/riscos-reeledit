@@ -158,6 +158,10 @@ uint64_t re_render_signature(re_project *p, int start, int length)
         re_sound_fx fx;
         if (o.video && !re_project_overlay_sound_fx(p, i, &fx))
             h = fnv(h, "S %d %d %d %d|", fx.pan, fx.rumble, fx.voice, fx.gate);
+        re_okey ok[RE_OKEYS];
+        int nk = o.keys ? re_project_overlay_keys(p, i, ok, RE_OKEYS) : 0;
+        for (int k = 0; k < nk; k++)
+            h = fnv(h, "F %d %d %d %d|", ok[k].frame, ok[k].place, ok[k].size, ok[k].opacity);
         re_key key;
         if (!re_project_overlay_key(p, i, &key) && key.kind)
             h = fnv(h, "K %d %d|", key.kind, key.tolerance);

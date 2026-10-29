@@ -314,6 +314,7 @@ typedef struct
     int sound_fade_in, sound_fade_out; /* a video's sound's fades (frames; 0: none) */
     char name[64];         /* the file's leaf name (a picture's without .png or .jpg) */
     int track;             /* 2: on V2; 3: on the titles' track, over V2 (titles made here) */
+    int keys;              /* its keyframes (0: none: place, size and opacity as above throughout) */
 } re_overlay;
 /* Their number, and each (in order, from 0: V2's, then the titles'
    track's, each by start). 0, or -1. */
@@ -355,6 +356,28 @@ int re_project_overlay_volume(re_project *p, int i, int db);
 int re_project_overlay_sound_fade(re_project *p, int i, int end, int length);
 /* Taken away. 1 done, 0 not. */
 int re_project_overlay_remove(re_project *p, int i);
+/* Keyframes (overlay.c): an overlay's place, size and opacity changing
+   over its length, moving smoothly from each keyframe to the next (a
+   picture in the picture growing to fill the frame, a title sliding to
+   a corner). frame: from the overlay's start. With none, the overlay's
+   own place, size and opacity hold throughout; with any, they're ignored
+   (before the first, the first's; after the last, the last's). Its
+   keyframes in order (at most max; their number); one set at a frame (a
+   new one, or that one changed: 1 changed, 0 not); one taken away; all
+   taken away (the first's settings kept as the overlay's own). Kept
+   within the overlay's length; a title's size is its own. */
+typedef struct
+{
+    int frame, place, size, opacity;
+} re_okey;
+#define RE_OKEYS 32
+int re_project_overlay_keys(re_project *p, int i, re_okey *k, int max);
+int re_project_overlay_key_set(re_project *p, int i, const re_okey *k);
+int re_project_overlay_key_remove(re_project *p, int i, int frame);
+int re_project_overlay_keys_clear(re_project *p, int i);
+/* Its settings at a frame (from its start): the place of the keyframe at
+   or before it, size and opacity between keyframes. 0, or -1. */
+int re_project_overlay_at_frame(re_project *p, int i, int frame, re_okey *k);
 /* Green screen (key.c): an overlay's backdrop of one colour made
    see-through. kind: re_keys' (0 Off, Green, Blue); tolerance: how near
    the colour a colour must be, 1..60 (%). 0, or -1; set: 1 changed, 0 not. */

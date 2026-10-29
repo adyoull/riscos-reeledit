@@ -57,6 +57,11 @@ Tolerance. Loudness (the Inspector with nothing selected): the whole
 film evened out as it plays and exports, for the web (-14 LUFS) or TV
 (-23 LUFS). Edit > Countdown at the playhead: a 5-second leader.
 
+Keyframes (an overlay's Inspector): Keyframes On makes one at its start
+and one at the playhead; Place, Size and Opacity then set the keyframe at
+the playhead, the overlay moving smoothly between them. Go to the next
+keyframe, Delete the keyframe here; Keyframes again: off.
+
 Freeze frames: F (Edit > Freeze the frame) holds the frame at the
 playhead for 2 seconds there, the clip split around it. Edit > Colour
 clip at the playhead puts in 2 seconds of black (its Fill in the

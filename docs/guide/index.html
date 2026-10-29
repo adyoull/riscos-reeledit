@@ -493,6 +493,17 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <div class="box tip"><b class="label">TIP</b>If you choose a menu item with Adjust rather than Select, the menu stays open. You can then try Top left, Top right and Centre in turn and see each one in the Viewer.</div>
 <figure><img src="images/logo-top-right.png" alt="A logo placed top right"><figcaption>A logo in the top right corner.</figcaption></figure>
 <figure><img src="images/pip.png" alt="Picture in picture"><figcaption>Picture in picture: v2.mp4 on V2, shown in the bottom right of v1.mp4.</figcaption></figure>
+<h4>Keyframes: making an overlay move</h4>
+<p>An overlay can change while it's on screen. For example, a picture in picture can grow until it fills the frame, a logo can fade to half, or a title can slide to a corner. Each change is set at a <b>keyframe</b>, and ReelEdit moves the overlay smoothly from one keyframe to the next.</p>
+<ol>
+<li>Select the overlay, and put the playhead where the change should be complete.</li>
+<li>In the Inspector, click <b>Keyframes</b> so that it says <b>On</b>. ReelEdit makes two keyframes: one at the overlay's start, and one at the playhead.</li>
+<li>Change the Place, Size or Opacity. The change goes into the keyframe at the playhead.</li>
+</ol>
+<figure><img src="images/keyframes.png" alt="An overlay growing between keyframes"><figcaption>Halfway between two keyframes: clipa is growing from the bottom right corner to fill the frame. The small white squares on its bar on the Timeline are its keyframes.</figcaption></figure>
+<p>To add another keyframe, move the playhead and change a setting. <b>Go to the next keyframe</b> jumps the playhead from one to the next, and <b>Delete the keyframe here</b> takes away the one at the playhead. While Keyframes is on, Place, Size and Opacity show the settings at the playhead. Click <b>Keyframes</b> again to turn them off: the overlay keeps the settings of its first keyframe.</p>
+<div class="box rem"><b class="label">REMEMBER</b>Keyframes are counted from the overlay's start, so they move with it when you move it. If you shorten the overlay, it ends before it reaches the keyframes after its new end.</div>
+
 <h4>Green screen</h4>
 <p>If you've filmed someone in front of a green (or blue) sheet, you can replace the sheet with another clip. Put the green screen video on V2 over the clip you want behind it, select it, and choose <b>Place &gt; Full frame</b> in the Inspector. Then set <b>Key out</b> to <b>Green</b> (or <b>Blue</b>). The green goes, and the clip on V1 shows through.</p>
 <figure><img src="images/green-screen.png" alt="A green screen video over a clip"><figcaption>A video shot against green, over clipb with Key out set to Green. Only the red and yellow square is left.</figcaption></figure>

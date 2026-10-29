@@ -1229,6 +1229,72 @@ static void freezes(const char *numbered, const char *pic, const char *out)
 
 static int chan_peak(re_project *p, int frame, int which);
 
+/* ---- keyframes: an overlay moving from the top left corner to the whole frame, fading to half */
+static void keyframes(const char *a, const char *logo, const char *out)
+{
+    re_engine_io io = {show, NULL, clk, NULL, 48000, 2, NULL};
+    re_project *p = re_project_new();
+    re_project_add(p, a, -1);
+    re_project_add(p, a, -1);
+    int ov = re_project_overlay_add(p, logo, 10, 50);
+    re_okey k0 = {0, RE_PLACE_TOP_LEFT, 20, 100}, k1 = {40, RE_PLACE_FULL, 100, 50}, v;
+    re_overlay o;
+    CHECK(ov == 0 && re_project_overlay_keys(p, 0, NULL, 0) == 0, "keyframes: none at first");
+    CHECK(re_project_overlay_key_set(p, 0, &k0) == 1 && re_project_overlay_key_set(p, 0, &k1) == 1
+              && re_project_overlay_key_set(p, 0, &k1) == 0 && !re_project_overlay(p, 0, &o) && o.keys == 2,
+          "keyframes: two set (once): %d", o.keys);
+    re_engine *e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    int tl = luma_xy(e, 10, 40, 27), mid0 = luma_xy(e, 10, 160, 90);
+    int mid1 = luma_xy(e, 50, 160, 90), corner1 = luma_xy(e, 50, 2, 2), mid_half = luma_xy(e, 30, 160, 90);
+    CHECK(tl > 220 && abs(mid0 - 81) <= 6, "keyframes: the first: the logo at the top left (%d), the middle red (%d)", tl,
+          mid0);
+    CHECK(abs(mid1 - 158) <= 10 && abs(corner1 - 81) <= 6, "keyframes: the second: the whole frame at half (%d), red at its corner (%d)",
+          mid1, corner1);
+    CHECK(abs(mid_half - 196) <= 14, "keyframes: halfway: growing, three quarters there: %d", mid_half);
+    CHECK(!re_project_overlay_at_frame(p, 0, 20, &v) && v.place == RE_PLACE_TOP_LEFT && v.size == 60 && v.opacity == 75,
+          "keyframes: at 20: place %d size %d opacity %d", v.place, v.size, v.opacity);
+    /* a fade in to frame 20, halfway between the keyframes: the composite given the box there */
+    re_project_overlay_fade(p, 0, 0, 20);
+    re_engine_refresh(e);
+    int at20 = luma_xy(e, 30, 160, 90);
+    CHECK(abs(at20 - 196) <= 14, "keyframes: with a fade in, at its end (halfway between them): %d", at20);
+    re_project_overlay_fade(p, 0, 0, 0);
+    /* a fade out still fades it */
+    re_project_overlay_fade(p, 0, 1, 10);
+    re_engine_refresh(e);
+    int faded = luma_xy(e, 59, 160, 90);
+    CHECK(abs(faded - 81) <= 12, "keyframes: faded out at its end: %d", faded);
+    re_project_overlay_fade(p, 0, 1, 0);
+    /* copied and pasted, saved and opened */
+    re_copy *c = re_project_copy(p, RE_COPY_OVERLAY, 0, 0);
+    int t = 0;
+    int pasted = re_project_paste(p, c, 80, &t);
+    re_copy_free(c);
+    re_okey got[RE_OKEYS];
+    CHECK(pasted == 1 && re_project_overlay_keys(p, 1, got, RE_OKEYS) == 2 && got[1].frame == 40 && got[1].opacity == 50,
+          "keyframes: pasted: %d", pasted);
+    CHECK(!re_project_save(p, out) && count(out, "shotcut:reeledit_keys") == 2, "keyframes: saved");
+    re_engine_close(e);
+    re_project_close(p);
+    p = re_project_open(out, 1);
+    CHECK(p && re_project_overlay_keys(p, 0, got, RE_OKEYS) == 2 && got[0].place == RE_PLACE_TOP_LEFT && got[1].size == 100,
+          "keyframes: opened");
+    e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    mid1 = luma_xy(e, 50, 160, 90);
+    CHECK(abs(mid1 - 158) <= 10, "keyframes: opened, played: %d", mid1);
+    /* one taken away, undone; all taken away: the first's settings the overlay's own */
+    CHECK(re_project_overlay_key_remove(p, 0, 40) == 1 && re_project_overlay_keys(p, 0, got, RE_OKEYS) == 1
+              && re_project_overlay_key_remove(p, 0, 7) == 0,
+          "keyframes: one taken away");
+    re_project_undo(p);
+    CHECK(re_project_overlay_keys(p, 0, got, RE_OKEYS) == 2, "keyframes: undone");
+    CHECK(re_project_overlay_keys_clear(p, 0) == 1 && !re_project_overlay(p, 0, &o) && o.keys == 0
+              && o.place == RE_PLACE_TOP_LEFT && o.size == 20,
+          "keyframes: cleared: place %d size %d", o.place, o.size);
+    re_engine_close(e);
+    re_project_close(p);
+}
+
 /* ---- the plus module's: effects, green screen, the loudness evened out, a countdown */
 static void extras(const char *a, const char *b, const char *green, const char *quiet, const char *out)
 {
@@ -2738,6 +2804,7 @@ int main(int argc, char **argv)
     freezes(n, argv[12], out);
     wipes(a, b, out);
     extras(a, b, argv[14], argv[15], out);
+    keyframes(a, argv[11], out);
     export(a, argv[9], out, "export-test.mp4");
     audio_tracks(a, argv[9], argv[11], out);
     source_editing(a, b, n, out);

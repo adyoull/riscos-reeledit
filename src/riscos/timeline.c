@@ -657,6 +657,17 @@ static void draw_overlays(int track, int ox, int y0, int y1, int f0, int f1, int
             rect(x0, y0 + 12, x0 + inset + 4, y1 - 12);
             rect(x1 - inset - 4, y0 + 12, x1, y1 - 12);
         }
+        if (o.keys) { /* its keyframes: white diamonds (squares at this size) along its bottom */
+            re_okey k[RE_OKEYS];
+            int nk = re_project_overlay_keys(A.proj, i, k, RE_OKEYS);
+            for (int j = 0; j < nk; j++) {
+                int kx = ox + x_of(o.start + k[j].frame);
+                colour(0x20202000);
+                rect(kx - 7, y0 + inset, kx + 7, y0 + inset + 14);
+                colour(0xFFFFFF00);
+                rect(kx - 5, y0 + inset + 2, kx + 5, y0 + inset + 12);
+            }
+        }
         int c0 = x0 + 2 > cx0 ? x0 + 2 : cx0, c1 = x1 - 2 < cx1 ? x1 - 2 : cx1;
         int r0 = y0 > cy0 ? y0 : cy0, r1 = y1 < cy1 ? y1 : cy1;
         if (c1 > c0 && r1 > r0) {

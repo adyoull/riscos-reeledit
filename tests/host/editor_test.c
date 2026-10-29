@@ -2336,6 +2336,59 @@ static int script(int *b, int mask)
         re_key k;
         re_project_overlay_key(re_test_project(), 0, &k);
         CHECK(k.kind == 1 && k.tolerance == 60, "Inspector: Tolerance to its end: %d", k.tolerance);
+        next(4083);
+        return click_tl(b, 40, 1, 0x400); /* the playhead to 40 (into the overlay: it's selected still) */
+    }
+    /* ---- keyframes: on (at its start and at the playhead), Opacity at the playhead a keyframe's, the next one,
+       off ---- */
+    case 4083:
+        if (nulls)
+            return 0;
+        next(4084);
+        return in_row(b, 6, 300, 0x400); /* Keyframes: on */
+    case 4084: {
+        if (nulls)
+            return 0;
+        re_overlay o;
+        re_okey k[RE_OKEYS];
+        re_project_overlay(re_test_project(), 0, &o);
+        int n = re_project_overlay_keys(re_test_project(), 0, k, RE_OKEYS);
+        CHECK(re_test_overlay_selected() == 0 && n == 2 && k[0].frame == 0 && k[1].frame == 40 - o.start,
+              "Inspector: Keyframes on: %d (at %d, %d; the overlay from %d)", n, k[0].frame, n > 1 ? k[1].frame : -1,
+              o.start);
+        mark = o.opacity;
+        next(4085);
+        return in_row(b, 3, 220 + 250 / 4, 0x400); /* Opacity: a quarter */
+    }
+    case 4085: {
+        if (nulls)
+            return 0;
+        re_overlay o;
+        re_okey k[RE_OKEYS];
+        re_project_overlay(re_test_project(), 0, &o);
+        int n = re_project_overlay_keys(re_test_project(), 0, k, RE_OKEYS);
+        CHECK(n == 2 && k[1].opacity == 25 && k[0].opacity == mark && o.opacity == mark,
+              "Inspector: Opacity at the playhead: the keyframe's %d (the first's %d)", n > 1 ? k[1].opacity : -1,
+              k[0].opacity);
+        shot("42-keyframes");
+        next(4086);
+        return in_row(b, 7, 300, 0x400); /* Go to the next keyframe (past the last: the first) */
+    }
+    case 4086: {
+        if (nulls)
+            return 0;
+        re_overlay o;
+        re_project_overlay(re_test_project(), 0, &o);
+        CHECK(pos == o.start, "Inspector: the next keyframe: at %d (the first, %d)", pos, o.start);
+        next(4087);
+        return in_row(b, 6, 300, 0x400); /* Keyframes: off */
+    }
+    case 4087: {
+        if (nulls)
+            return 0;
+        re_overlay o;
+        re_project_overlay(re_test_project(), 0, &o);
+        CHECK(o.keys == 0 && o.opacity == mark, "Inspector: Keyframes off: %d left, opacity %d", o.keys, o.opacity);
         next(181);
         return key_to(b, TL, 0x7F); /* Delete */
     }

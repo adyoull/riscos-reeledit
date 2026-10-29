@@ -12,6 +12,11 @@
  *                              frame's width and height
  *   shotcut:reeledit_opacity   %
  *   shotcut:reeledit_fade_in, _fade_out   frames
+ *   shotcut:reeledit_keys      keyframes: "frame:place:size:opacity;..."
+ *                              (from its start), the box and opacity
+ *                              moving from each to the next (the
+ *                              composite's geometry keyframed at each,
+ *                              and at the fades' ends)
  * A video's sound is faded with it (its fades' volume filters on the cut,
  * as V1's: fade.c) or on its own, or muted (clipsound.c).
  * The transitions are made again from these after every edit
@@ -95,6 +100,41 @@ static int place_of(const char *s)
     return RE_PLACE_FULL;
 }
 
+/* An overlay cut's keyframes: their number */
+static int read_keys(mlt_properties cp, re_okey *k, int max)
+{
+    const char *s = mlt_properties_get(cp, "shotcut:reeledit_keys");
+    int n = 0;
+    while (s && *s && n < max) {
+        re_okey v;
+        int used = 0;
+        if (sscanf(s, "%d:%d:%d:%d%n", &v.frame, &v.place, &v.size, &v.opacity, &used) != 4)
+            break;
+        if (v.place < 0 || v.place >= RE_PLACES)
+            v.place = RE_PLACE_FULL;
+        if (!n || v.frame > k[n - 1].frame)
+            k[n++] = v;
+        s += used;
+        if (*s == ';')
+            s++;
+    }
+    return n;
+}
+
+static void write_keys(mlt_properties cp, const re_okey *k, int n)
+{
+    char s[RE_OKEYS * 24];
+    int at = 0;
+    s[0] = 0;
+    for (int i = 0; i < n; i++)
+        at += snprintf(s + at, sizeof(s) - at, "%s%d:%d:%d:%d", i ? ";" : "", k[i].frame, k[i].place, k[i].size,
+                       k[i].opacity);
+    if (n)
+        mlt_properties_set(cp, "shotcut:reeledit_keys", s);
+    else
+        mlt_properties_clear(cp, "shotcut:reeledit_keys");
+}
+
 int re_project_overlay(re_project *p, int i, re_overlay *o)
 {
     mlt_playlist_clip_info info;
@@ -116,6 +156,8 @@ int re_project_overlay(re_project *p, int i, re_overlay *o)
                                                                      : 100;
     o->fade_in = mlt_properties_get_int(cp, "shotcut:reeledit_fade_in");
     o->fade_out = mlt_properties_get_int(cp, "shotcut:reeledit_fade_out");
+    re_okey k[RE_OKEYS];
+    o->keys = read_keys(cp, k, RE_OKEYS);
     o->sound = o->video && rp_cut_has_sound(info.cut);
     o->muted = o->video && rp_cut_muted(info.cut);
     o->volume = o->video ? rp_cut_volume(info.cut) : 0;
@@ -289,6 +331,97 @@ static void box(const re_overlay *o, double *x, double *y, double *w, double *h,
         *y = 0;
 }
 
+/* A keyframed overlay's box and opacity at a frame (from its start) */
+static void key_value(const re_okey *k, int n, int f, double *at /* x y w h opacity */, int *place,
+                      void (*box_of)(void *ctx, int place, int size, double *xywh), void *ctx)
+{
+    int j = 0;
+    while (j + 1 < n && k[j + 1].frame <= f)
+        j++;
+    double a[4], b[4];
+    box_of(ctx, k[j].place, k[j].size, a);
+    *place = k[j].place;
+    if (f <= k[j].frame || j + 1 >= n) { /* (at or before the first, at or after the last) */
+        memcpy(at, a, sizeof(a));
+        at[4] = k[j].opacity;
+        return;
+    }
+    box_of(ctx, k[j + 1].place, k[j + 1].size, b);
+    double t = (double) (f - k[j].frame) / (k[j + 1].frame - k[j].frame);
+    for (int c = 0; c < 4; c++)
+        at[c] = a[c] + (b[c] - a[c]) * t;
+    at[4] = k[j].opacity + (k[j + 1].opacity - k[j].opacity) * t;
+}
+
+struct box_ctx
+{
+    re_project *p;
+    mlt_producer cut;
+    const re_overlay *o;
+};
+
+static void box_of(void *ctx, int place, int size, double *xywh)
+{
+    struct box_ctx *c = ctx;
+    re_overlay o = *c->o;
+    const char *ha, *va;
+    o.place = place;
+    o.size = size;
+    if (o.title)
+        title_box(c->p, c->cut, &o, &xywh[0], &xywh[1], &xywh[2], &xywh[3], &ha, &va);
+    else
+        box(&o, &xywh[0], &xywh[1], &xywh[2], &xywh[3], &ha, &va);
+}
+
+static int by_int(const void *a, const void *b)
+{
+    return *(const int *) a - *(const int *) b;
+}
+
+/* The composite's geometry for a keyframed overlay: a point at each
+   keyframe and at the fades' ends, the composite moving straight between
+   them */
+static void keyed_geometry(re_project *p, mlt_producer cut, const re_overlay *o, const re_okey *k, int n,
+                           mlt_properties tp)
+{
+    int L = o->length, fi = o->fade_in, fo = o->fade_out;
+    if (fi + fo > L)
+        fo = L - fi;
+    int at[RE_OKEYS + 4], m = 0;
+    at[m++] = 0;
+    at[m++] = L - 1;
+    if (fi > 0)
+        at[m++] = fi;
+    if (fo > 0)
+        at[m++] = L - fo - 1;
+    for (int i = 0; i < n; i++)
+        if (k[i].frame > 0 && k[i].frame < L - 1)
+            at[m++] = k[i].frame;
+    qsort(at, m, sizeof(int), by_int);
+    struct box_ctx ctx = {p, cut, o};
+    char g[RE_OKEYS * 64 + 256];
+    int len = 0, last = -1;
+    g[0] = 0;
+    for (int i = 0; i < m; i++) {
+        int f = at[i];
+        if (f <= last || f < 0 || f > L - 1)
+            continue;
+        double v[5];
+        int place;
+        key_value(k, n, f, v, &place, box_of, &ctx);
+        double fade = 1;
+        if (fi > 0 && f < fi)
+            fade = (double) f / fi;
+        if (fo > 0 && f > L - fo - 1)
+            fade = (double) (L - 1 - f) / fo;
+        double op = (v[4] < 0 ? 0 : v[4] > 100 ? 100 : v[4]) / 100.0 * fade;
+        len += snprintf(g + len, sizeof(g) - len, "%s%d=%g%%/%g%%:%g%%x%g%%:%g", len ? ";" : "", f, v[0], v[1], v[2],
+                        v[3], op);
+        last = f;
+    }
+    mlt_properties_set(tp, "geometry", g);
+}
+
 /* Our transitions taken out of the tractor */
 static void drop_composites(re_project *p)
 {
@@ -343,6 +476,21 @@ void rp_fit_overlays(re_project *p)
             title_box(p, info.cut, &o, &x, &y, &w, &h, &ha, &va);
         } else {
             box(&o, &x, &y, &w, &h, &ha, &va);
+        }
+        re_okey keys[RE_OKEYS];
+        mlt_playlist_clip_info kinfo;
+        info_of(p, i, &kinfo, NULL);
+        int nk = read_keys(MLT_PRODUCER_PROPERTIES(kinfo.cut), keys, RE_OKEYS);
+        if (nk > 0) {
+            keyed_geometry(p, kinfo.cut, &o, keys, nk, tp);
+            mlt_properties_set_int(tp, "fill", 1);
+            mlt_properties_set(tp, "halign", "centre");
+            mlt_properties_set(tp, "valign", "middle");
+            mlt_properties_set_int(tp, "shotcut:reeledit_overlay", 1);
+            mlt_transition_set_in_and_out(t, o.start, o.start + o.length - 1);
+            mlt_field_plant_transition(field, t, p->v1_track, o.track == 3 ? p->v3_track : p->v2_track);
+            mlt_transition_close(t);
+            continue;
         }
         double op = (o.opacity < 0 ? 0 : o.opacity > 100 ? 100 : o.opacity) / 100.0;
         char rect[96], g[400];
@@ -653,4 +801,126 @@ int re_project_overlay_volume(re_project *p, int i, int db)
     rp_cut_set_volume(p, info.cut, db);
     rp_changed(p);
     return 1;
+}
+
+/* ---- keyframes ----------------------------------------------------------------------------- */
+
+static mlt_producer cut_of(re_project *p, int i, re_overlay *o)
+{
+    mlt_playlist pl;
+    int e = re_project_overlay(p, i, o) ? -1 : rp_overlay_entry(p, i, &pl);
+    return e >= 0 ? mlt_playlist_get_clip(pl, e) : NULL;
+}
+
+int re_project_overlay_keys(re_project *p, int i, re_okey *k, int max)
+{
+    re_overlay o;
+    mlt_producer cut = cut_of(p, i, &o);
+    return cut ? read_keys(MLT_PRODUCER_PROPERTIES(cut), k, max) : 0;
+}
+
+/* The keyframes written (an edit) */
+static int put_keys(re_project *p, mlt_producer cut, const re_okey *k, int n)
+{
+    if (!p->in_edit)
+        rp_checkpoint(p);
+    write_keys(MLT_PRODUCER_PROPERTIES(cut), k, n);
+    rp_changed(p);
+    return 1;
+}
+
+int re_project_overlay_key_set(re_project *p, int i, const re_okey *want)
+{
+    re_overlay o;
+    mlt_producer cut = cut_of(p, i, &o);
+    re_okey k[RE_OKEYS + 1], v = *want;
+    if (!cut)
+        return 0;
+    int n = read_keys(MLT_PRODUCER_PROPERTIES(cut), k, RE_OKEYS);
+    v.frame = v.frame < 0 ? 0 : v.frame > o.length - 1 ? o.length - 1 : v.frame;
+    v.place = v.place < 0 || v.place >= RE_PLACES ? RE_PLACE_FULL : v.place;
+    v.size = v.size < 1 ? 1 : v.size > 100 ? 100 : v.size;
+    v.opacity = v.opacity < 0 ? 0 : v.opacity > 100 ? 100 : v.opacity;
+    int j = 0;
+    while (j < n && k[j].frame < v.frame)
+        j++;
+    if (j < n && k[j].frame == v.frame) {
+        if (!memcmp(&k[j], &v, sizeof(v)))
+            return 0;
+        k[j] = v;
+    } else {
+        if (n >= RE_OKEYS)
+            return 0;
+        memmove(k + j + 1, k + j, (n - j) * sizeof(re_okey));
+        k[j] = v;
+        n++;
+    }
+    return put_keys(p, cut, k, n);
+}
+
+int re_project_overlay_key_remove(re_project *p, int i, int frame)
+{
+    re_overlay o;
+    mlt_producer cut = cut_of(p, i, &o);
+    re_okey k[RE_OKEYS];
+    if (!cut)
+        return 0;
+    int n = read_keys(MLT_PRODUCER_PROPERTIES(cut), k, RE_OKEYS);
+    for (int j = 0; j < n; j++)
+        if (k[j].frame == frame) {
+            if (n == 1) { /* (the last: its settings the overlay's own) */
+                int done = re_project_overlay_keys_clear(p, i);
+                return done;
+            }
+            memmove(k + j, k + j + 1, (n - j - 1) * sizeof(re_okey));
+            return put_keys(p, cut, k, n - 1);
+        }
+    return 0;
+}
+
+int re_project_overlay_keys_clear(re_project *p, int i)
+{
+    re_overlay o;
+    mlt_producer cut = cut_of(p, i, &o);
+    re_okey k[RE_OKEYS];
+    if (!cut || !read_keys(MLT_PRODUCER_PROPERTIES(cut), k, RE_OKEYS))
+        return 0;
+    if (!p->in_edit)
+        rp_checkpoint(p);
+    mlt_properties cp = MLT_PRODUCER_PROPERTIES(cut);
+    mlt_properties_set(cp, "shotcut:reeledit_place", PLACES[k[0].place]);
+    mlt_properties_set_int(cp, "shotcut:reeledit_size", k[0].size);
+    mlt_properties_set_int(cp, "shotcut:reeledit_opacity", k[0].opacity);
+    write_keys(cp, k, 0);
+    rp_changed(p);
+    return 1;
+}
+
+int re_project_overlay_at_frame(re_project *p, int i, int frame, re_okey *v)
+{
+    re_overlay o;
+    mlt_producer cut = cut_of(p, i, &o);
+    re_okey k[RE_OKEYS];
+    if (!cut)
+        return -1;
+    int n = read_keys(MLT_PRODUCER_PROPERTIES(cut), k, RE_OKEYS);
+    v->frame = frame;
+    if (!n) {
+        v->place = o.place;
+        v->size = o.size;
+        v->opacity = o.opacity;
+        return 0;
+    }
+    int j = 0;
+    while (j + 1 < n && k[j + 1].frame <= frame)
+        j++;
+    v->place = k[j].place;
+    v->size = k[j].size;
+    v->opacity = k[j].opacity;
+    if (frame > k[j].frame && j + 1 < n) {
+        double t = (double) (frame - k[j].frame) / (k[j + 1].frame - k[j].frame);
+        v->size = (int) (k[j].size + (k[j + 1].size - k[j].size) * t + 0.5);
+        v->opacity = (int) (k[j].opacity + (k[j + 1].opacity - k[j].opacity) * t + 0.5);
+    }
+    return 0;
 }

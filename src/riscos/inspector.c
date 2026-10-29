@@ -9,7 +9,9 @@
  *              first: a menu); Sound: Volume, Mute, the clean-up; Motion:
  *              pan and zoom (a menu) and how far
  *   an overlay Place (a menu), Size, Opacity; a video's Volume and Mute;
- *              a title's Edit title...
+ *              a title's Edit title...; Keyframes: on, Place, Size and
+ *              Opacity are the overlay's at the playhead, and setting one
+ *              sets a keyframe there
  *   a dissolve Transition: the dissolve or a wipe (a menu), its edge's
  *              softness and its direction
  *   a sound    Volume, Mute
@@ -42,7 +44,8 @@ enum { K_HEADING, K_SLIDER, K_BUTTON, K_TOGGLE, K_TEXT, K_TABS }; /* (tabs: labe
 enum { C_LOOK = 1, C_BRIGHTNESS, C_CONTRAST, C_SATURATION, C_WARMTH, C_MIDTONES, C_RESET, C_VOLUME, C_MUTE,
        O_PLACE, O_SIZE, O_OPACITY, O_TITLE, O_VOLUME, O_MUTE, A_VOLUME, A_MUTE,
        F_PAN, F_RUMBLE, F_VOICE, F_GATE, F_NORMAL, /* (F_: the sound's clean-up, of whatever is selected) */
-       T_TABS, M_MOTION, M_AMOUNT, C_FILL, W_KIND, W_SOFT, W_REVERSE, C_EFFECT, O_KEY, O_TOL, P_LOUD };
+       T_TABS, M_MOTION, M_AMOUNT, C_FILL, W_KIND, W_SOFT, W_REVERSE, C_EFFECT, O_KEY, O_TOL, P_LOUD,
+       O_KEYS, O_KEYNEXT, O_KEYDEL };
 
 typedef struct
 {
@@ -101,6 +104,42 @@ static int add(control *c, int n, int kind, int id, const char *label, int lo, i
     snprintf(c[n].text, sizeof(c[n].text), "%s", text ? text : "");
     c[n].third = NULL;
     return n + 1;
+}
+
+/* The playhead's frame in an overlay (from its start, kept within it) */
+static int key_frame(const re_overlay *o)
+{
+    int f = app_position() - o->start;
+    return f < 0 ? 0 : f > o->length - 1 ? o->length - 1 : f;
+}
+
+/* The keyframe at the playhead: its index, or -1 */
+static int key_here(const re_overlay *o)
+{
+    re_okey k[RE_OKEYS];
+    int n = re_project_overlay_keys(A.proj, A.ov_sel, k, RE_OKEYS), f = key_frame(o);
+    for (int i = 0; i < n; i++)
+        if (k[i].frame == f)
+            return i;
+    return -1;
+}
+
+/* An overlay's place, size or opacity (-1: as it is) set: a keyframe at the playhead if it has keyframes,
+   else its own. 1 changed. */
+static int overlay_set(int place, int size, int opacity)
+{
+    re_overlay o;
+    re_okey v;
+    if (re_project_overlay(A.proj, A.ov_sel, &o))
+        return 0;
+    if (!o.keys)
+        return re_project_overlay_set(A.proj, A.ov_sel, place, size, opacity);
+    re_project_overlay_at_frame(A.proj, A.ov_sel, key_frame(&o), &v);
+    v.frame = key_frame(&o);
+    if (place >= 0) v.place = place;
+    if (size >= 0) v.size = size;
+    if (opacity >= 0) v.opacity = opacity;
+    return re_project_overlay_key_set(A.proj, A.ov_sel, &v);
 }
 
 /* The selection's sound clean-up: 0, or -1 (none: nothing with sound selected) */
@@ -225,6 +264,12 @@ static int controls(control *c)
         else
             n = add(c, n, K_HEADING, 0, o.title ? "Title" : "Overlay", 0, 0, 0, NULL);
         if (!sound || I.tab == 0) {
+            re_okey at;
+            if (o.keys && !re_project_overlay_at_frame(A.proj, A.ov_sel, key_frame(&o), &at)) {
+                o.place = at.place; /* (the playhead's) */
+                o.size = at.size;
+                o.opacity = at.opacity;
+            }
             if (o.title)
                 n = add(c, n, K_BUTTON, O_TITLE, "Text", 0, 0, 0, "Edit title...");
             n = add(c, n, K_BUTTON, O_PLACE, "Place", 0, 0, 0,
@@ -237,6 +282,16 @@ static int controls(control *c)
                 n = add(c, n, K_BUTTON, O_KEY, "Key out", 0, 0, 0, re_keys[key.kind]);
                 if (key.kind)
                     n = add(c, n, K_SLIDER, O_TOL, "Tolerance", 1, 60, key.tolerance, NULL);
+            }
+            char kt[32];
+            snprintf(kt, sizeof(kt), o.keys ? "On: %d" : "Off", o.keys);
+            n = add(c, n, K_TOGGLE, O_KEYS, "Keyframes", 0, 1, o.keys > 0, kt);
+            if (o.keys) {
+                n = add(c, n, K_BUTTON, O_KEYNEXT, "", 0, 0, 0, "Go to the next keyframe");
+                if (key_here(&o) >= 0)
+                    n = add(c, n, K_BUTTON, O_KEYDEL, "", 0, 0, 0, "Delete the keyframe here");
+                else
+                    n = add(c, n, K_TEXT, 0, "", 0, 0, 0, "Change a setting to put a keyframe here.");
             }
         } else {
             n = add(c, n, K_SLIDER, O_VOLUME, "Volume", -36, 12, o.volume, NULL);
@@ -355,6 +410,18 @@ static void redraw_all(void)
     ro_swi(Wimp_SetExtent, &r);
     r.r[0] = I.win; r.r[1] = 0; r.r[2] = ext[1]; r.r[3] = WIDTH; r.r[4] = 0;
     ro_swi(Wimp_ForceRedraw, &r);
+}
+
+void in_playhead(int frame)
+{
+    static int last = -1;
+    re_overlay o;
+    if (frame == last)
+        return;
+    last = frame;
+    if (is_open() && A.proj && A.ov_sel >= 0 && !re_project_overlay(A.proj, A.ov_sel, &o) && o.keys
+        && (!A.e || re_engine_speed(A.e) == 0))
+        redraw_all(); /* (its settings are the playhead's) */
 }
 
 void in_show_page(int tab)
@@ -575,10 +642,10 @@ static int set(int id, int value)
         done = !re_project_item(A.proj, A.sel, &it) && re_project_mute(A.proj, A.sel, !it.muted);
         break;
     case O_SIZE:
-        done = re_project_overlay_set(A.proj, A.ov_sel, -1, value, -1);
+        done = overlay_set(-1, value, -1);
         break;
     case O_OPACITY:
-        done = re_project_overlay_set(A.proj, A.ov_sel, -1, -1, value);
+        done = overlay_set(-1, -1, value);
         break;
     case O_VOLUME:
         done = re_project_overlay_volume(A.proj, A.ov_sel, value);
@@ -660,8 +727,9 @@ static void open_menu(int which, int x, int y)
     int ticked = -1;
     if (which == C_LOOK && !re_project_colour(A.proj, A.sel, &col))
         ticked = re_colour_look_of(&col);
+    re_okey ok;
     if (which == O_PLACE && !re_project_overlay(A.proj, A.ov_sel, &o))
-        ticked = o.place;
+        ticked = o.keys && !re_project_overlay_at_frame(A.proj, A.ov_sel, key_frame(&o), &ok) ? ok.place : o.place;
     if (which == M_MOTION && !re_project_motion(A.proj, A.sel, &mo))
         ticked = mo.kind;
     re_wipe wi;
@@ -725,7 +793,7 @@ void in_menu_select(int *b)
         done = re_project_set_colour(A.proj, A.sel, &col);
         app_log("inspector: look %s", re_colour_looks[k]);
     } else if (I.menu == O_PLACE && k < RE_PLACES) {
-        done = re_project_overlay_set(A.proj, A.ov_sel, k, -1, -1);
+        done = overlay_set(k, -1, -1);
         app_log("inspector: place %s", PLACE_NAMES[k]);
     } else if (I.menu == M_MOTION && k < RE_MOTIONS) {
         re_motion m;
@@ -926,6 +994,50 @@ void in_click(int *b)
     case O_TITLE:
         ti_open(A.ov_sel);
         break;
+    case O_KEYS: {
+        re_overlay o;
+        if (re_project_overlay(A.proj, A.ov_sel, &o))
+            break;
+        int done = 0;
+        if (o.keys) {
+            done = re_project_overlay_keys_clear(A.proj, A.ov_sel);
+        } else { /* (one at its start as it is, and one at the playhead, to change) */
+            re_okey k = {0, o.place, o.size, o.opacity};
+            re_project_begin(A.proj);
+            done = re_project_overlay_key_set(A.proj, A.ov_sel, &k);
+            k.frame = key_frame(&o);
+            if (k.frame > 0)
+                re_project_overlay_key_set(A.proj, A.ov_sel, &k);
+            re_project_end(A.proj);
+        }
+        app_log("inspector: keyframes %s", o.keys ? "off" : "on");
+        if (done)
+            app_edited();
+        break;
+    }
+    case O_KEYNEXT: {
+        re_overlay o;
+        re_okey k[RE_OKEYS];
+        if (re_project_overlay(A.proj, A.ov_sel, &o))
+            break;
+        int n = re_project_overlay_keys(A.proj, A.ov_sel, k, RE_OKEYS), f = key_frame(&o), to = n ? k[0].frame : 0;
+        for (int j = 0; j < n; j++)
+            if (k[j].frame > f) {
+                to = k[j].frame;
+                break;
+            }
+        app_seek(o.start + to);
+        redraw_all();
+        break;
+    }
+    case O_KEYDEL: {
+        re_overlay o;
+        if (!re_project_overlay(A.proj, A.ov_sel, &o) && re_project_overlay_key_remove(A.proj, A.ov_sel, key_frame(&o))) {
+            app_log("inspector: keyframe at %d deleted", key_frame(&o));
+            app_edited();
+        }
+        break;
+    }
     case F_NORMAL:
         normalise();
         break;
