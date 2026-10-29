@@ -153,6 +153,9 @@ static char start_cmd[1500];
 /* A child's arguments (children.c: in a scrap file, !RunImage -MODE @file):
    how many, read into a (the file then gone), or -1 */
 const char *re_test_own_decoders(void);
+int re_test_export_start(const char *path);
+int re_test_export_waiting(void);
+int ex_busy(void);
 static char child_decoders[64]; /* (the last child's "-decoders" share, from child_args) */
 static int child_args(const char *mode, char a[][300], int max)
 {
@@ -2895,7 +2898,7 @@ static int script(int *b, int mask)
                   && !strcmp(a[2], "720") && !strcmp(a[3], "1") && !strcmp(a[4], "0") && re_project_modified(re_test_project()),
               "Export: %d tasks started, \"%s\" (%d arguments: %s), modified %d", starts, start_cmd, n, n > 1 ? a[1] : "-",
               re_project_modified(re_test_project()));
-        CHECK(!strcmp(child_decoders, "h264_vchiq=3,hevc_hwdec=1"), "Export: given decoders \"%s\"", child_decoders);
+        CHECK(!strcmp(child_decoders, "h264_vchiq=2,hevc_hwdec=1"), "Export: given decoders \"%s\"", child_decoders);
         next(255);
         memset(b, 0, 24);
         b[0] = 24; b[1] = 0x777; b[2] = 70; b[4] = 0x808C2; b[5] = 0x52454558; /* TaskWindow_Ego */
@@ -3500,7 +3503,7 @@ static int script(int *b, int mask)
               re_test_tl_title());
         if (!x)
             fail_quit("proxy: not started");
-        CHECK(!strcmp(child_decoders, "h264_vchiq=1,hevc_hwdec=1") && !strcmp(re_test_own_decoders(), "h264_vchiq=2,hevc_hwdec=0"),
+        CHECK(!strcmp(child_decoders, "h264_vchiq=1,hevc_hwdec=1") && !strcmp(re_test_own_decoders(), "h264_vchiq=1,hevc_hwdec=0"),
               "proxy: given decoders \"%s\", the editor's own \"%s\"", child_decoders, re_test_own_decoders());
         char err[200];
         CHECK(re_export_proxy(file, outf, 0, NULL, NULL, NULL, err, sizeof(err)) == 0, "proxy: %s", err);
@@ -3599,6 +3602,75 @@ static int script(int *b, int mask)
         if (nulls)
             return 0;
         CHECK(!strstr(re_test_tl_title(), "making"), "proxy: stuck, stopped: the Timeline \"%s\"", re_test_tl_title());
+        /* ---- an export while a proxy is being made: the proxy stopped first (the VideoCore's encoder
+           can't be shared), the export started once it has ended, the proxy made again after ---- */
+        CHECK(system("cp big.mp4 'big copy - three.mp4'") == 0, "export and proxy: no copy of big.mp4");
+        proxy_starts = starts;
+        moritas_sent = 0;
+        next(5020);
+        data_load(b, TL, W[1].box[0] - W[1].scroll_x + 16 + (int) ((re_project_length(re_test_project()) + 5) * tl_scale),
+                  0xBF6, "big copy - three.mp4");
+        b[8] = W[1].box[3] - TL_V1_TOP - 48;
+        return 17;
+    case 5020: {
+        if (nulls)
+            return 0;
+        char a[4][300];
+        int na = child_args("proxy", a, 4);
+        CHECK(starts == proxy_starts + 1 && na == 3 && strstr(a[0], "big copy - three.mp4"),
+              "export and proxy: the proxy not started (%d)", starts - proxy_starts);
+        int r = re_test_export_start("ADFS::Disc.$.While/mp4");
+        CHECK(r == 0 && starts == proxy_starts + 1 && re_test_export_waiting() && ex_busy(),
+              "export and proxy: the export started beside the proxy (%d started, waiting %d)", starts - proxy_starts,
+              re_test_export_waiting());
+        next(5021);
+        memset(b, 0, 24); /* (the proxy says who it is: stopped then) */
+        b[0] = 24; b[1] = 0x792; b[2] = 95; b[4] = 0x808C2; b[5] = 0x52455058;
+        return 17;
+    }
+    case 5021:
+        CHECK(moritas_sent == 1, "export and proxy: the proxy not stopped (%d)", moritas_sent);
+        next(5022);
+        memset(b, 0, 24);
+        b[0] = 20; b[1] = 0x792; b[2] = 96; b[4] = 0x808C3; /* its TaskWindow_Morio */
+        return 17;
+    case 5022: {
+        if (nulls && starts == proxy_starts + 1 && fake_cs - phase_cs < 1000)
+            return 0; /* (the export started at the next watch) */
+        char a[8][300];
+        int na = child_args("export", a, 8);
+        CHECK(starts == proxy_starts + 2 && na == 5 && !re_test_export_waiting()
+                  && !strcmp(child_decoders, "h264_vchiq=2,hevc_hwdec=1"),
+              "export and proxy: the export not started once the proxy stopped (%d started, %d arguments, \"%s\")",
+              starts - proxy_starts, na, child_decoders);
+        next(5023);
+        memset(b, 0, 24);
+        b[0] = 24; b[1] = 0x793; b[2] = 97; b[4] = 0x808C2; b[5] = 0x52454558; /* the export's TaskWindow_Ego */
+        return 17;
+    }
+    case 5023:
+        if (fake_cs - phase_cs < 600)
+            return 0; /* (time going by: no proxy started beside the export) */
+        CHECK(starts == proxy_starts + 2, "export and proxy: a proxy started beside the export");
+        next(5024);
+        memset(b, 0, 24);
+        b[0] = 20; b[1] = 0x793; b[2] = 98; b[4] = 0x808C3; /* the export's TaskWindow_Morio */
+        return 17;
+    case 5024: {
+        if (nulls && starts == proxy_starts + 2 && fake_cs - phase_cs < 1000)
+            return 0; /* (the proxy started again at the next watch) */
+        char a[4][300];
+        int na = child_args("proxy", a, 4);
+        CHECK(starts == proxy_starts + 3 && na == 3 && strstr(a[0], "big copy - three.mp4"),
+              "export and proxy: the proxy not made again after the export (%d started)", starts - proxy_starts);
+        next(5025);
+        memset(b, 0, 24);
+        b[0] = 20; b[1] = 0x794; b[2] = 99; b[4] = 0x808C3; /* (it ends, never having said who it was: given up) */
+        return 17;
+    }
+    case 5025:
+        if (nulls)
+            return 0;
         next(45);
         return key_to(b, TL, 0x18D);
     case 45: /* the desktop shutting down: asked, Discard; the shutdown started again; quit */

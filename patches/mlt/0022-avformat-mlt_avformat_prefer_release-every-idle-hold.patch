@@ -1,0 +1,59 @@
+From 8b759b883928f828f1f840758a472cf0d4e0bff6 Mon Sep 17 00:00:00 2001
+From: Andrew Youll <andrewyoull86@gmail.com>
+Date: Thu, 29 Oct 2026 22:16:30 +0000
+Subject: [PATCH 22/22] avformat: mlt_avformat_prefer_release, every idle
+ holder's decoder closed
+
+An application that hands the hardware to another program of its own (on
+RISC OS, an export or a proxy in a TaskWindow, whose encoder needs the
+VideoCore's memory too) closes the preferred decoders it isn't decoding
+with now. Each holder opens the default decoder at its next picture, as
+one handed over does, and may claim a place again.
+---
+ src/modules/avformat/producer_avformat.c | 30 ++++++++++++++++++++++++
+ 1 file changed, 30 insertions(+)
+
+diff --git a/src/modules/avformat/producer_avformat.c b/src/modules/avformat/producer_avformat.c
+index 52ce11c..1e378f9 100644
+--- a/src/modules/avformat/producer_avformat.c
++++ b/src/modules/avformat/producer_avformat.c
+@@ -3761,6 +3761,36 @@ int mlt_avformat_prefer_held(const char *name)
+     return n;
+ }
+ 
++/* Every holder of a preferred decoder not decoding now closes it, as an
++   idle one is handed over (it opens the default decoder at its next
++   picture, and may claim a place again): how many were closed. For an
++   application sharing the hardware with another program of its own (on
++   RISC OS, a proxy or an export in a TaskWindow, its encoder needing the
++   memory too). */
++int mlt_avformat_prefer_release(const char *name)
++{
++    int n = 0;
++    pthread_mutex_lock(&prefer_lock);
++    for (int i = 0; i < PREFER_HOLDERS; i++) {
++        producer_avformat h = prefer_holders[i].self;
++        if (!h || !name || strcmp(prefer_holders[i].name, name))
++            continue;
++        if (pthread_mutex_trylock(&h->video_mutex))
++            continue; // (decoding now: kept)
++        prefer_holders[i].self = NULL;
++        pthread_mutex_lock(&h->open_mutex);
++        h->prefer_active = 0;
++        avcodec_free_context(&h->video_codec);
++        pthread_mutex_unlock(&h->open_mutex);
++        h->prefer_pending = 1;
++        decode_again(h);
++        pthread_mutex_unlock(&h->video_mutex);
++        n++;
++    }
++    pthread_mutex_unlock(&prefer_lock);
++    return n;
++}
++
+ /* A picture is being decoded: the clock moves on, and a holder is in use. */
+ static void prefer_touch(producer_avformat self)
+ {
+-- 
+2.43.0
+

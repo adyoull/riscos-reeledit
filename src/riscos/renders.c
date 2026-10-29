@@ -98,11 +98,20 @@ static int can_hw(void)
     return !ro_swi(OS_SWINumberFromString, &r);
 }
 
-/* The next stretch without a preview started: 1, or 0 (none: done) */
+/* Another child running (children.c: one at a time): the next waits (rr_tick) */
+static int blocked(void)
+{
+    return app_child_others(TXT_ID) || ex_busy();
+}
+
+/* The next stretch without a preview started: 1, 2 (waiting: rr_tick
+   starts it), or 0 (none: done) */
 static int next(void)
 {
     char unix_proj[512], unix_out[512], cmd[1400];
     _kernel_swi_regs r;
+    if (blocked())
+        return 2;
     stretches();
     int i;
     for (i = 0; i < R.n; i++)
@@ -152,6 +161,10 @@ void rr_start(void)
         return;
     if (R.on)
         return;
+    if (ex_busy()) {
+        app_report("Previews can't be rendered while a video is being exported.");
+        return;
+    }
     R.on = 1;
     if (!next()) {
         R.on = 0;
@@ -225,11 +238,16 @@ static void heard(const char *line)
 
 int rr_watching(void)
 {
-    return R.running;
+    return R.running || R.on;
 }
 
 void rr_tick(void)
 {
+    if (R.on && !R.running && !blocked()) { /* (waiting for another child: it has ended) */
+        if (!next())
+            R.on = 0;
+        tl_refresh();
+    }
     if (!R.running || ro_now_cs() - R.heard_cs < STUCK_CS)
         return;
     app_log("render: frames %d-%d: nothing from it for %d s: stopped", R.job.start, R.job.start + R.job.length - 1,

@@ -28,6 +28,13 @@ typedef struct
    h264_vchiq, encoder h264_encvchiq, 250 frames in 9.5 s"), for the log */
 const char *re_export_report(void);
 
+/* MLT's and FFmpeg's messages printed (for the editor's log) and watched
+   by the export or proxy being made: an encoder failing stops the try,
+   and the next codec is tried (re_export_main sets this) */
+void re_export_watch_messages(void);
+/* One such line looked at: 1 once the encoder has failed */
+int re_export_watch(const char *line);
+
 /* The project file exported to out. progress (if given) is told each
    picture made of how many; stop (if given) is asked each picture, and
    non-zero stops it (the file is deleted). 0 done, 1 stopped, -1 failed

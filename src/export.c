@@ -23,6 +23,7 @@
 
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
+#include <libavutil/log.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,7 +40,68 @@ int re_export_bitrate(int width, int height, double fps, int quality)
     return k < 300000 ? 300000 : k > 20000000 ? 20000000 : k;
 }
 
+typedef struct
+{
+    mlt_producer producer;
+    int done, total, stopped;
+    void (*progress)(void *ctx, int done, int total);
+    int (*stop)(void *ctx);
+    void *ctx;
+} run;
+
 static char report[200];
+
+/* ---- the encoder watched: it failing stops the try at once ----
+
+   The VideoCore's encoder can fail to start ("Input enable: ENOSPC": its
+   memory taken by decoders and another program's encoder) or stop part
+   way ("No packet from the VideoCore in 5 s"). MLT's avformat consumer
+   then said "error with video encode" for every frame and went on to the
+   end, decoding the whole project for nothing and writing no video (an
+   export of 9979 frames ran for minutes before it was stopped), and a
+   proxy came out short but "made". Its messages (re_export_main gives
+   them to child_line) are watched: on the first such line the try is
+   stopped, and the next codec tried (libx264 on the ARM). */
+static struct
+{
+    run *r;           /* the try being made */
+    int failed;
+    char why[160];
+} W;
+
+int re_export_watch(const char *line)
+{
+    int bad = strstr(line, "error with video encode") || strstr(line, "error writing video frame")
+              || (strstr(line, "encvchiq")
+                  && (strstr(line, "ENOSPC") || strstr(line, "ENOMEM") || strstr(line, "No packet from the VideoCore")
+                      || strstr(line, "no memory left")));
+    if (bad && !W.failed) {
+        W.failed = 1;
+        const char *b = strrchr(line, ']');
+        snprintf(W.why, sizeof(W.why), "%s", b && b[1] ? b + 2 : !strncmp(line, "mlt: ", 5) ? line + 5 : line);
+        size_t n = strlen(W.why);
+        while (n && (W.why[n - 1] == '\n' || W.why[n - 1] == ' '))
+            W.why[--n] = 0;
+        if (W.r && W.r->producer)
+            mlt_producer_set_speed(W.r->producer, 0); /* (terminate_on_pause: the consumer ends) */
+    }
+    return W.failed;
+}
+
+/* A line of MLT's or FFmpeg's (engine.c's re_engine_messages): said, for
+   the editor's log, and watched */
+static void child_line(const char *line)
+{
+    printf("%s\n", line);
+    fflush(stdout);
+    re_export_watch(line);
+}
+
+void re_export_watch_messages(void)
+{
+    re_engine_messages(child_line);
+    re_engine_messages_most(MLT_LOG_WARNING, AV_LOG_WARNING); /* (warnings and errors: the log not filled with chat) */
+}
 
 const char *re_export_report(void)
 {
@@ -58,14 +120,6 @@ static mlt_frame fast_process(mlt_filter filter, mlt_frame frame)
     return frame;
 }
 
-typedef struct
-{
-    mlt_producer producer;
-    int done, total, stopped;
-    void (*progress)(void *ctx, int done, int total);
-    int (*stop)(void *ctx);
-    void *ctx;
-} run;
 
 static void on_show(mlt_properties owner, run *r, mlt_event_data data)
 {
@@ -285,10 +339,21 @@ static int export_open(re_project *p, const char *out, const re_export_settings 
     int made = -1, total = s->range ? s->out - s->in + 1 : len;
     const char *used = codecs[0];
     clock_t t0 = clock();
+    int failed = 0;
     for (int i = 0; i < n && !r.stopped; i++) {
         used = codecs[i];
         remove(out);
+        W.r = &r;
+        W.failed = 0;
         made = encode(p, out, s, used, &r);
+        W.r = NULL;
+        failed = W.failed;
+        if (failed) { /* (stopped at its first error: the next codec, from the start) */
+            printf("the encoder %s failed (%s)%s%s\n", used, W.why, i + 1 < n ? ": trying " : "",
+                   i + 1 < n ? codecs[i + 1] : "");
+            fflush(stdout);
+            continue;
+        }
         if (r.stopped || (made > 0 && size_of(out) > 0 && has_video(out)))
             break; /* (made: done, or stopped) */
     }
@@ -300,6 +365,11 @@ static int export_open(re_project *p, const char *out, const re_export_settings 
     if (r.stopped) {
         remove(out);
         return 1;
+    }
+    if (failed) {
+        snprintf(err, errsize, "the video encoder %s failed: %.100s", used, W.why);
+        remove(out);
+        return -1;
     }
     if (made < total || size_of(out) <= 0 || !has_video(out)) {
         snprintf(err, errsize, "the video couldn't be made (%s: %d of %d frames)", used, made < 0 ? 0 : made, total);
@@ -393,6 +463,7 @@ int re_export_main(int argc, char **argv)
         printf("failed: MLT couldn't start\n");
         return 2;
     }
+    re_export_watch_messages();
     char err[200];
     clock_t last = 0;
     printf("progress 0 0\n");

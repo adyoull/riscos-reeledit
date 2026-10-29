@@ -55,6 +55,7 @@ static struct
     unsigned serial;
     int apply;            /* the project to be made again (with them, or without) */
     unsigned heard_cs;    /* when it last said anything (or started): px_tick's watch */
+    int pausing;          /* stopped for an export (px_pause): its file made again after */
     int done, total;      /* its progress (frames) */
 } X;
 
@@ -139,11 +140,31 @@ int px_making(int *made, int *all)
     return X.running;
 }
 
-/* The next file wanting a proxy started: 1, or 0 (none) */
+/* Another child running (children.c: one at a time), or an export
+   waiting to start: the next waits (px_tick starts it) */
+static int blocked(void)
+{
+    return app_child_others(TXT_ID) || ex_busy();
+}
+
+/* Files waiting for theirs */
+static int waiting(void)
+{
+    for (int i = 0; i < X.n; i++)
+        if (X.f[i].state == UNKNOWN)
+            return 1;
+    return 0;
+}
+
+/* The next file wanting a proxy started: 1, or 0 (none, or waiting) */
 static int next(void)
 {
     char unix_out[512], cmd[1400];
     _kernel_swi_regs r;
+    if (blocked()) {
+        tl_title();
+        return 0;
+    }
     for (int i = 0; i < X.n; i++) {
         if (X.f[i].state != UNKNOWN)
             continue;
@@ -245,7 +266,12 @@ static void ended(void)
     X.running = 0;
     X.child = 0;
     app_child_ended(TXT_ID);
-    if (X.at >= 0 && X.at < X.n) {
+    if (X.at >= 0 && X.at < X.n && X.pausing) { /* (for an export: made again after it) */
+        X.pausing = 0;
+        X.f[X.at].state = UNKNOWN;
+        remove(uout);
+        app_log("proxy: %s: stopped while a video is exported; made after", X.f[X.at].file);
+    } else if (X.at >= 0 && X.at < X.n) {
         if (X.ok) {
             X.f[X.at].state = MADE;
             free(X.f[X.at].proxy);
@@ -290,6 +316,8 @@ static void heard(const char *line)
 
 void px_tick(void)
 {
+    if (!X.running && waiting() && !blocked()) /* (another child, or an export, has ended) */
+        next();
     if (!X.running || ro_now_cs() - X.heard_cs < STUCK_CS)
         return;
     app_log("proxy: %s: nothing from it for %d s: stopped", X.at >= 0 && X.at < X.n ? X.f[X.at].file : "?",
@@ -308,7 +336,20 @@ void px_tick(void)
 
 int px_watching(void)
 {
-    return X.running;
+    return X.running || waiting();
+}
+
+void px_pause(void)
+{
+    if (!X.running || X.pausing)
+        return;
+    X.pausing = 1;
+    if (X.child) { /* (its TaskWindow_Morio ends it: made again later) */
+        _kernel_swi_regs r;
+        int m[6] = {20, 0, 0, 0, MSG_TW_MORITE, 0};
+        r.r[0] = 17; r.r[1] = (intptr_t) m; r.r[2] = X.child;
+        ro_swi(Wimp_SendMessage, &r);
+    } /* (else when it says who it is: px_message) */
 }
 
 int px_progress(void)
@@ -321,6 +362,10 @@ int px_message(int *b)
     if (b[4] == MSG_TW_EGO && X.running && b[5] == TXT_ID) {
         X.child = b[1];
         X.heard_cs = ro_now_cs();
+        if (X.pausing) { /* (paused before it said who it was) */
+            X.pausing = 0;
+            px_pause();
+        }
         return 1;
     }
     if (b[4] == MSG_TW_OUTPUT && X.running && b[1] == X.child) {

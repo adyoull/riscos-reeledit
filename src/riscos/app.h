@@ -281,9 +281,11 @@ void rr_close(void);   /* the editor closed: stopped, the files deleted */
 _kernel_oserror *app_child_start(const char *mode, const char *const *args, int n, const char *name, unsigned txt,
                                  int decoders, char *cmd, int size);
 void app_child_ended(unsigned txt);
+int app_child_others(unsigned txt); /* other children running now (only one runs at a time) */
 
 void px_edited(void);  /* the project changed: files wanting proxies found, made one after another */
 int px_message(int *block); /* 1: it was a proxy's (TaskWindow's) */
+void px_pause(void);   /* the one being made stopped (for an export), made again after */
 int px_pending(void);  /* the project to be made again (proxies made, or turned on or off) */
 void px_applied(void); /* (viewer.c: done) */
 int px_on(void);       /* View > Use proxies */
@@ -303,6 +305,8 @@ void rr_wipe(void);    /* (renders.c) previews left by a session that stopped, d
 /* ---- exportbox.c: the Export window ---- */
 int ex_window(void);
 int ex_running(void);          /* an export is being made */
+int ex_busy(void);             /* one being made, or waiting for a proxy or render to stop first */
+void ex_tick(void);            /* (the one waiting started, once they have) */
 void ex_open(void);            /* File > Export... */
 void ex_click(int *block);
 void ex_key(int *block);

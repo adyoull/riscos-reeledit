@@ -61,7 +61,15 @@ static struct
     char line[256];       /* output not yet ended by a newline */
     int line_len, result; /* 0 running, 1 done, -1 failed */
     int done, total;
+    /* waiting for a proxy or a render to stop first (children.c: one at a time) */
+    int waiting, wait_safe;
+    char wait_path[256];
 } X = {0};
+
+int ex_busy(void)
+{
+    return X.running || X.waiting;
+}
 
 int ex_window(void)
 {
@@ -90,7 +98,7 @@ static void show(void)
 {
     snprintf(X.shown[M_SIZE], 24, "%s", SIZE_NAMES[X.size]);
     snprintf(X.shown[M_QUALITY], 24, "%s", QUALITY_NAMES[X.quality]);
-    snprintf(X.go, sizeof(X.go), "%s", X.running ? "Stop" : "Export");
+    snprintf(X.go, sizeof(X.go), "%s", ex_busy() ? "Stop" : "Export");
     redraw_icons();
     if (X.win) { /* the option's tick, and shaded without VCHIQ */
         _kernel_swi_regs r;
@@ -235,6 +243,17 @@ static int start(const char *path, int safe)
     }
     if (X.running || !A.proj)
         return -1;
+    if (app_child_others(TXT_ID)) { /* (a proxy or render using the VideoCore: stopped first, ex_tick) */
+        snprintf(X.wait_path, sizeof(X.wait_path), "%s", path);
+        X.wait_safe = safe;
+        X.waiting = 1;
+        px_pause();
+        rr_stop();
+        app_log("export to %s: waiting for a proxy or a preview to stop", path);
+        say("Waiting for a proxy or preview being made to stop...", NULL);
+        show();
+        return 0;
+    }
     snprintf(proj, sizeof(proj), "<Wimp$ScrapDir>.ReelEdExp");
     const char *uproj = app_mlt_name(proj, unix_proj, sizeof(unix_proj));
     if (re_project_save_copy(A.proj, uproj)) {
@@ -248,7 +267,7 @@ static int start(const char *path, int safe)
     snprintf(nums[1], 16, "%d", X.quality);
     snprintf(nums[2], 16, "%d", X.hw && X.can_hw);
     const char *args[5] = {uproj, uout, nums[0], nums[1], nums[2]};
-    _kernel_oserror *e = app_child_start("export", args, 5, "ReelEdit export", TXT_ID, 3, cmd, sizeof(cmd));
+    _kernel_oserror *e = app_child_start("export", args, 5, "ReelEdit export", TXT_ID, 2, cmd, sizeof(cmd));
     app_log("export to %s: %s%s%s", path, cmd, e ? ": " : "", e ? e->errmess : "");
     if (e) {
         app_report("The export couldn't be started (TaskWindow).");
@@ -263,15 +282,43 @@ static int start(const char *path, int safe)
     return 0;
 }
 
+#ifdef RE_TEST
+int re_test_export_start(const char *path) /* (as dragged to a directory) */
+{
+    return start(path, 1);
+}
+
+int re_test_export_waiting(void)
+{
+    return X.waiting;
+}
+#endif
+
 static int dragged(const char *path, int safe)
 {
     return start(path, safe);
+}
+
+void ex_tick(void)
+{
+    if (X.waiting && !app_child_others(TXT_ID)) {
+        X.waiting = 0;
+        if (start(X.wait_path, X.wait_safe))
+            say("", NULL);
+        show();
+    }
 }
 
 static void stop(void)
 {
     _kernel_swi_regs r;
     int m[6];
+    if (X.waiting) { /* (not started yet) */
+        X.waiting = 0;
+        say("Stopped.", NULL);
+        show();
+        return;
+    }
     if (!X.running)
         return;
     if (X.child) {
@@ -288,7 +335,7 @@ void ex_click(int *b)
 {
     _kernel_swi_regs r;
     if (b[4] == I_GO && (b[2] & 5)) {
-        if (X.running) {
+        if (ex_busy()) {
             stop();
         } else if (!strchr(X.name, '.') && !strchr(X.name, ':')) {
             app_report("To export, drag the icon to a directory display (or type the full name).");

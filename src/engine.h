@@ -32,6 +32,8 @@ int re_mlt_start(void);
    instead of stderr: the hardware decoders say there when they wait or
    give up. NULL: dropped (and MLT and FFmpeg told to say little). */
 void re_engine_messages(void (*line)(const char *line));
+/* The least important of MLT's and FFmpeg's messages given to it (as standard MLT_LOG_INFO, AV_LOG_VERBOSE) */
+void re_engine_messages_most(int mlt_level, int av_level);
 
 /* A picture to show: yuv420p, three planes. Valid only during show(). */
 typedef struct

@@ -182,10 +182,18 @@ static void msg_text(const char *s)
     }
 }
 
+static int msg_mlt_most = MLT_LOG_INFO, msg_av_most = AV_LOG_VERBOSE; /* (the least important said) */
+
+void re_engine_messages_most(int mlt_level, int av_level)
+{
+    msg_mlt_most = mlt_level;
+    msg_av_most = av_level;
+}
+
 static void msg_from_mlt(void *service, int level, const char *fmt, va_list ap)
 {
     (void) service;
-    if (level > MLT_LOG_INFO || !msg_line) /* (MLT's verbose is chatty: its level is for FFmpeg's sake) */
+    if (level > msg_mlt_most || !msg_line) /* (MLT's verbose is chatty: its level is for FFmpeg's sake) */
         return;
     char t[512];
     int n = snprintf(t, sizeof(t), "mlt: ");
@@ -195,7 +203,7 @@ static void msg_from_mlt(void *service, int level, const char *fmt, va_list ap)
 
 static void msg_from_ffmpeg(void *avcl, int level, const char *fmt, va_list ap)
 {
-    if (level > AV_LOG_VERBOSE || !msg_line) /* (the VideoCore's decoder says what it does at verbose) */
+    if (level > msg_av_most || !msg_line) /* (the VideoCore's decoder says what it does at verbose) */
         return;
     char t[512];
     int prefix = 1;

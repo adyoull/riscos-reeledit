@@ -8,16 +8,23 @@
  * which split it into several arguments there, and the child failed or
  * waited forever.
  *
- * The VideoCore's decoders are shared with it. MLT counts the hardware
- * decoders open only in its own program (patches/mlt 0004: three
- * h264_vchiq, one hevc_hwdec), so the editor holding three and a proxy
- * opening one more made four, which can stop the VideoCore answering. A
- * child is given what's free, up to what it wants (a proxy one, a render
- * two, an export three), as its first argument ("-decoders h264_vchiq=N,
- * hevc_hwdec=M": re_export_main sets it as its limit, 0020); the editor's
- * own limit is what's left (0020's mlt_avformat_prefer_limit) until the
- * child ends (app_child_ended). The editor's open ones aren't closed: it
- * keeps what it has.
+ * The VideoCore is shared with it. MLT counts the hardware decoders open
+ * only in its own program (patches/mlt 0004), and every child also has
+ * the VideoCore's encoder open: with the editor holding two decoders, a
+ * proxy's decoder and its encoder stalled ("No packet from the VideoCore
+ * in 5 s"), and an export started then got none ("Input enable: ENOSPC").
+ * So, while a child runs:
+ *   - the editor's idle hardware decoders are closed when it starts (0022:
+ *     it opens them again, within its limit, when it next plays);
+ *   - all the programs together have at most two h264_vchiq (three with
+ *     no encoder, 0004), leaving the encoder room;
+ *   - a child is given what's free, up to what it wants (a proxy one, a
+ *     render or an export two), as its first argument ("-decoders
+ *     h264_vchiq=N,hevc_hwdec=M": re_export_main sets it as its limit,
+ *     0020), and the editor's own limit is what's left until it ends
+ *     (app_child_ended);
+ *   - only one runs at a time: proxies and renders wait for any other
+ *     (app_child_others), and an export pauses them and waits.
  *
  * Part of riscos-reeledit. GPL version 2 or later.
  */
@@ -31,7 +38,8 @@
 /* (patches/mlt 0020; the build's MLT_AVFORMAT_PREFER_MAX_DEFAULT) */
 extern int mlt_avformat_prefer_held(const char *name);
 extern void mlt_avformat_prefer_limit(const char *spec);
-#define H264_MAX 3
+extern int mlt_avformat_prefer_release(const char *name); /* (0022) */
+#define H264_MAX 2 /* (with a child's encoder: the build's three is without one) */
 #define HEVC_MAX 1
 
 #define CHILDREN 4
@@ -65,6 +73,14 @@ const char *re_test_own_decoders(void) /* (the editor's own limit now: "" none) 
 }
 #endif
 
+int app_child_others(unsigned txt)
+{
+    int n = 0;
+    for (int i = 0; i < CHILDREN; i++)
+        n += given[i].txt && given[i].txt != txt;
+    return n;
+}
+
 void app_child_ended(unsigned txt)
 {
     for (int i = 0; i < CHILDREN; i++)
@@ -78,6 +94,9 @@ void app_child_ended(unsigned txt)
 static int give(unsigned txt, int want, char *spec, int size)
 {
     app_child_ended(txt); /* (one a kind: an old one's given back) */
+    int closed = mlt_avformat_prefer_release("h264_vchiq") + mlt_avformat_prefer_release("hevc_hwdec");
+    if (closed)
+        app_log("the VideoCore: %d of the editor's decoders closed, for a child", closed);
     int h = mlt_avformat_prefer_held("h264_vchiq"), e = mlt_avformat_prefer_held("hevc_hwdec"), slot = -1;
     for (int i = 0; i < CHILDREN; i++)
         if (given[i].txt) {

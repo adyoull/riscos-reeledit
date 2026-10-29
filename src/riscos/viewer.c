@@ -2145,6 +2145,7 @@ int reeledit_main(int argc, char **argv)
                        || pv_busy(); /* (thumbnails and waveforms to make) */
         px_tick(); /* (a proxy or render that has said nothing for long: stopped) */
         rr_tick();
+        ex_tick(); /* (an export waiting for them to stop: started) */
         unsigned before = ro_now_cs();
         r.r[0] = busy ? 0 : 1;
         r.r[1] = (intptr_t) block;
@@ -2152,7 +2153,7 @@ int reeledit_main(int argc, char **argv)
             r.r[2] = (int) (V.poll_cs + V.idle_cs);
             if (ro_swi(Wimp_PollIdle, &r))
                 break;
-        } else if (!busy && (px_watching() || rr_watching())) { /* (a null event every 2 s to watch them) */
+        } else if (!busy && (px_watching() || rr_watching() || ex_busy())) { /* (a null event every 2 s to watch them) */
             r.r[0] = 0;
             r.r[2] = (int) (ro_now_cs() + 200);
             if (ro_swi(Wimp_PollIdle, &r))

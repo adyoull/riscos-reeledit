@@ -15,6 +15,7 @@
  */
 #include "engine.h"
 #include "export.h"
+#include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include "project.h"
 #include "scale.h"
@@ -2822,6 +2823,59 @@ static void latin1(const char *a, const char *out)
     remove(name);
 }
 
+/* ---- an encoder failing: the try stopped at once (the VideoCore's
+   encoder, out of memory, failed for every frame of a 9979-frame export,
+   which went on to the end) ---- */
+static int fail_send_after = -1, sends;
+int __real_avcodec_send_frame(AVCodecContext *c, const AVFrame *f);
+int __wrap_avcodec_send_frame(AVCodecContext *c, const AVFrame *f)
+{
+    /* (every other frame from then on: MLT's own stop, after three errors in a row, never comes, as on the Pi) */
+    if (fail_send_after >= 0 && f && sends++ >= fail_send_after && (sends & 1))
+        return AVERROR(EINVAL);
+    return __real_avcodec_send_frame(c, f);
+}
+static int shown_frames;
+static void count_shown(void *ctx, int done, int total)
+{
+    (void) ctx;
+    (void) total;
+    shown_frames = done;
+}
+static void encoder_fails(const char *a, const char *out)
+{
+    /* the lines that mean it, and not a decoder's */
+    CHECK(!re_export_watch("[h264_vchiq @ 0x6e8] Output enable: ENOMEM")
+              && !re_export_watch("[swscaler @ 0x6e9] No accelerated colorspace conversion found")
+              && re_export_watch("[h264_encvchiq @ 0x831a2480] Input enable: ENOSPC"),
+          "encoder: the lines watched for");
+    re_project *p = re_project_new();
+    re_project_add(p, a, -1);
+    re_project_add(p, a, -1);
+    int len = re_project_length(p);
+    re_project_save(p, "enc-fail.mlt");
+    re_project_close(p);
+    re_export_settings es = {90, RE_EXPORT_NORMAL, 0, "mpeg4"};
+    char err[200];
+    re_export_watch_messages();
+    fail_send_after = 3;
+    sends = 0;
+    shown_frames = 0;
+    int r = re_export("enc-fail.mlt", out, &es, count_shown, NULL, NULL, err, sizeof(err));
+    fail_send_after = -1;
+    re_engine_messages(NULL);
+    re_engine_messages_most(MLT_LOG_INFO, AV_LOG_VERBOSE);
+    FILE *left = fopen(out, "rb");
+    CHECK(r < 0 && strstr(err, "the video encoder mpeg4 failed") && shown_frames < 20 && !left,
+          "encoder: failing from frame 3 of %d: %d, \"%s\", stopped after %d frames, file left %d", len, r, err,
+          shown_frames, left != NULL);
+    if (left)
+        fclose(left);
+    /* (and the next try is a fresh one: it works) */
+    CHECK(re_export("enc-fail.mlt", out, &es, NULL, NULL, NULL, err, sizeof(err)) == 0, "encoder: afterwards: %s", err);
+    remove("enc-fail.mlt");
+}
+
 static void proxies(const char *numbered_rel, const char *big_rel, const char *m2v, const char *pic, const char *out)
 {
     char numbered[PATH_MAX], big[PATH_MAX]; /* (as the desktop names them: whole) */
@@ -3559,6 +3613,7 @@ int main(int argc, char **argv)
     render_previews(a, b, n, argv[12], out);
     proxies(n, argv[7], argv[5], argv[12], out);
     latin1(a, out);
+    encoder_fails(a, out);
     overlays(a, b, argv[9], out, argv[10], argv[11], argv[12]);
     video_overlays(a, b, argv[9], n, argv[5], out);
     char dir[512];

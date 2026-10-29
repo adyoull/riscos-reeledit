@@ -82,7 +82,7 @@ $CC $CFLAGS -DRE_TEST -I"$HERE/fake" -I"$TOP/src" "$TOP/src/engine.c" "$TOP/src/
   "$TOP/src/riscos/timeline.c" "$TOP/src/riscos/savebox.c" "$TOP/src/riscos/info.c" "$TOP/src/riscos/effects.c" "$TOP/src/riscos/marks.c" "$TOP/src/riscos/overlays.c" "$TOP/src/riscos/titles.c" "$TOP/src/riscos/exportbox.c" "$TOP/src/riscos/audiotracks.c" "$TOP/src/riscos/autosave.c" "$TOP/src/riscos/clips.c" "$TOP/src/riscos/previews.c" "$TOP/src/riscos/copypaste.c" "$TOP/src/riscos/renders.c" "$TOP/src/riscos/proxies.c" "$TOP/src/riscos/children.c" "$TOP/src/riscos/logging.c" "$TOP/src/riscos/guide.c" "$TOP/src/riscos/inspector.c" "$TOP/src/riscos/display.c" \
   "$TOP/src/riscos/sound.c" "$HERE/editor_test.c" -o "$O/editor_test" $MLTLIBS $FFLIBS -lpthread -lm || bad=1
 $CC $CFLAGS -I"$TOP/src" "$TOP/src/engine.c" "$TOP/src/project.c" "$TOP/src/dissolve.c" "$TOP/src/fade.c" "$TOP/src/clipsound.c" "$TOP/src/overlay.c" "$TOP/src/track.c" "$TOP/src/audio.c" "$TOP/src/source.c" "$TOP/src/clipboard.c" "$TOP/src/speed.c" "$TOP/src/colour.c" "$TOP/src/soundfx.c" "$TOP/src/motion.c" "$TOP/src/freeze.c" "$TOP/src/wipe.c" "$TOP/src/effect.c" "$TOP/src/key.c" "$TOP/src/loudness.c" "$TOP/src/render.c" "$TOP/src/proxy.c" "$TOP/src/still.c" "$TOP/src/affine.c" "$TOP/src/scale.c" "$TOP/src/chroma.c" "$TOP/src/looks.c" "$TOP/src/lut.c" "$TOP/src/neon.c" "$TOP/src/hold.c" "$TOP/src/title.c" "$TOP/src/export.c" "$TOP/src/sprites.c" "$TOP/src/measure.c" "$TOP/src/media.c" "$HERE/project_test.c" -o "$O/project_test" \
-  -Wl,--wrap=mlt_fast_scale_plane $MLTLIBS $FFLIBS -lpthread -lm || bad=1
+  -Wl,--wrap=mlt_fast_scale_plane,--wrap=avcodec_send_frame $MLTLIBS $FFLIBS -lpthread -lm || bad=1
 $CC -shared -fPIC "$HERE/count_threads.c" -o "$O/count_threads.so" -ldl || bad=1
 
 # ---- melt: make and save the project, then render it with no threads
@@ -127,7 +127,7 @@ if [ -n "${SCREENS:-}" ]; then
   python3 "$HERE/screens.py" "$SCREENS" > /dev/null || fail "screens.py couldn't draw the screenshots"
   rm -f "$SCREENS"/*.txt "$SCREENS"/*.raw "$SCREENS"/*.yuv
 fi
-for m in normal refuse late off lazy max max3 share exit; do
+for m in normal refuse late off lazy max max3 share release exit; do
   echo "== prefer_test $m"
   "$O/prefer_test" $m numbered.mp4 2>&1 | grep -v "^\[" || bad=1
 done
