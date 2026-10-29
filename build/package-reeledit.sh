@@ -27,6 +27,7 @@ for f in FFmpeg GPLv2 LGPLv21 x264 ReelHWAccel LAME Vorbis Ogg Opus dav1d PThrea
 done
 cp "$OUT/riscos/src/mlt-7.42.0/COPYING" "$LC/MLT,fff"
 cp "$OUT/riscos/src/libxml2/Copyright" "$LC/libxml2,fff"
+cp "$OUT/riscos/src/mlt-7.42.0/src/modules/plus/ebur128/COPYING" "$LC/libebur128,fff"
 cp "$OUT/riscos/src/mesa-devkit-$MESA_DEVKIT_VERSION/LICENCES.txt" "$LC/Toolchain,fff"
 python3 "$RCD_DIR/package/rozip.py" "$OUT/ReelEdit-$RE_VERSION.zip" -C "$P" '!ReelEdit'
 STRS=$(strings -a "$A/!RunImage,ff8")

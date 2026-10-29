@@ -1066,6 +1066,10 @@ static void motion(const char *a, const char *ramp, const char *out)
     re_project_item(p, 1, &it);
     int s = it.start, n = it.length;
     re_engine *e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    mlt_filter ours = mlt_factory_filter(re_project_profile(p), "affine", NULL);
+    CHECK(ours && mlt_properties_get_int(MLT_FILTER_PROPERTIES(ours), "_reeledit_affine"),
+          "motion: affine is the plus module's, not ours");
+    mlt_filter_close(ours);
     int l0 = luma_xy(e, s + 2, 2, 90), m0 = luma_xy(e, s + 2, 160, 90);
     CHECK(it.picture && !it.moving && abs(l0 - ramp_y(2)) <= 3 && abs(m0 - ramp_y(160)) <= 3,
           "motion: the picture as it is: %d at the left, %d in the middle (picture %d)", l0, m0, it.picture);
@@ -1220,6 +1224,150 @@ static void freezes(const char *numbered, const char *pic, const char *out)
     p = re_project_new();
     re_project_add(p, pic, -1);
     CHECK(re_project_freeze(p, 5, 0) == -1, "freeze: a picture");
+    re_project_close(p);
+}
+
+static int chan_peak(re_project *p, int frame, int which);
+
+/* ---- the plus module's: effects, green screen, the loudness evened out, a countdown */
+static void extras(const char *a, const char *b, const char *green, const char *quiet, const char *out)
+{
+    re_engine_io io = {show, NULL, clk, NULL, 48000, 2, NULL};
+    re_project *p = re_project_new();
+    re_project_add(p, a, -1);
+    re_project_add(p, b, -1);
+    re_engine *e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    int y0 = luma_xy(e, 10, 160, 90);
+    CHECK(re_project_effect(p, 0) == 0 && re_project_effect(p, 9) == -1, "effect: none at first");
+    CHECK(re_project_set_effect(p, 0, 1) == 1 && re_project_set_effect(p, 0, 1) == 0, "effect: negative (once)");
+    re_engine_refresh(e);
+    int neg = luma_xy(e, 10, 160, 90), other = luma_xy(e, 100, 160, 90);
+    re_item it;
+    re_project_item(p, 0, &it);
+    CHECK(abs(neg - (251 - y0)) <= 8 && it.effect == 1 && other < 60, "effect: negative: %d (was %d); the next clip %d", neg,
+          y0, other);
+    /* (through a dissolve: the clip before still negative there) */
+    int dm = re_project_dissolve(p, 0, 10, 1);
+    re_item di;
+    re_project_item(p, dm, &di);
+    re_engine_refresh(e);
+    int in_mix = luma_xy(e, di.start + di.length / 2, 160, 90);
+    CHECK(dm > 0 && abs(in_mix - (neg + other) / 2) <= 10, "effect: through a dissolve: %d (want about %d)", in_mix,
+          (neg + other) / 2);
+    re_project_undo(p);
+    re_engine_close(e);
+    e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    re_project_set_effect(p, 0, 3);
+    re_engine_refresh(e);
+    int post = luma_xy(e, 10, 160, 90);
+    CHECK(post <= 24 || post >= 228, "effect: posterised: %d", post);
+    re_project_set_effect(p, 0, 2);
+    re_engine_refresh(e);
+    int sketch = luma_xy(e, 10, 160, 90);
+    CHECK(abs(sketch - y0) > 40, "effect: a sketch: %d (was %d)", sketch, y0);
+    re_project_split(p, 20);
+    CHECK(re_project_effect(p, 1) == 2, "effect: split: the second part's %d", re_project_effect(p, 1));
+    re_project_undo(p);
+    CHECK(re_project_speed(p, 0, 50) == 1 && re_project_effect(p, 0) == 2, "effect: kept through a speed change");
+    CHECK(!re_project_save(p, out) && count(out, "charcoal") >= 1, "effect: saved");
+    /* green screen: a green video with a white box, over the whole frame */
+    int ov = re_project_overlay_add(p, green, 0, 50);
+    re_project_overlay_set(p, ov, RE_PLACE_FULL, -1, -1);
+    re_engine_close(e);
+    re_project_set_effect(p, 0, 0);
+    re_project_set_effect(p, 1, 1); /* (not under the overlay) */
+    e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    y0 = luma_xy(e, 10, 10, 10);
+    int box = luma_xy(e, 10, 160, 90);
+    re_key k;
+    CHECK(ov == 0 && !re_project_overlay_key(p, 0, &k) && k.kind == 0 && y0 > 120, "key: none at first: %d (green)", y0);
+    k.kind = 1;
+    k.tolerance = RE_KEY_TOLERANCE;
+    CHECK(re_project_overlay_set_key(p, 0, &k) == 1 && re_project_overlay_set_key(p, 0, &k) == 0, "key: green (once)");
+    re_engine_refresh(e);
+    int keyed = luma_xy(e, 10, 10, 10), box1 = luma_xy(e, 10, 160, 90);
+    int red = 81; /* (a.mp4's) */
+    CHECK(abs(keyed - red) <= 8 && abs(box1 - box) <= 4 && box > 200, "key: green keyed: %d at the corner (V1's %d), %d in the box",
+          keyed, red, box1);
+    k.tolerance = 40;
+    re_project_overlay_set_key(p, 0, &k);
+    re_project_overlay_key(p, 0, &k);
+    CHECK(k.kind == 1 && k.tolerance == 40, "key: tolerance 40: %d", k.tolerance);
+    k.kind = 2;
+    k.tolerance = RE_KEY_TOLERANCE;
+    re_project_overlay_set_key(p, 0, &k);
+    re_engine_refresh(e);
+    int blue = luma_xy(e, 10, 10, 10);
+    CHECK(abs(blue - y0) <= 4, "key: blue: the green stays: %d", blue);
+    k.kind = 1;
+    re_project_overlay_set_key(p, 0, &k);
+    re_copy *cp = re_project_copy(p, RE_COPY_OVERLAY, 0, 0);
+    re_project_overlay_remove(p, 0);
+    int at = 0;
+    re_project_paste(p, cp, 10, &at);
+    re_copy_free(cp);
+    CHECK(!re_project_overlay_key(p, 0, &k) && k.kind == 1, "key: pasted: %d", k.kind);
+    CHECK(!re_project_save(p, out) && count(out, "chroma") >= 1, "key: saved");
+    re_engine_close(e);
+    re_project_close(p);
+    p = re_project_open(out, 1);
+    CHECK(p && !re_project_overlay_key(p, 0, &k) && k.kind == 1 && k.tolerance == RE_KEY_TOLERANCE && re_project_effect(p, 1) == 1,
+          "key: opened: %d %d; effect %d", k.kind, k.tolerance, re_project_effect(p, 1));
+    re_project_close(p);
+    /* the loudness: a quiet sound, 8 seconds of it, turned up towards -14 LUFS as it plays */
+    p = re_project_new();
+    for (int i = 0; i < 3; i++)
+        re_project_add(p, a, -1);
+    for (int i = 0; i < 4; i++) {
+        int tk = 0, ix = 0;
+        re_project_audio_add(p, quiet, i * 50, 0, &tk, &ix);
+    }
+    CHECK(re_project_loudness(p) == 0 && re_project_set_loudness(p, 3) == 0, "loudness: off at first");
+    int before = 0, after = 0;
+    for (int f = 0; f < 200; f++) { /* (frame by frame, as it plays) */
+        int pk = chan_peak(p, f, 0);
+        if (f < 10 && pk > before) before = pk;
+        if (f > 180 && pk > after) after = pk;
+    }
+    CHECK(before > 50 && abs(after - before) < before / 10, "loudness: off: %d, then %d", before, after);
+    CHECK(re_project_set_loudness(p, RE_LOUDNESS_WEB) == 1 && re_project_set_loudness(p, RE_LOUDNESS_WEB) == 0
+              && re_project_loudness(p) == RE_LOUDNESS_WEB, "loudness: on (once)");
+    int b1 = 0, a1 = 0;
+    for (int f = 0; f < 200; f++) {
+        int pk = chan_peak(p, f, 0);
+        if (f < 10 && pk > b1) b1 = pk;
+        if (f > 180 && pk > a1) a1 = pk;
+    }
+    /* (a sound much too quiet: turned up as far as it goes, 15 dB, from the start: MLT's filter starts at its first
+       measurement) */
+    CHECK(a1 > before * 4 && a1 < before * 7 && b1 > before * 4, "loudness: turned up: %d at first, %d after 7 seconds (%d as it is)",
+          b1, a1, before);
+    CHECK(!re_project_save(p, out) && count(out, "dynamic_loudness") == 1, "loudness: saved");
+    re_project_undo(p);
+    CHECK(re_project_loudness(p) == 0, "loudness: undone");
+    re_project_close(p);
+    p = re_project_open(out, 1);
+    CHECK(p && re_project_loudness(p) == RE_LOUDNESS_WEB, "loudness: opened: %d", p ? re_project_loudness(p) : 9);
+    re_project_close(p);
+    /* a countdown before the film */
+    p = re_project_new();
+    re_project_add(p, a, -1);
+    CHECK(re_project_add_countdown(p, 0, 5) == 0, "countdown: not put in");
+    re_project_item(p, 0, &it);
+    CHECK(it.countdown && it.length == 125 && !strcmp(it.name, "Countdown") && !re_project_item_file(p, 0)
+              && re_project_speed(p, 0, 200) == 0, "countdown: %d, %d long, %s", it.countdown, it.length, it.name);
+    e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    int mid = luma_xy(e, 10, 160, 90), corner = luma_xy(e, 10, 5, 5), later = luma_xy(e, 112, 160, 90);
+    int beep = 0, quietest = 99999;
+    for (int f = 0; f < 125; f++) {
+        int pk = chan_peak(p, f, 0);
+        beep = pk > beep ? pk : beep;
+        quietest = pk < quietest ? pk : quietest;
+    }
+    CHECK(mid >= 0 && corner >= 0 && (mid != corner || mid != later) && beep > 1000 && quietest < 100,
+          "countdown: shown: %d in the middle, %d in the corner, %d later; its beep %d, quiet %d", mid, corner, later, beep,
+          quietest);
+    re_engine_close(e);
     re_project_close(p);
 }
 
@@ -2331,9 +2479,9 @@ static void media(const char *numbered, const char *snd, const char *pic, const 
 
 int main(int argc, char **argv)
 {
-    if (argc != 14) {
+    if (argc != 16) {
         fprintf(stderr, "usage: project_test a.mp4 b.mp4 numbered.mp4 out.mlt numbered.m2v four3-709.mp4 big.mp4 "
-                        "wide-dvd.mp4 numbered-snd.mp4 full.png logo.png pic.jpg ramp.png\n");
+                        "wide-dvd.mp4 numbered-snd.mp4 full.png logo.png pic.jpg ramp.png green.mp4 quiet.wav\n");
         return 2;
     }
     const char *a = argv[1], *b = argv[2], *n = argv[3], *out = argv[4];
@@ -2589,6 +2737,7 @@ int main(int argc, char **argv)
     motion(a, argv[13], out);
     freezes(n, argv[12], out);
     wipes(a, b, out);
+    extras(a, b, argv[14], argv[15], out);
     export(a, argv[9], out, "export-test.mp4");
     audio_tracks(a, argv[9], argv[11], out);
     source_editing(a, b, n, out);

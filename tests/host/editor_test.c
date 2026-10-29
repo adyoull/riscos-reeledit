@@ -1716,8 +1716,24 @@ static int script(int *b, int mask)
         re_project_colour(re_test_project(), 1, &c);
         re_colour_look(2, &warm);
         CHECK(!memcmp(&c, &warm, sizeof(c)), "Inspector: Look > Warm: warmth %d", c.warmth);
+        mark = menus;
+        next(4070);
+        return in_row(b, 7, 300, 0x400); /* Effect: its menu */
+    }
+    case 4070:
+        CHECK(menus == mark + 1, "Inspector: Effect gave no menu");
+        next(4071);
+        b[0] = 1; b[1] = -1; /* Negative */
+        return 9;
+    case 4071: {
+        if (nulls)
+            return 0;
+        CHECK(re_project_effect(re_test_project(), 1) == 1, "Inspector: Effect > Negative: %d",
+              re_project_effect(re_test_project(), 1));
+        re_project_set_effect(re_test_project(), 1, 0); /* (as it was) */
+        app_edited();
         next(4008);
-        return in_row(b, 7, 300, 0x400); /* Reset the colour */
+        return in_row(b, 8, 300, 0x400); /* Reset the colour */
     }
     case 4008: {
         if (nulls)
@@ -1807,7 +1823,7 @@ static int script(int *b, int mask)
             return 0;
         }
         next(4018);
-        b[0] = 1; b[1] = 20; b[2] = -1; /* Edit > Normalise all the sound */
+        b[0] = 1; b[1] = 21; b[2] = -1; /* Edit > Normalise all the sound */
         return 9;
     }
     case 4018: {
@@ -1940,6 +1956,53 @@ static int script(int *b, int mask)
         if (nulls)
             return 0;
         CHECK(!strcmp(layout(), "c30 c75"), "the colour clip undone: %s", layout());
+        next(4060);
+        return key_to(b, TL, 0x1A); /* ^Z: nothing selected, the project's page */
+    /* ---- the project's Loudness; Edit > Countdown at the playhead ---- */
+    case 4060:
+        if (nulls)
+            return 0;
+        mark = menus;
+        next(4061);
+        return in_row(b, 1, 300, 0x400); /* Loudness: its menu */
+    case 4061:
+        CHECK(menus == mark + 1 && re_test_selected() < 0, "Inspector: Loudness gave no menu");
+        next(4062);
+        b[0] = 1; b[1] = -1; /* for the web */
+        return 9;
+    case 4062:
+        if (nulls)
+            return 0;
+        CHECK(re_project_loudness(re_test_project()) == RE_LOUDNESS_WEB, "Inspector: Loudness for the web: %d",
+              re_project_loudness(re_test_project()));
+        shot("41-loudness");
+        next(4063);
+        return key_to(b, TL, 0x188); /* F8 */
+    case 4063:
+        if (nulls)
+            return 0;
+        CHECK(re_project_loudness(re_test_project()) == 0, "the loudness undone");
+        next(4064);
+        b[0] = W[0].box[0] + 200; b[1] = W[0].box[3] - 100; b[2] = 2; b[3] = VIEWER; b[4] = -1; /* Menu */
+        return 6;
+    case 4064:
+        next(4065);
+        b[0] = 1; b[1] = 20; b[2] = -1; /* Edit > Countdown at the playhead */
+        return 9;
+    case 4065: {
+        if (nulls)
+            return 0;
+        re_item it;
+        re_project_item(re_test_project(), 2, &it);
+        CHECK(!strcmp(layout(), "c30 c10 c125 c65") && it.countdown && re_test_selected() == 2,
+              "Edit > Countdown: %s, countdown %d, sel %d", layout(), it.countdown, re_test_selected());
+        next(4066);
+        return key_to(b, TL, 0x188);
+    }
+    case 4066:
+        if (nulls)
+            return 0;
+        CHECK(!strcmp(layout(), "c30 c75"), "the countdown undone: %s", layout());
         next(144);
         return click_tl(b, 15, 0, 2);
     case 144:
@@ -2250,8 +2313,32 @@ static int script(int *b, int mask)
         if (nulls)
             return 0;
         CHECK(re_test_overlay_selected() == 0, "overlays: a click on it selected %d", re_test_overlay_selected());
+        mark = menus;
+        next(4080);
+        return in_row(b, 4, 300, 0x400); /* the Inspector: Green screen, its menu */
+    case 4080:
+        CHECK(menus == mark + 1, "Inspector: Green screen gave no menu");
+        next(4081);
+        b[0] = 1; b[1] = -1; /* Green */
+        return 9;
+    case 4081: {
+        if (nulls)
+            return 0;
+        re_key k;
+        re_project_overlay_key(re_test_project(), 0, &k);
+        CHECK(k.kind == 1 && k.tolerance == RE_KEY_TOLERANCE, "Inspector: Green screen > Green: %d", k.kind);
+        next(4082);
+        return in_row(b, 5, 480, 0x400); /* Tolerance: its end */
+    }
+    case 4082: {
+        if (nulls)
+            return 0;
+        re_key k;
+        re_project_overlay_key(re_test_project(), 0, &k);
+        CHECK(k.kind == 1 && k.tolerance == 60, "Inspector: Tolerance to its end: %d", k.tolerance);
         next(181);
         return key_to(b, TL, 0x7F); /* Delete */
+    }
     case 181:
         if (nulls)
             return 0;

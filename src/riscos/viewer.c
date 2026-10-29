@@ -1233,6 +1233,21 @@ static void freeze(void)
     tl_select(i);
 }
 
+/* Edit > Countdown at the playhead: 5 seconds of a leader put in there, selected */
+static void countdown(void)
+{
+    if (!A.proj)
+        return;
+    int i = re_project_add_countdown(A.proj, app_position(), 5);
+    app_log("countdown at %d: item %d", app_position(), i);
+    if (i < 0) {
+        app_report("A countdown couldn't be put in here.");
+        return;
+    }
+    app_edited();
+    tl_select(i);
+}
+
 /* Edit > Colour clip: a black one put in at the playhead, selected (its colour is the Inspector's) */
 static void colour_clip(void)
 {
@@ -1302,7 +1317,7 @@ static MENU(4) m_file = {"File", 7, 2, 7, 0, 300, 44, 0,
                           {0x80, -1, IT("Export...      ^E")}}};
 /* (the Edit menu's items: E_ */
 enum { E_UNDO, E_REDO, E_CUT, E_COPY, E_PASTE, E_SPLIT, E_TRIM_START, E_TRIM_END, E_ROLL, E_DISSOLVE, E_FADE_IN,
-       E_FADE_OUT, E_DELETE, E_DELETE_GAP, E_EXTRACT, E_LIFT, E_CLEAR, E_TITLE, E_FREEZE, E_FILL, E_NORMALISE, E_N };
+       E_FADE_OUT, E_DELETE, E_DELETE_GAP, E_EXTRACT, E_LIFT, E_CLEAR, E_TITLE, E_FREEZE, E_FILL, E_COUNT, E_NORMALISE, E_N };
 static MENU(E_N) m_edit = {"Edit", 7, 2, 7, 0, 520, 44, 0,
                          {{0, -1, IT("Undo                     F8")}, {2, -1, IT("Redo                     F9")},
                           {0, -1, IT("Cut                      ^X")}, {0, -1, IT("Copy                     ^C")},
@@ -1316,7 +1331,8 @@ static MENU(E_N) m_edit = {"Edit", 7, 2, 7, 0, 520, 44, 0,
                           {0, -1, IT("Extract the marked part   '")}, {2, -1, IT("Lift the marked part      ;")},
                           {2, -1, IT("Clear the selection      ^Z")},
                           {0, -1, IT("New title...              T")},
-                          {0, -1, IT("Freeze the frame          F")}, {2, -1, IT("Colour clip at the playhead")},
+                          {0, -1, IT("Freeze the frame          F")}, {0, -1, IT("Colour clip at the playhead")},
+                          {2, -1, IT("Countdown at the playhead")},
                           {0x80, -1, IT("Normalise all the sound")}}};
 static char play_item[24] = "Play           Space";
 static MENU(9) m_play = {"Play", 7, 2, 7, 0, 420, 44, 0,
@@ -1402,6 +1418,7 @@ void app_menu(int x, int y)
     menu_shade(&m_edit.item[E_TITLE].iflags, !has);
     menu_shade(&m_edit.item[E_FREEZE].iflags, !has);
     menu_shade(&m_edit.item[E_FILL].iflags, !has);
+    menu_shade(&m_edit.item[E_COUNT].iflags, !has);
     menu_shade(&m_edit.item[E_NORMALISE].iflags, !has);
     for (int i = 3; i <= 4; i++)
         menu_shade(&m_play.item[i].iflags, !has);
@@ -1558,6 +1575,7 @@ static void menu_select(int *b)
         case E_TITLE: ti_open(-1); break;
         case E_FREEZE: freeze(); break;
         case E_FILL: colour_clip(); break;
+        case E_COUNT: countdown(); break;
         case E_NORMALISE: in_normalise_all(); break;
         }
         break;

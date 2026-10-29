@@ -125,6 +125,15 @@ void rp_cut_mute(re_project *p, mlt_producer cut, int on);
 int rp_cut_colour(mlt_producer cut, re_colour *c);
 void rp_cut_set_colour(re_project *p, mlt_producer cut, const re_colour *c);
 void rp_fit_colour(re_project *p);
+/* effect.c: a cut's special effect (0: none), set; the dissolves' ends
+   given their clips'. key.c: an overlay cut's green screen, set.
+   freeze.c: a cut is a countdown */
+int rp_cut_effect(mlt_producer cut);
+void rp_cut_set_effect(re_project *p, mlt_producer cut, int kind);
+void rp_fit_effect(re_project *p);
+void rp_cut_key(mlt_producer cut, re_key *k);
+void rp_cut_set_key(re_project *p, mlt_producer cut, const re_key *k);
+int rp_cut_countdown(mlt_producer cut);
 /* wipe.c: a dissolve's wipe (0, or -1: no luma transition) */
 int rp_mix_wipe(mlt_tractor t, re_wipe *w);
 /* freeze.c: a cut is a colour clip (1, its colour), or a freeze frame (1,

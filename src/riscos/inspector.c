@@ -13,6 +13,7 @@
  *   a dissolve Transition: the dissolve or a wipe (a menu), its edge's
  *              softness and its direction
  *   a sound    Volume, Mute
+ *   nothing    the project's: Loudness (a menu: as it is, or evened out)
  *
  * A slider is set by clicking on it or dragging along it: the Viewer shows
  * the change as it's dragged, and the whole drag is one step for Undo.
@@ -41,7 +42,7 @@ enum { K_HEADING, K_SLIDER, K_BUTTON, K_TOGGLE, K_TEXT, K_TABS }; /* (tabs: labe
 enum { C_LOOK = 1, C_BRIGHTNESS, C_CONTRAST, C_SATURATION, C_WARMTH, C_MIDTONES, C_RESET, C_VOLUME, C_MUTE,
        O_PLACE, O_SIZE, O_OPACITY, O_TITLE, O_VOLUME, O_MUTE, A_VOLUME, A_MUTE,
        F_PAN, F_RUMBLE, F_VOICE, F_GATE, F_NORMAL, /* (F_: the sound's clean-up, of whatever is selected) */
-       T_TABS, M_MOTION, M_AMOUNT, C_FILL, W_KIND, W_SOFT, W_REVERSE };
+       T_TABS, M_MOTION, M_AMOUNT, C_FILL, W_KIND, W_SOFT, W_REVERSE, C_EFFECT, O_KEY, O_TOL, P_LOUD };
 
 typedef struct
 {
@@ -64,6 +65,18 @@ static struct
     int closed;      /* closed by the user: not opened with the editor */
     int tab;         /* the page shown: 0 Colour (or Overlay), 1 Sound, 2 Motion (a clip's) */
 } I = {0, "Inspector", 0, 0, 0, 0, 0};
+
+#define LOUDS 3
+static const char *const LOUD_NAMES[LOUDS] = {"As it is", "For the web, -14 LUFS", "For TV, -23 LUFS"};
+static const int LOUD_LUFS[LOUDS] = {0, RE_LOUDNESS_WEB, RE_LOUDNESS_BROADCAST};
+
+static int loud_index(int lufs)
+{
+    for (int i = 0; i < LOUDS; i++)
+        if (LOUD_LUFS[i] == lufs)
+            return i;
+    return 0;
+}
 
 static const char *const PLACE_NAMES[RE_PLACES] = {"Full frame", "Centre", "Top left", "Top right", "Bottom left",
                                                    "Bottom right", "Lower third"};
@@ -182,6 +195,7 @@ static int controls(control *c)
             n = add(c, n, K_SLIDER, C_SATURATION, "Saturation", 0, 200, col.saturation, NULL);
             n = add(c, n, K_SLIDER, C_WARMTH, "Warmth", -100, 100, col.warmth, NULL);
             n = add(c, n, K_SLIDER, C_MIDTONES, "Midtones", -100, 100, col.midtones, NULL);
+            n = add(c, n, K_BUTTON, C_EFFECT, "Effect", 0, 0, 0, re_effects[it.effect]);
             n = add(c, n, K_BUTTON, C_RESET, "", 0, 0, 0, "Reset the colour");
             if (it.speed != 100) {
                 snprintf(v, sizeof(v), it.speed < 0 ? "Speed: reversed, %d%%" : "Speed: %d%%",
@@ -218,6 +232,12 @@ static int controls(control *c)
             if (!o.title && o.place != RE_PLACE_FULL)
                 n = add(c, n, K_SLIDER, O_SIZE, "Size", 10, 100, o.size, NULL);
             n = add(c, n, K_SLIDER, O_OPACITY, "Opacity", 0, 100, o.opacity, NULL);
+            re_key key;
+            if (!o.title && !re_project_overlay_key(A.proj, A.ov_sel, &key)) {
+                n = add(c, n, K_BUTTON, O_KEY, "Key out", 0, 0, 0, re_keys[key.kind]);
+                if (key.kind)
+                    n = add(c, n, K_SLIDER, O_TOL, "Tolerance", 1, 60, key.tolerance, NULL);
+            }
         } else {
             n = add(c, n, K_SLIDER, O_VOLUME, "Volume", -36, 12, o.volume, NULL);
             n = add(c, n, K_TOGGLE, O_MUTE, "Mute", 0, 1, o.muted, o.muted ? "Muted" : "Not muted");
@@ -228,6 +248,11 @@ static int controls(control *c)
         n = add(c, n, K_SLIDER, A_VOLUME, "Volume", -36, 12, a.volume, NULL);
         n = add(c, n, K_TOGGLE, A_MUTE, "Mute", 0, 1, a.muted, a.muted ? "Muted" : "Not muted");
         n = fx_rows(c, n);
+    } else if (re_project_length(A.proj) > 0) { /* (nothing selected: the project's) */
+        int l = re_project_loudness(A.proj);
+        n = add(c, n, K_HEADING, 0, "The whole film", 0, 0, 0, NULL);
+        n = add(c, n, K_BUTTON, P_LOUD, "Loudness", 0, 0, 0, LOUD_NAMES[loud_index(l)]);
+        n = add(c, n, K_TEXT, 0, "", 0, 0, 0, l ? "Evened out: quiet parts up, loud ones down." : "Each clip as loud as it is.");
     }
     return n;
 }
@@ -235,7 +260,7 @@ static int controls(control *c)
 static void value_text(const control *c, char *t, int size)
 {
     switch (c->id) {
-    case C_CONTRAST: case C_SATURATION: case O_SIZE: case O_OPACITY: case W_SOFT:
+    case C_CONTRAST: case C_SATURATION: case O_SIZE: case O_OPACITY: case W_SOFT: case O_TOL:
         snprintf(t, size, "%d%%", c->value);
         break;
     case C_VOLUME: case O_VOLUME: case A_VOLUME:
@@ -564,6 +589,14 @@ static int set(int id, int value)
     case A_VOLUME:
         done = re_project_audio_volume(A.proj, A.au_track, A.au_sel, value);
         break;
+    case O_TOL: {
+        re_key k;
+        if (re_project_overlay_key(A.proj, A.ov_sel, &k) || !k.kind)
+            return 0;
+        k.tolerance = value;
+        done = re_project_overlay_set_key(A.proj, A.ov_sel, &k);
+        break;
+    }
     case W_SOFT: case W_REVERSE: {
         re_wipe w;
         if (re_project_wipe(A.proj, A.sel, &w) || w.kind <= 0)
@@ -616,13 +649,14 @@ static int value_at(const control *k, int wx)
 
 static void open_menu(int which, int x, int y)
 {
-    static MENU(RE_FILLS) m; /* (the longest: RE_FILLS 9, RE_LOOKS 8, RE_PLACES and RE_MOTIONS 7) */
+    static MENU(RE_FILLS) m; /* (the longest: RE_FILLS 9; RE_LOOKS, RE_WIPES 8; RE_PLACES, RE_MOTIONS 7) */
     re_colour col;
     re_overlay o;
     re_motion mo;
     re_item it;
     int n = which == C_LOOK ? RE_LOOKS : which == O_PLACE ? RE_PLACES : which == M_MOTION ? RE_MOTIONS
-          : which == W_KIND ? RE_WIPES : RE_FILLS;
+          : which == W_KIND ? RE_WIPES : which == C_EFFECT ? RE_EFFECTS : which == O_KEY ? RE_KEYS
+          : which == P_LOUD ? LOUDS : RE_FILLS;
     int ticked = -1;
     if (which == C_LOOK && !re_project_colour(A.proj, A.sel, &col))
         ticked = re_colour_look_of(&col);
@@ -633,14 +667,22 @@ static void open_menu(int which, int x, int y)
     re_wipe wi;
     if (which == W_KIND && !re_project_wipe(A.proj, A.sel, &wi))
         ticked = wi.kind;
+    re_key ky;
+    if (which == C_EFFECT)
+        ticked = re_project_effect(A.proj, A.sel);
+    if (which == O_KEY && !re_project_overlay_key(A.proj, A.ov_sel, &ky))
+        ticked = ky.kind;
+    if (which == P_LOUD)
+        ticked = loud_index(re_project_loudness(A.proj));
     if (which == C_FILL && !re_project_item(A.proj, A.sel, &it))
         for (int i = 0; i < RE_FILLS; i++)
             if ((int) re_fill_rgbs[i] == it.fill)
                 ticked = i;
     memset(&m, 0, sizeof(m));
-    snprintf(m.title, sizeof(m.title), "%s",
-             which == C_LOOK ? "Look" : which == O_PLACE ? "Place" : which == M_MOTION ? "Motion"
-             : which == W_KIND ? "Transition" : "Fill");
+    const char *title = which == C_LOOK ? "Look" : which == O_PLACE ? "Place" : which == M_MOTION ? "Motion"
+                        : which == W_KIND ? "Transition" : which == C_EFFECT ? "Effect"
+                        : which == O_KEY ? "Green screen" : which == P_LOUD ? "Loudness" : "Fill";
+    memcpy(m.title, title, strlen(title) < sizeof(m.title) ? strlen(title) + 1 : sizeof(m.title)); /* (12: no end) */
     m.tfg = 7, m.tbg = 2, m.wfg = 7, m.wbg = 0;
     m.w = 320, m.h = 44;
     for (int i = 0; i < n; i++) {
@@ -649,6 +691,9 @@ static void open_menu(int which, int x, int y)
                            : which == O_PLACE ? PLACE_NAMES[i]
                            : which == M_MOTION ? re_motions[i]
                            : which == W_KIND   ? re_wipes[i]
+                           : which == C_EFFECT ? re_effects[i]
+                           : which == O_KEY    ? re_keys[i]
+                           : which == P_LOUD   ? LOUD_NAMES[i]
                                                : re_fill_names[i];
         it->flags = (i == n - 1 ? 0x80 : 0) | (i == ticked ? 1 : 0);
         it->sub = -1;
@@ -656,6 +701,8 @@ static void open_menu(int which, int x, int y)
         it->text = name;
         it->valid = (const char *) -1;
         it->len = (int) strlen(name) + 1;
+        if ((int) strlen(name) * 16 + 40 > m.w) /* (wide enough for the longest) */
+            m.w = (int) strlen(name) * 16 + 40;
     }
     I.menu = which;
     _kernel_swi_regs r;
@@ -696,6 +743,19 @@ void in_menu_select(int *b)
             done = re_project_set_wipe(A.proj, A.sel, &w);
         }
         app_log("inspector: transition %s", re_wipes[k]);
+    } else if (I.menu == C_EFFECT && k < RE_EFFECTS) {
+        done = re_project_set_effect(A.proj, A.sel, k);
+        app_log("inspector: effect %s", re_effects[k]);
+    } else if (I.menu == O_KEY && k < RE_KEYS) {
+        re_key ky;
+        if (!re_project_overlay_key(A.proj, A.ov_sel, &ky)) {
+            ky.kind = k;
+            done = re_project_overlay_set_key(A.proj, A.ov_sel, &ky);
+        }
+        app_log("inspector: green screen %s", re_keys[k]);
+    } else if (I.menu == P_LOUD && k < LOUDS) {
+        done = re_project_set_loudness(A.proj, LOUD_LUFS[k]);
+        app_log("inspector: loudness %d", LOUD_LUFS[k]);
     } else if (I.menu == C_FILL && k < RE_FILLS) {
         done = re_project_set_fill(A.proj, A.sel, re_fill_rgbs[k]);
         app_log("inspector: fill %s", re_fill_names[k]);
@@ -851,7 +911,7 @@ void in_click(int *b)
         redraw_all();
         break;
     }
-    case C_LOOK: case O_PLACE: case M_MOTION: case C_FILL: case W_KIND:
+    case C_LOOK: case O_PLACE: case M_MOTION: case C_FILL: case W_KIND: case C_EFFECT: case O_KEY: case P_LOUD:
         open_menu(k->id, b[0], b[1]);
         break;
     case C_RESET: {

@@ -40,6 +40,7 @@ void rp_changed(re_project *p)
     rp_fit_sound_fx(p);
     rp_fit_colour(p);
     rp_fit_motion(p);
+    rp_fit_effect(p);
     rp_fit_overlays(p);
     rp_fit_audio(p);
     fit_tractor(p);
@@ -311,6 +312,7 @@ static int adopt(re_project *p, mlt_producer prod)
     rp_fit_sound_fx(p);
     rp_fit_colour(p);
     rp_fit_motion(p);
+    rp_fit_effect(p);
     rp_fit_overlays(p);
     rp_fit_audio(p);
     return 0;
@@ -458,6 +460,8 @@ int re_project_item(re_project *p, int i, re_item *item)
         item->held_frame = item->held ? (int) (t * re_project_fps(p) + 0.5) : 0;
         item->fill = rp_cut_fill(cut, &rgb) ? (int) rgb : -1;
         item->picture = re_still_is(cut) || item->fill >= 0;
+        item->countdown = rp_cut_countdown(cut);
+        item->effect = rp_cut_effect(cut);
     }
     const char *file =
         item->gap || item->mix ? NULL : re_project_original(p, rp_speed_file(info.producer, info.resource));
@@ -472,6 +476,8 @@ int re_project_item(re_project *p, int i, re_item *item)
         char n[64];
         snprintf(n, sizeof(n), "%s", item->name);
         snprintf(item->name, sizeof(item->name), "Freeze: %.50s", n);
+    } else if (item->countdown) {
+        snprintf(item->name, sizeof(item->name), "Countdown");
     } else if (item->fill >= 0) {
         const char *n = re_fill_name((unsigned) item->fill);
         snprintf(item->name, sizeof(item->name), "%s", n ? n : "Colour");
@@ -485,7 +491,7 @@ const char *re_project_item_file(re_project *p, int i)
     if (!p->v1 || mlt_playlist_get_clip_info(p->v1, &info, i) || mlt_playlist_is_blank(p->v1, i) || rp_mix_of(p, i))
         return NULL;
     unsigned rgb;
-    if (rp_cut_fill(info.cut, &rgb)) /* (a colour clip: no file) */
+    if (rp_cut_fill(info.cut, &rgb) || rp_cut_countdown(info.cut)) /* (a colour clip, a countdown: no file) */
         return NULL;
     return rp_speed_file(info.producer, info.resource); /* (MLT keeps a picture's without "qimage:") */
 }
@@ -567,6 +573,7 @@ int rp_split_at(re_project *p, int frame)
     rp_cut_sound_fx(mlt_playlist_get_clip(p->v1, i), &fx);
     re_motion motion;
     rp_cut_motion(mlt_playlist_get_clip(p->v1, i), &motion);
+    int effect = rp_cut_effect(mlt_playlist_get_clip(p->v1, i));
     /* (the first part: its in to the frame before; the second, a new cut,
        is given the fades out and the mute) */
     if (mlt_playlist_split(p->v1, i, frame - it.start - 1))
@@ -580,6 +587,7 @@ int rp_split_at(re_project *p, int frame)
         rp_cut_set_volume(p, mlt_playlist_get_clip(p->v1, i + 1), volume);
     rp_cut_set_colour(p, mlt_playlist_get_clip(p->v1, i + 1), &colour);
     rp_cut_set_sound_fx(p, mlt_playlist_get_clip(p->v1, i + 1), &fx);
+    rp_cut_set_effect(p, mlt_playlist_get_clip(p->v1, i + 1), effect);
     if (motion.kind > 0) /* (each part all of it) */
         rp_cut_set_motion(p, mlt_playlist_get_clip(p->v1, i + 1), &motion);
     return 1;

@@ -51,6 +51,12 @@ Wipes: select a dissolve and choose its Transition in the Inspector
 (Dissolve, Wipe from the left, from the top, Barn doors, Diagonal,
 Circle, Box, Clock), with Softness (its edge) and Direction.
 
+Effects (a clip's Colour tab): Negative, Sketch, Posterise. Green
+screen (an overlay's Key out): Green or Blue made see-through, with a
+Tolerance. Loudness (the Inspector with nothing selected): the whole
+film evened out as it plays and exports, for the web (-14 LUFS) or TV
+(-23 LUFS). Edit > Countdown at the playhead: a 5-second leader.
+
 Freeze frames: F (Edit > Freeze the frame) holds the frame at the
 playhead for 2 seconds there, the clip split around it. Edit > Colour
 clip at the playhead puts in 2 seconds of black (its Fill in the

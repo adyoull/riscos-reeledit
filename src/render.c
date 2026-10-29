@@ -120,6 +120,8 @@ uint64_t re_render_signature(re_project *p, int start, int length)
     int end = start + length;
     uint64_t h = 14695981039346656037ull;
     h = fnv(h, "%d %dx%d %d/%d|", length, pr->width, pr->height, pr->frame_rate_num, pr->frame_rate_den);
+    if (re_project_loudness(p))
+        h = fnv(h, "L %d|", re_project_loudness(p));
     /* (each thing that's in it, placed from its start: a stretch moved along keeps its signature) */
     for (int i = 0; i < re_project_items(p); i++) {
         re_item it;
@@ -140,6 +142,8 @@ uint64_t re_render_signature(re_project *p, int start, int length)
         re_motion m;
         if (it.moving && !re_project_motion(p, i, &m))
             h = fnv(h, "M %d %d|", m.kind, m.amount);
+        if (it.effect)
+            h = fnv(h, "E %d|", it.effect);
     }
     for (int i = 0; i < re_project_overlays(p); i++) {
         re_overlay o;
@@ -154,6 +158,9 @@ uint64_t re_render_signature(re_project *p, int start, int length)
         re_sound_fx fx;
         if (o.video && !re_project_overlay_sound_fx(p, i, &fx))
             h = fnv(h, "S %d %d %d %d|", fx.pan, fx.rumble, fx.voice, fx.gate);
+        re_key key;
+        if (!re_project_overlay_key(p, i, &key) && key.kind)
+            h = fnv(h, "K %d %d|", key.kind, key.tolerance);
         if (o.title && !re_project_title(p, i, &t))
             h = fnv(h, "T %s %s %d %06X %d %d|", t.text, t.font, t.size, (unsigned) t.colour, t.style, t.align);
     }

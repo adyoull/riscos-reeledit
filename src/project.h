@@ -56,6 +56,8 @@ typedef struct
     int held;            /* 1: a freeze frame (re_project_freeze) */
     int held_frame;      /* its frame of its file (as re_item_file_frame's) */
     int fill;            /* a colour clip's colour (0xRRGGBB), or -1: not one */
+    int countdown;       /* 1: a countdown (re_project_add_countdown) */
+    int effect;          /* its special effect (re_effects'; 0: none) */
     char name[64];       /* the clip's file's leaf name */
 } re_item;
 int re_project_items(re_project *p);
@@ -217,6 +219,10 @@ int re_project_set_colour(re_project *p, int item, const re_colour *c);
 int re_project_freeze(re_project *p, int frame, int length);
 int re_project_add_fill(re_project *p, int frame, int length, unsigned rgb);
 int re_project_set_fill(re_project *p, int item, unsigned rgb);
+/* A countdown (a leader: a clock face counting the seconds down, a beep at
+   2) put in at a frame, so many seconds long (0: 5), as a colour clip is.
+   Its index, or -1. */
+int re_project_add_countdown(re_project *p, int frame, int seconds);
 #define RE_FILLS 9
 extern const char *const re_fill_names[RE_FILLS]; /* Black, White, Grey, Red... */
 extern const unsigned re_fill_rgbs[RE_FILLS];
@@ -243,6 +249,21 @@ int re_project_motion(re_project *p, int item, re_motion *m);
 int re_project_set_motion(re_project *p, int item, const re_motion *m);
 /* The filter that does it, registered with MLT (re_mlt_start does it) */
 void re_motion_register(void);
+
+/* A clip's special effect (effect.c): re_effects' (0 None, Negative, Sketch,
+   Posterise). A clip's (-1: not a clip), and set: 1 changed, 0 not. */
+#define RE_EFFECTS 4
+extern const char *const re_effects[RE_EFFECTS];
+int re_project_effect(re_project *p, int item);
+int re_project_set_effect(re_project *p, int item, int kind);
+
+/* The whole project's sound evened out as it plays and is exported
+   (loudness.c): its target loudness (LUFS, -40..-5; 0: off, as it is).
+   Not in an empty project. Set: 1 changed, 0 not. */
+#define RE_LOUDNESS_WEB (-14)       /* (as YouTube and the like play it) */
+#define RE_LOUDNESS_BROADCAST (-23) /* (EBU R128) */
+int re_project_loudness(re_project *p);
+int re_project_set_loudness(re_project *p, int lufs);
 
 /* Sound clean-up (soundfx.c): a clip's, a video overlay's or a sound's */
 typedef struct
@@ -334,6 +355,19 @@ int re_project_overlay_volume(re_project *p, int i, int db);
 int re_project_overlay_sound_fade(re_project *p, int i, int end, int length);
 /* Taken away. 1 done, 0 not. */
 int re_project_overlay_remove(re_project *p, int i);
+/* Green screen (key.c): an overlay's backdrop of one colour made
+   see-through. kind: re_keys' (0 Off, Green, Blue); tolerance: how near
+   the colour a colour must be, 1..60 (%). 0, or -1; set: 1 changed, 0 not. */
+typedef struct
+{
+    int kind, tolerance;
+} re_key;
+#define RE_KEYS 3
+#define RE_KEY_TOLERANCE 15
+extern const char *const re_keys[RE_KEYS];
+void re_key_none(re_key *k);
+int re_project_overlay_key(re_project *p, int i, re_key *k);
+int re_project_overlay_set_key(re_project *p, int i, const re_key *k);
 
 /* Titles (title.h): text over the video, an overlay made from it. Put on
    the titles' track (over V2, so a title goes over a logo or a picture in

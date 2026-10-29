@@ -3,13 +3,15 @@
  * put where an animated rect says ("transition.rect", in the profile's
  * pixels), as Shotcut's Size, Position & Rotate filter puts it.
  *
- * MLT's own affine (in its "plus" module: not in this build) composites
- * through a transition, in RGBA. This one does only what a rect needs:
+ * MLT's own affine (in its "plus" module) composites through a transition,
+ * in RGBA, interpolating each pixel: far too slow on a Pi for a picture's
+ * whole length. This one, registered over it, does only what a rect
+ * needs:
  * the picture below asked for at the rect's size (a picture scaled once,
  * by still.c or MLT's rescale), then the frame's part of it copied out, on
  * black where it doesn't cover the frame, in the format asked for
  * (yuv420p, yuv422, RGB, RGBA; others as yuv422). Rotation and opacity
- * aren't done. Registered only if there's no other affine.
+ * aren't done (a Shotcut project's rotation is left out).
  *
  * Part of riscos-reeledit. GPL version 2 or later.
  */
@@ -140,14 +142,16 @@ static mlt_filter motion_init(mlt_profile profile, mlt_service_type type, const 
     (void) id;
     (void) arg;
     mlt_filter f = mlt_filter_new();
-    if (f)
+    if (f) {
         f->process = process;
+        mlt_properties_set_int(MLT_FILTER_PROPERTIES(f), "_reeledit_affine", 1); /* (ours, not plus's) */
+    }
     return f;
 }
 
 void re_motion_register(void)
 {
     mlt_repository r = mlt_factory_repository();
-    if (r && !mlt_properties_get_data(mlt_repository_filters(r), "affine", NULL))
+    if (r) /* (over the plus module's) */
         mlt_repository_register(r, mlt_service_filter_type, "affine", (mlt_register_callback) motion_init);
 }

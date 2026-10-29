@@ -3,3 +3,5 @@
 ^src/modules/core/filter_audiochannels\.c:.*(int16_t|int32_t|float) \*
 ^src/modules/avformat/filter_avcolour_space\.c:.*uint16_t \*
 ^src/modules/avformat/producer_avformat\.c:.*(AVSphericalMapping|int32_t \*\) displaymatrix|AVHWFramesContext)
+^src/modules/plus/(filter_hslprimaries|filter_hslrange|filter_lift_gamma_gain|filter_shape|filter_spot_remover|filter_strobe)\.c:.*uint16_t \*
+^src/modules/plus/(producer_blipflash|producer_count)\.c:.*float \*

@@ -7,6 +7,10 @@
  * through MLT's loader as a picture is, so it's fitted to the frame as
  * the clip was. A still: no sound; no speed.
  *
+ * A countdown: the "plus" module's "count" producer (a clock face counting
+ * the seconds down to the film's start, with a beep at 2, as a leader
+ * has), its length the clip's: put in as a colour clip is.
+ *
  * A colour clip: MLT's "color" producer (resource "#AARRGGBB", as Shotcut
  * makes its colour clips), put in at a frame as a freeze frame is.
  *
@@ -116,6 +120,32 @@ int re_project_add_fill(re_project *p, int frame, int length, unsigned rgb)
     if (prod)
         mlt_properties_set(MLT_PRODUCER_PROPERTIES(prod), "shotcut:caption", "Colour");
     return put(p, prod, frame, length);
+}
+
+int re_project_add_countdown(re_project *p, int frame, int seconds)
+{
+    if (!p->tractor && !p->profile->is_explicit)
+        return -1;
+    mlt_producer prod = mlt_factory_producer(p->profile, "count", NULL);
+    if (!prod)
+        return -1;
+    int length = re_project_frames(p, seconds > 0 ? seconds : 5);
+    mlt_properties pp = MLT_PRODUCER_PROPERTIES(prod);
+    mlt_properties_set(pp, "direction", "down");
+    mlt_properties_set(pp, "style", "seconds+1");
+    mlt_properties_set(pp, "sound", "2pop");
+    mlt_properties_set(pp, "background", "clock");
+    mlt_properties_set(pp, "shotcut:caption", "Countdown");
+    mlt_properties_set_position(pp, "length", length);
+    mlt_properties_set_position(pp, "out", length - 1);
+    mlt_producer cut = mlt_producer_cut(prod, 0, length - 1);
+    mlt_producer_close(prod);
+    return cut ? rp_insert_cut(p, cut, frame) : -1;
+}
+
+int rp_cut_countdown(mlt_producer cut)
+{
+    return cut && service_is(cut, "count");
 }
 
 int re_project_set_fill(re_project *p, int item, unsigned rgb)

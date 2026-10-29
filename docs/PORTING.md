@@ -47,16 +47,21 @@ scope and no policies). With `MLT_NO_THREADS` they're never reached.
 crossdev's `check-all.sh` passes on melt: static, every frame of 4 KB or
 more probed, no VFPv4, UnixLib consistent.
 
-`check-unaligned.sh` finds 59 casts in MLT's sources that raise the
-alignment a pointer needs. Each was looked at; they are listed in
+`check-unaligned.sh` finds 72 casts in MLT's sources (59 before the plus
+module was built in) that raise the alignment a pointer needs. Each was looked at; they are listed in
 `build/unaligned-safe.txt`, and a new one fails the build:
 
 - **16-bit image planes** (`uint16_t *` from a plane pointer: `mlt_image.c`,
   most core filters, `transition_luma.c`, `filter_avcolour_space.c`): image
   buffers come from `mlt_pool_alloc` or `av_malloc`, aligned to 16 bytes, and
-  the 16-bit formats' strides and plane offsets are even.
+  the 16-bit formats' strides and plane offsets are even. The plus
+  module's (`filter_hslprimaries`, `filter_hslrange`, `filter_lift_gamma_gain`,
+  `filter_shape`, `filter_spot_remover`, `filter_strobe`) are the same:
+  RGBA64 pictures and 16-bit alpha masks from the frame.
 - **Audio** (`filter_audiochannels.c`, `int16_t`/`int32_t`/`float`): audio
-  buffers are allocated aligned, and the planar offsets are whole samples.
+  buffers are allocated aligned, and the planar offsets are whole samples;
+  plus's `producer_blipflash.c` and `producer_count.c` (`float`) fill the
+  frame's own audio buffer.
 - **FFmpeg side data** (`producer_avformat.c`: the display matrix, spherical
   mapping, hardware frames context): FFmpeg allocates these with `av_malloc`.
 

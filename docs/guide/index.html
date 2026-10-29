@@ -115,7 +115,7 @@ a { color:#1f5fa8; }
 <li><b>Fades, dissolves and wipes</b> between clips.</li>
 <li><b>Colour:</b> looks such as black and white or sepia, and sliders for brightness, warmth and more.</li>
 <li><b>Sound:</b> mute a clip, fade its sound or change its volume, clean it up (rumble, hiss between words), even out the levels, and add music and sound effects on separate audio tracks.</li>
-<li><b>Overlays:</b> a logo in the corner, a second video in a small box (picture in picture), or a picture over the whole frame.</li>
+<li><b>Overlays:</b> a logo in the corner, a second video in a small box (picture in picture), a picture over the whole frame, or a green screen.</li>
 <li><b>Titles</b> in RISC OS fonts.</li>
 <li><b>Slow motion, fast motion and reverse</b>, freeze frames, and pan and zoom across photos.</li>
 <li><b>Colour clips</b> of black or any of nine colours.</li>
@@ -412,6 +412,16 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <div class="box rem"><b class="label">REMEMBER</b>A clip keeps its colour when you split it (both parts get it), change its speed, copy and paste it, or make a dissolve: the colour lasts right through the dissolve.</div>
 <div class="box tech"><b class="label">TECHNICAL STUFF</b>The colour settings become a single FFmpeg <code>lutyuv</code> filter on the clip (<code>avfilter.lutyuv</code> in the project file, marked <code>shotcut:filter=reeleditColour</code>). It works in the same picture format the Viewer uses, so each pixel costs one look-up in a table: on the testbed a Sepia clip still played at 13 to 29 milliseconds a picture. ReelEdit's copy of MLT has a fix so that FFmpeg's filters work with the FFmpeg 5.1 that RISC OS has.</div>
 
+<h4>Special effects</h4>
+<p>Under the sliders, <b>Effect</b> is a menu of three bolder changes:</p>
+<ul>
+<li><b>Negative</b> turns the picture into its negative: light parts dark, and each colour its opposite.</li>
+<li><b>Sketch</b> turns the picture into a drawing: dark lines where the edges are, on white.</li>
+<li><b>Posterise</b> makes every part of the picture black or white, with no greys.</li>
+</ul>
+<figure><img src="images/effect-sketch.png" alt="A clip with the Sketch effect"><figcaption>clipb with Effect set to Sketch: the test card drawn as lines. The red and yellow square is a green screen overlay on V2, which the effect doesn't touch.</figcaption></figure>
+<p>A clip has one effect at a time, as well as its colour settings. Choose <b>None</b> to take it off. (Reset the colour leaves the effect alone.)</p>
+
 <h4>Colour clips</h4>
 <p>A plain colour fills a gap nicely: black before a title, or a colour behind some words. Put the playhead where you want it and choose <b>Edit &gt; Colour clip at the playhead</b>. A black clip two seconds long goes in there and is selected. Choose its colour from <b>Fill</b> in the Inspector:</p>
 <figure><img src="images/inspector-fill.png" alt="The Inspector for a colour clip"><figcaption>A colour clip with Fill set to Blue.</figcaption></figure>
@@ -445,6 +455,16 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <li><b>Normalise the level</b> sets the Volume so that the loud parts come to just below the top. It works from the waveform, so wait for that to be drawn first.</li>
 </ul>
 <p>To even out a whole film, choose <b>Edit &gt; Normalise all the sound</b>. That does every clip and every sound on the audio tracks in one go, and one Undo puts them all back.</p>
+<h4>Evening out the loudness as it plays</h4>
+<p>Normalising sets each clip's level once. If the sound gets louder and quieter within a clip, ReelEdit can keep adjusting it while the film plays. Click an empty part of the Timeline (or press <kbd>Ctrl-Z</kbd>) so that nothing is selected. The Inspector then shows the settings for <b>the whole film</b>:</p>
+<figure><img src="images/inspector-loudness.png" alt="The Inspector with nothing selected"><figcaption>Loudness for the whole film, set for the web.</figcaption></figure>
+<ul>
+<li><b>As it is</b> leaves every clip as loud as it is.</li>
+<li><b>For the web, -14 LUFS</b> evens the sound out to the level YouTube and similar sites play at.</li>
+<li><b>For TV, -23 LUFS</b> is the broadcast level. It's quieter, with more room for loud moments.</li>
+</ul>
+<p>ReelEdit measures the sound over the last few seconds and turns it up or down gradually: by no more than 3 dB a second, and 15 dB in all. It works as you play, and the export uses it too.</p>
+<div class="box tech"><b class="label">TECHNICAL STUFF</b>This is MLT's <code>dynamic_loudness</code> filter on the whole project, measuring the loudness as EBU R128 does. It comes from MLT's <i>plus</i> module, which this version of ReelEdit is the first to include.</div>
 <div class="box tip"><b class="label">TIP</b>Background works best on speech recorded close to the microphone. On music it can cut the quiet notes, so leave it off there.</div>
 <div class="box rem"><b class="label">REMEMBER</b>Waveforms show the sound as you'll hear it, so they take the volume and fades into account, and a muted clip has none. If a waveform looks flat, the sound really is quiet.</div>
 
@@ -473,7 +493,12 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <div class="box tip"><b class="label">TIP</b>If you choose a menu item with Adjust rather than Select, the menu stays open. You can then try Top left, Top right and Centre in turn and see each one in the Viewer.</div>
 <figure><img src="images/logo-top-right.png" alt="A logo placed top right"><figcaption>A logo in the top right corner.</figcaption></figure>
 <figure><img src="images/pip.png" alt="Picture in picture"><figcaption>Picture in picture: v2.mp4 on V2, shown in the bottom right of v1.mp4.</figcaption></figure>
-<div class="box tech"><b class="label">TECHNICAL STUFF</b>Overlays are saved as MLT composite transitions, the same way Shotcut saves them. Ripple edits on V1 don't move anything on V2.</div>
+<h4>Green screen</h4>
+<p>If you've filmed someone in front of a green (or blue) sheet, you can replace the sheet with another clip. Put the green screen video on V2 over the clip you want behind it, select it, and choose <b>Place &gt; Full frame</b> in the Inspector. Then set <b>Key out</b> to <b>Green</b> (or <b>Blue</b>). The green goes, and the clip on V1 shows through.</p>
+<figure><img src="images/green-screen.png" alt="A green screen video over a clip"><figcaption>A video shot against green, over clipb with Key out set to Green. Only the red and yellow square is left.</figcaption></figure>
+<p><b>Tolerance</b> sets how close to green a colour has to be to disappear. Turn it up if a green fringe is left round the edges, and down if parts of the person disappear too.</p>
+<div class="box tip"><b class="label">TIP</b>Light the sheet evenly and keep the person a little way in front of it, so that no shadows fall on it. Don't wear anything green.</div>
+<div class="box tech"><b class="label">TECHNICAL STUFF</b>Overlays are saved as MLT composite transitions, the same way Shotcut saves them. Ripple edits on V1 don't move anything on V2. Key out is MLT's <code>chroma</code> filter (Shotcut's Chroma Key: Simple).</div>
 
 <h3 class="chapter" id="ch13"><span>13</span> Titles</h3>
 <p>Move the playhead to where the title should start and press <kbd>T</kbd> (or choose <b>Edit &gt; New title…</b>). The <b>Title window</b> opens:</p>
@@ -494,6 +519,11 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <figure><img src="images/title-on-video.png" alt="A title over the video"><figcaption>"My Holiday" in Homerton Bold with a shadow, in the lower third.</figcaption></figure>
 <p>To change a title, press Menu over it and choose <b>Edit title…</b>. Make your changes and click <b>Change</b>. One press of <kbd>F8</kbd> undoes all of them.</p>
 <div class="box rem"><b class="label">REMEMBER</b>A title is an overlay, so you can move it, trim it, fade it and change its opacity like any other. The only difference is that its size is set in the Title window, not on the overlay menu.</div>
+
+<h4>A countdown</h4>
+<p>For a film shown to an audience, a countdown at the start looks the part. Put the playhead at the start (<kbd>Home</kbd>) and choose <b>Edit &gt; Countdown at the playhead</b>. Five seconds of a leader go in: a clock face counting down 5, 4, 3, 2, 1, with a beep at 2.</p>
+<figure><img src="images/countdown.png" alt="A countdown leader"><figcaption>A countdown at the start of the film, showing 5. The digits are drawn with a RISC OS font.</figcaption></figure>
+<p>It's a clip like any other: move it, or delete it if you change your mind.</p>
 
 <h3 class="chapter" id="ch14"><span>14</span> Speed, motion and freeze frames</h3>
 <h4>Speed and reverse</h4>
