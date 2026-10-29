@@ -145,10 +145,12 @@ static int get_image(mlt_frame frame, uint8_t **image, mlt_image_format *format,
     uint8_t *p = *image;
     if (kind == INVERT) {
         if (planar) {
-            for (int i = 0; i < w * h; i++)
-                p[i] = (uint8_t) clampi(inv - p[i], min, max_luma);
-            for (int i = w * h; i < w * h + (w / 2) * (h / 2) * 2; i++)
-                p[i] = (uint8_t) clampi(256 - p[i], min, max_chroma);
+            if (!re_neon_invert(p, w * h, inv, 0, min, max_luma))
+                for (int i = 0; i < w * h; i++)
+                    p[i] = (uint8_t) clampi(inv - p[i], min, max_luma);
+            if (!re_neon_invert(p + w * h, (w / 2) * (h / 2) * 2, 255, 1, min, max_chroma))
+                for (int i = w * h; i < w * h + (w / 2) * (h / 2) * 2; i++)
+                    p[i] = (uint8_t) clampi(256 - p[i], min, max_chroma);
         } else {
             for (int i = 0; i < w * h * 2; i += 2) {
                 p[i] = (uint8_t) clampi(inv - p[i], min, max_luma);

@@ -110,6 +110,25 @@ int re_neon_charcoal(const uint8_t *above, const uint8_t *row, const uint8_t *be
     return i;
 }
 
+int re_neon_invert(uint8_t *p, int n, int base, int add, int lo, int hi)
+{
+    if (!neon_on || base < 0 || base > 255 || add < 0 || add > 1 || lo < 0 || hi > 255 || lo > hi)
+        return 0;
+    uint8x16_t B = vdupq_n_u8((uint8_t) base), A = vdupq_n_u8((uint8_t) add), LO = vdupq_n_u8((uint8_t) lo),
+               HI = vdupq_n_u8((uint8_t) hi);
+    int i = 0;
+    for (; i + 16 <= n; i += 16) { /* (base - p saturating at 0, then + add saturating at 255: below lo, above hi
+                                       either way) */
+        uint8x16_t v = vqaddq_u8(vqsubq_u8(B, vld1q_u8(p + i)), A);
+        vst1q_u8(p + i, vminq_u8(vmaxq_u8(v, LO), HI));
+    }
+    for (; i < n; i++) {
+        int v = base - p[i] + add;
+        p[i] = (uint8_t) (v < lo ? lo : v > hi ? hi : v);
+    }
+    return 1;
+}
+
 #else
 
 int re_neon_is_on(void)
@@ -139,6 +158,12 @@ int re_neon_charcoal(const uint8_t *above, const uint8_t *row, const uint8_t *be
                      const uint8_t *lut, int lut_n, uint8_t sat)
 {
     (void) above; (void) row; (void) below; (void) out; (void) n; (void) xs; (void) lut; (void) lut_n; (void) sat;
+    return 0;
+}
+
+int re_neon_invert(uint8_t *p, int n, int base, int add, int lo, int hi)
+{
+    (void) p; (void) n; (void) base; (void) add; (void) lo; (void) hi;
     return 0;
 }
 

@@ -28,4 +28,8 @@ int re_neon_key(const uint8_t *u, const uint8_t *v, uint8_t *a0, uint8_t *a1, in
 int re_neon_charcoal(const uint8_t *above, const uint8_t *row, const uint8_t *below, uint8_t *out, int n, int xs,
                      const uint8_t *lut, int lut_n, uint8_t sat);
 
+/* looks.c's Negative: n bytes in place, p[i] = clamp(base - p[i] + add, lo, hi) (base 0..255, add 0 or 1:
+   luma inv - y, chroma 256 - c), the same as the C */
+int re_neon_invert(uint8_t *p, int n, int base, int add, int lo, int hi);
+
 #endif

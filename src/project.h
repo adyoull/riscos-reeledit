@@ -260,6 +260,13 @@ int re_project_set_effect(re_project *p, int item, int kind);
    it) */
 void re_looks_register(void);
 
+/* lut.c: "avfilter.lutyuv" registered over the avformat module's: colour.c's
+   tables made here (not FFmpeg's 65536 values a table), any other
+   expression by MLT's own; re_lut_tables: colour.c's three expressions'
+   tables, 0, or -1 (not colour.c's) */
+void re_lut_register(void);
+int re_lut_tables(const char *y, const char *u, const char *v, uint8_t t[3][256]);
+
 /* The whole project's sound evened out as it plays and is exported
    (loudness.c): its target loudness (LUFS, -40..-5; 0: off, as it is).
    Not in an empty project. Set: 1 changed, 0 not. */

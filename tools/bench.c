@@ -146,9 +146,10 @@ int main(int argc, char **argv)
     re_hold_register();
     re_chroma_register();
     re_looks_register();
+    re_lut_register();
     /* (as ReelEdit: NEON where there is, quick scaling; BENCH_C or
        BENCH_ACCURATE set to any value leaves either out, to compare) */
-    int fast = !getenv("BENCH_ACCURATE");
+    int fast = !getenv("BENCH_ACCURATE"), sound = getenv("BENCH_SOUND") != NULL;
     if ((av_get_cpu_flags() & AV_CPU_FLAG_NEON) && !getenv("BENCH_C"))
     {
         mlt_environment_set("MLT_NEON", "1");
@@ -187,6 +188,12 @@ int main(int argc, char **argv)
         int w = w0, h = h0;
         uint8_t *image = NULL;
         mlt_frame_get_image(frame, &image, &format, &w, &h, 0);
+        if (sound) { /* (BENCH_SOUND: the sound too, as the player takes it) */
+            mlt_audio_format af = mlt_audio_s16;
+            int freq = 48000, ch = 2, samples = mlt_audio_calculate_frame_samples(mlt_producer_get_fps(producer), freq, i);
+            int16_t *pcm = NULL;
+            mlt_frame_get_audio(frame, (void **) &pcm, &af, &freq, &ch, &samples);
+        }
         if (i == 0)
             printf("bench: %s, %d frames, %dx%d %s\n", argv[1], frames, w, h, mlt_image_format_name(format));
         mlt_frame_close(frame);

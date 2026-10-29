@@ -947,6 +947,91 @@ static int chroma(int which) /* (the middle of the shown picture's Cb or Cr) */
     return which ? shown_cr[45 * 160 + 80] : shown_cb[45 * 160 + 80];
 }
 
+/* lut.c: colour.c's tables made here the same as FFmpeg's lutyuv makes them
+   (a picture of every value through MLT's own avfilter.lutyuv), for looks
+   and settings at their extremes; avfilter.lutyuv here ours; another
+   expression done by MLT's */
+extern mlt_filter filter_avfilter_init(mlt_profile, mlt_service_type, const char *, char *);
+
+static uint8_t *every_value(mlt_profile prof, mlt_filter f)
+{
+    int w = 512, h = 2, size = w * h * 3 / 2;
+    uint8_t *buf = mlt_pool_alloc(size), *out = NULL;
+    for (int i = 0; i < w * h; i++)
+        buf[i] = (uint8_t) (i & 255);
+    for (int i = 0; i < 256; i++)
+        buf[w * h + i] = buf[w * h + 256 + i] = (uint8_t) i;
+    mlt_frame fr = mlt_frame_init(MLT_FILTER_SERVICE(f));
+    mlt_frame_set_image(fr, buf, size, mlt_pool_release);
+    mlt_properties fp = MLT_FRAME_PROPERTIES(fr);
+    mlt_properties_set_int(fp, "format", mlt_image_yuv420p);
+    mlt_properties_set_int(fp, "width", w);
+    mlt_properties_set_int(fp, "height", h);
+    mlt_properties_set_int(fp, "progressive", 1);
+    (void) prof;
+    mlt_filter_process(f, fr);
+    mlt_image_format fmt = mlt_image_yuv420p;
+    uint8_t *img = NULL;
+    int fw = w, fh = h;
+    mlt_frame_get_image(fr, &img, &fmt, &fw, &fh, 1);
+    if (img && fmt == mlt_image_yuv420p && fw == w && fh == h) {
+        out = malloc(3 * 256);
+        memcpy(out, img, 256);
+        memcpy(out + 256, img + w * h, 256);
+        memcpy(out + 512, img + w * h + 256, 256);
+    }
+    mlt_frame_close(fr);
+    return out;
+}
+
+static void luts(mlt_profile prof)
+{
+    mlt_filter ours = mlt_factory_filter(prof, "avfilter.lutyuv", NULL);
+    CHECK(ours && mlt_properties_get_int(MLT_FILTER_PROPERTIES(ours), "_reeledit_lut"),
+          "lut: avfilter.lutyuv is the avformat module's, not ours");
+    static const int set[][5] = {{0, 100, 100, 0, 0},     {100, 200, 200, 100, 100}, {-100, 0, 0, -100, -100},
+                                 {37, 63, 141, -23, 55},  {-12, 150, 30, 64, -77},   {5, 100, 100, 0, 0}};
+    for (int k = 0; ours && k < 6; k++) {
+        double g = pow(2.0, -set[k][4] / 100.0), kk = set[k][1] / 100.0, b = set[k][0] / 200.0;
+        double sa = set[k][2] / 100.0, w = set[k][3] * 0.2;
+        char y[200], u[100], v[100];
+        snprintf(y, sizeof(y), "clip(16+219*((pow(clip((val-16)/219,0,1),%.4f)-0.5)*%.4f+0.5+%.4f),0,255)", g, kk, b);
+        snprintf(u, sizeof(u), "clip(128+(val-128)*%.4f-(%.3f),0,255)", sa, w);
+        snprintf(v, sizeof(v), "clip(128+(val-128)*%.4f+(%.3f),0,255)", sa, w);
+        mlt_filter real = filter_avfilter_init(prof, mlt_service_filter_type, "avfilter.lutyuv", NULL);
+        mlt_service_set_profile(MLT_FILTER_SERVICE(real), prof);
+        mlt_properties_set(MLT_FILTER_PROPERTIES(real), "av.y", y);
+        mlt_properties_set(MLT_FILTER_PROPERTIES(real), "av.u", u);
+        mlt_properties_set(MLT_FILTER_PROPERTIES(real), "av.v", v);
+        mlt_properties_set(MLT_FILTER_PROPERTIES(ours), "av.y", y);
+        mlt_properties_set(MLT_FILTER_PROPERTIES(ours), "av.u", u);
+        mlt_properties_set(MLT_FILTER_PROPERTIES(ours), "av.v", v);
+        uint8_t t[3][256];
+        int parsed = !re_lut_tables(y, u, v, t);
+        uint8_t *want = every_value(prof, real), *got = every_value(prof, ours);
+        int diff = -1;
+        for (int i = 0; want && got && i < 768 && diff < 0; i++)
+            if (want[i] != got[i])
+                diff = i;
+        CHECK(parsed && want && got && diff < 0, "lut: setting %d: %s; %s at %d: FFmpeg's %d, ours %d", k,
+              parsed ? "read" : "not read", want && got ? "differs" : "no picture", diff,
+              want && diff >= 0 ? want[diff] : -1, got && diff >= 0 ? got[diff] : -1);
+        free(want);
+        free(got);
+        mlt_filter_close(real);
+    }
+    /* (not colour.c's: MLT's lutyuv does it, as it was given) */
+    mlt_properties_set(MLT_FILTER_PROPERTIES(ours), "av.y", "negval");
+    mlt_properties_set(MLT_FILTER_PROPERTIES(ours), "av.u", "val");
+    mlt_properties_set(MLT_FILTER_PROPERTIES(ours), "av.v", "val");
+    uint8_t *got = ours ? every_value(prof, ours) : NULL;
+    CHECK(got && got[16] == 235 && got[235] == 16 && got[100] == 151 && got[256 + 40] == 40,
+          "lut: another expression (negval): %d %d %d %d", got ? got[16] : -1, got ? got[235] : -1, got ? got[100] : -1,
+          got ? got[256 + 40] : -1);
+    free(got);
+    mlt_filter_close(ours);
+}
+
 static void colours(const char *a, const char *b, const char *out)
 {
     re_engine_io io = {show, NULL, clk, NULL, 48000, 2, NULL};
@@ -954,6 +1039,7 @@ static void colours(const char *a, const char *b, const char *out)
     re_project_add(p, a, -1);
     re_project_add(p, b, -1);
     re_engine *e = re_engine_open_producer(re_project_profile(p), re_project_producer(p), 1, &io);
+    luts(re_project_profile(p));
     int y0 = luma_at(e, 10), cb0 = chroma(0), cr0 = chroma(1), yb = luma_at(e, 100);
     re_colour c, g;
     re_colour_none(&c);

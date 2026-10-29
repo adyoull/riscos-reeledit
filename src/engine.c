@@ -123,6 +123,7 @@ int re_mlt_start(void)
         re_hold_register();
         re_chroma_register();
         re_looks_register();
+        re_lut_register();
         mlt_started = 1;
     }
     return 0;

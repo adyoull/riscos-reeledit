@@ -277,6 +277,21 @@ int main(void)
         free(o1);
         free(o2);
     }
+    /* looks.c's Negative: luma (inv - y) and chroma (256 - c) in their ranges, video and full */
+    for (int t = 0; t < 200; t++) {
+        static const int k[4][4] = {{251, 0, 16, 235}, {255, 0, 0, 255}, {255, 1, 16, 240}, {255, 1, 0, 255}};
+        const int *kk = k[t % 4];
+        int n = 1 + rand() % N;
+        fill(s, N, 0);
+        memcpy(d, s, n);
+        for (int i = 0; i < n; i++) { /* (the C, as looks.c's) */
+            int v = kk[0] - s[i] + kk[1];
+            s[i] = (uint8_t) (v < kk[2] ? kk[2] : v > kk[3] ? kk[3] : v);
+        }
+        if (!re_neon_invert(d, n, kk[0], kk[1], kk[2], kk[3]))
+            bad = 1;
+        compare("invert", d, s, n, 0);
+    }
     printf("neon_check: %s (largest difference from the C: %d)\n", bad ? "FAILED" : "passed", worst);
     return bad;
 }
