@@ -1,6 +1,6 @@
 # MLT on RISC OS: what was changed, and why
 
-MLT 7.42.0 builds for RISC OS with eighteen patches (`patches/mlt/`), one small
+MLT 7.42.0 builds for RISC OS with nineteen patches (`patches/mlt/`), one small
 compatibility header (`build/riscos-compat.h`) and these build settings
 (`build/build-riscos.sh`). Each patch is written so it could go upstream:
 the RISC OS behaviour is an option, off by default.
@@ -27,6 +27,7 @@ the RISC OS behaviour is an option, off by default.
 | 0016 `MLT_ANIMATION_TIME_FORMAT` read once | mlt_property.c and mlt_animation.c read it the first time it's needed, not every time | Every property got as a string asked the environment, about 430 times a frame in a picture in a picture; UnixLib's getenv looks for a name that isn't there among the OS's variables too |
 | 0017 luma: wipes mix only where the pictures meet | 0013's rows: runs of weight 0 left as they are, runs of 256 copied, only the rest mixed | Most of a wipe's picture is one clip or the other (on the testbed, within its noise: 14.2-15.4 ms a picture against 14.9-15.8) |
 | 0018 core_neon: blends skip see-through runs | `mlt_core_neon_blend` and `_blend_chroma`: sixteen pixels of alpha 0 left as they are, sixteen of alpha 255 at full strength copied, without the NEON mix (the alphas looked at with byte loads first: a NEON-to-ARM move stalls a Cortex-A8). The same to the bit | A logo's box and a keyed picture are mostly see-through. On the testbed, green screen from 12.3-14.2 ms a picture to 10.6-11.5 |
+| 0019 yuv420p at an odd size: one layout | MLT lays yuv420p's chroma out w/2 x h/2 (`mlt_image_format_planes`), FFmpeg (w+1)/2 x (h+1)/2. New common.c `mlt_avformat_yuv420p_av_to_mlt` / `_mlt_to_av` copy one into the other; filter_avcolour_space (in and out), filter_swscale (in) and producer_avformat (a decoded odd-sized picture) use them, so FFmpeg always sees its own layout and MLT its own. The preview scaler (0014) takes odd sizes, plane by plane in MLT's layout. The yuv420p composite (0009) gives an odd-sized picture's last row and column the chroma before them and draws no chroma for an odd-height frame's last row | At an odd height V starts a chroma row later in FFmpeg's layout: an overlay or picture of an odd height (common with keyframed sizes) had its V plane a row out (a line of the wrong colour), and FFmpeg's extra chroma row was written past the end of MLT's buffer |
 
 ## UnixLib
 

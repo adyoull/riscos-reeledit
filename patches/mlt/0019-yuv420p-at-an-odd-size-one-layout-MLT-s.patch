@@ -1,0 +1,388 @@
+From b85ca1bc91dfb9e4cea101af30367149b3591fc2 Mon Sep 17 00:00:00 2001
+From: Andrew Youll <andrewyoull86@gmail.com>
+Date: Thu, 29 Oct 2026 14:21:49 +0000
+Subject: [PATCH 19/19] yuv420p at an odd size: one layout, MLT's
+
+MLT lays out yuv420p's chroma w/2 x h/2 (mlt_image_format_planes), FFmpeg
+(w+1)/2 x (h+1)/2: at an odd height V starts a chroma row later in
+FFmpeg's. Where the two met, V was read from the wrong place or written
+over, and FFmpeg's extra row went past the end of MLT's buffer.
+
+- common.c: mlt_avformat_yuv420p_av_to_mlt and _mlt_to_av, the layouts
+  copied one to the other.
+- filter_avcolour_space: a yuv420p of an odd size in or out is given to
+  swscale, and taken from it, in FFmpeg's layout.
+- filter_swscale: the same for its input (its output was already copied
+  row by row into MLT's); the preview scaler (fast_scale.c) takes odd
+  sizes too, plane by plane in MLT's layout.
+- producer_avformat: a decoded picture of an odd size is made in FFmpeg's
+  layout, then copied into MLT's.
+- composite (yuv420p): an odd-sized picture's last row and column take
+  the chroma before them, and an odd-height frame's last luma row has
+  none drawn.
+---
+ src/modules/avformat/common.c                | 45 +++++++++++++++
+ src/modules/avformat/common.h                | 13 +++++
+ src/modules/avformat/filter_avcolour_space.c | 49 ++++++++++++++++-
+ src/modules/avformat/filter_swscale.c        | 32 +++++++----
+ src/modules/avformat/producer_avformat.c     | 58 ++++++++++++++++----
+ src/modules/core/transition_composite.c      | 22 +++++---
+ 6 files changed, 187 insertions(+), 32 deletions(-)
+
+diff --git a/src/modules/avformat/common.c b/src/modules/avformat/common.c
+index 1048953..25c3338 100644
+--- a/src/modules/avformat/common.c
++++ b/src/modules/avformat/common.c
+@@ -19,9 +19,12 @@
+ 
+ #include "common.h"
+ 
++#include <string.h>
++
+ #include <libavfilter/avfilter.h>
+ 
+ #include <libavutil/channel_layout.h>
++#include <libavutil/mem.h>
+ #include <libavutil/pixdesc.h>
+ #include <libavutil/samplefmt.h>
+ 
+@@ -749,3 +752,45 @@ void mlt_avformat_yuyv422_to_yuv420p(const uint8_t *src, int src_stride, uint8_t
+         }
+     }
+ }
++
++int mlt_avformat_yuv420p_odd(int width, int height)
++{
++    return ((width | height) & 1) != 0;
++}
++
++void mlt_avformat_yuv420p_av_to_mlt(const uint8_t *av, uint8_t *mlt, int width, int height)
++{
++    int acw = (width + 1) / 2, ach = (height + 1) / 2, mcw = width / 2, mch = height / 2;
++    memcpy(mlt, av, (size_t) width * height);
++    for (int p = 0; p < 2; p++) {
++        const uint8_t *s = av + (size_t) width * height + (size_t) p * acw * ach;
++        uint8_t *d = mlt + (size_t) width * height + (size_t) p * mcw * mch;
++        for (int y = 0; y < mch; y++)
++            memcpy(d + (size_t) y * mcw, s + (size_t) y * acw, mcw);
++    }
++}
++
++uint8_t *mlt_avformat_yuv420p_mlt_to_av(const uint8_t *mlt, int width, int height)
++{
++    int acw = (width + 1) / 2, ach = (height + 1) / 2, mcw = width / 2, mch = height / 2;
++    uint8_t *av = av_malloc((size_t) width * height + 2 * (size_t) acw * ach);
++    if (!av)
++        return NULL;
++    memcpy(av, mlt, (size_t) width * height);
++    for (int p = 0; p < 2; p++) {
++        const uint8_t *s = mlt + (size_t) width * height + (size_t) p * mcw * mch;
++        uint8_t *d = av + (size_t) width * height + (size_t) p * acw * ach;
++        for (int y = 0; y < ach; y++) {
++            int sy = y < mch ? y : mch - 1; /* (the last row again) */
++            uint8_t *row = d + (size_t) y * acw;
++            if (mch > 0 && mcw > 0) {
++                memcpy(row, s + (size_t) sy * mcw, mcw);
++                if (acw > mcw)
++                    row[acw - 1] = row[mcw - 1];
++            } else {
++                memset(row, 128, acw);
++            }
++        }
++    }
++    return av;
++}
+diff --git a/src/modules/avformat/common.h b/src/modules/avformat/common.h
+index 1019b9d..ad4da44 100644
+--- a/src/modules/avformat/common.h
++++ b/src/modules/avformat/common.h
+@@ -74,4 +74,17 @@ void mlt_avformat_yuv420p_to_yuyv422(uint8_t *const src[3], const int src_stride
+ void mlt_avformat_yuyv422_to_yuv420p(const uint8_t *src, int src_stride, uint8_t *const dst[3],
+                                      const int dst_stride[3], int width, int height);
+ 
++/* yuv420p at an odd width or height: MLT lays out its chroma planes w/2 x
++   h/2 (mlt_image_format_planes: V after U's (w/2) * (h/2)), FFmpeg
++   (w+1)/2 x (h+1)/2, so where V starts, and how big the picture is, differ.
++   At even sizes they're the same and these have nothing to do. */
++/* 1 if they differ at this size */
++int mlt_avformat_yuv420p_odd(int width, int height);
++/* FFmpeg's layout copied into MLT's (the last chroma row and column of an
++   odd size dropped: MLT has none) */
++void mlt_avformat_yuv420p_av_to_mlt(const uint8_t *av, uint8_t *mlt, int width, int height);
++/* MLT's layout copied for FFmpeg to read: a new buffer (av_free it) in
++   FFmpeg's, the last chroma row and column repeated; NULL if none */
++uint8_t *mlt_avformat_yuv420p_mlt_to_av(const uint8_t *mlt, int width, int height);
++
+ #endif // COMMON_H
+diff --git a/src/modules/avformat/filter_avcolour_space.c b/src/modules/avformat/filter_avcolour_space.c
+index 7a16657..6526bfe 100644
+--- a/src/modules/avformat/filter_avcolour_space.c
++++ b/src/modules/avformat/filter_avcolour_space.c
+@@ -85,7 +85,7 @@ static int convert_mlt_to_av_cs(mlt_image_format format)
+ }
+ 
+ // returns set_lumage_transfer result
+-static int av_convert_image(uint8_t *out,
++static int av_convert_planes(uint8_t *out,
+                             uint8_t *in,
+                             int out_fmt,
+                             int in_fmt,
+@@ -150,6 +150,53 @@ static int av_convert_image(uint8_t *out,
+     return error;
+ }
+ 
++/* As av_convert_planes, with a yuv420p of an odd size in or out in MLT's
++   layout (common.h): FFmpeg is given and gives its own */
++static int av_convert_image(uint8_t *out,
++                            uint8_t *in,
++                            int out_fmt,
++                            int in_fmt,
++                            int out_width,
++                            int out_height,
++                            int in_width,
++                            int in_height,
++                            mlt_colorspace src_colorspace,
++                            mlt_colorspace dst_colorspace,
++                            int src_full_range,
++                            int dst_full_range)
++{
++    uint8_t *in_av = NULL, *out_av = NULL;
++    if (in_fmt == AV_PIX_FMT_YUV420P && mlt_avformat_yuv420p_odd(in_width, in_height)) {
++        in_av = mlt_avformat_yuv420p_mlt_to_av(in, in_width, in_height);
++        if (!in_av)
++            return -1;
++    }
++    if (out_fmt == AV_PIX_FMT_YUV420P && mlt_avformat_yuv420p_odd(out_width, out_height)) {
++        out_av = av_malloc(av_image_get_buffer_size(AV_PIX_FMT_YUV420P, out_width, out_height, 1));
++        if (!out_av) {
++            av_free(in_av);
++            return -1;
++        }
++    }
++    int error = av_convert_planes(out_av ? out_av : out,
++                                  in_av ? in_av : in,
++                                  out_fmt,
++                                  in_fmt,
++                                  out_width,
++                                  out_height,
++                                  in_width,
++                                  in_height,
++                                  src_colorspace,
++                                  dst_colorspace,
++                                  src_full_range,
++                                  dst_full_range);
++    if (out_av) /* (an error here is only the colours' settings: the picture was made) */
++        mlt_avformat_yuv420p_av_to_mlt(out_av, out, out_width, out_height);
++    av_free(out_av);
++    av_free(in_av);
++    return error;
++}
++
+ /** Do it :-).
+ */
+ 
+diff --git a/src/modules/avformat/filter_swscale.c b/src/modules/avformat/filter_swscale.c
+index a09db11..daa3441 100644
+--- a/src/modules/avformat/filter_swscale.c
++++ b/src/modules/avformat/filter_swscale.c
+@@ -178,8 +178,8 @@ static int filter_scale(mlt_frame frame,
+     // (fast_scale.h), not by swscale, whose general code was most of the
+     // time a picture in a picture took on a small ARM machine
+     if (*format == mlt_image_yuv420p && mlt_properties_get_int(properties, "consumer.fast_scale")
+-        && (interp & 0xff) != SWS_POINT && !(iwidth & 1) && !(iheight & 1) && !(owidth & 1)
+-        && !(oheight & 1) && iwidth > 0 && iheight > 0 && owidth > 0 && oheight > 0) {
++        && (interp & 0xff) != SWS_POINT && iwidth >= 2 && iheight >= 2 && owidth >= 2 && oheight >= 2) {
++        /* (an odd size too: chroma w/2 x h/2, as mlt_image_format_planes lays it out) */
+         mlt_profile profile = mlt_service_profile(
+             MLT_PRODUCER_SERVICE(mlt_frame_get_original_producer(frame)));
+         mlt_colorspace dst_colorspace = profile ? profile->colorspace : mlt_colorspace_bt601;
+@@ -190,13 +190,15 @@ static int filter_scale(mlt_frame frame,
+             int out_size = mlt_image_format_size(*format, owidth, oheight, NULL);
+             uint8_t *out = mlt_pool_alloc(out_size);
+             const uint8_t *in = *image;
+-            int ok = out && !mlt_fast_scale_plane(in, iwidth, iheight, out, owidth, oheight)
+-                     && !mlt_fast_scale_plane(in + iwidth * iheight, iwidth / 2, iheight / 2,
+-                                              out + owidth * oheight, owidth / 2, oheight / 2)
+-                     && !mlt_fast_scale_plane(in + iwidth * iheight + (iwidth / 2) * (iheight / 2),
+-                                              iwidth / 2, iheight / 2,
+-                                              out + owidth * oheight + (owidth / 2) * (oheight / 2),
+-                                              owidth / 2, oheight / 2);
++            uint8_t *ip[4] = {NULL}, *op[4] = {NULL};
++            int is[4], os[4];
++            if (out) {
++                mlt_image_format_planes(mlt_image_yuv420p, iwidth, iheight, (void *) in, ip, is);
++                mlt_image_format_planes(mlt_image_yuv420p, owidth, oheight, out, op, os);
++            }
++            int ok = out && !mlt_fast_scale_plane(ip[0], iwidth, iheight, op[0], owidth, oheight)
++                     && !mlt_fast_scale_plane(ip[1], iwidth / 2, iheight / 2, op[1], owidth / 2, oheight / 2)
++                     && !mlt_fast_scale_plane(ip[2], iwidth / 2, iheight / 2, op[2], owidth / 2, oheight / 2);
+             if (ok) {
+                 mlt_frame_set_image(frame, out, out_size, mlt_pool_release);
+                 *image = out;
+@@ -222,6 +224,7 @@ static int filter_scale(mlt_frame frame,
+     if (outbuf && (cached || context)) {
+         AVFrame *avinframe = av_frame_alloc();
+         AVFrame *avoutframe = av_frame_alloc();
++        uint8_t *in_av = NULL;
+ 
+         mlt_profile profile = mlt_service_profile(
+             MLT_PRODUCER_SERVICE(mlt_frame_get_original_producer(frame)));
+@@ -289,9 +292,17 @@ static int filter_scale(mlt_frame frame,
+         avinframe->interlaced_frame = !mlt_properties_get_int(properties, "progressive");
+         avinframe->top_field_first = mlt_properties_get_int(properties, "top_field_first");
+ #endif
++        /* (an odd size of yuv420p: FFmpeg's layout of it to read, common.h) */
++        if (*format == mlt_image_yuv420p && mlt_avformat_yuv420p_odd(iwidth, iheight)) {
++            in_av = mlt_avformat_yuv420p_mlt_to_av(*image, iwidth, iheight);
++            if (!in_av) {
++                result = 1;
++                goto exit;
++            }
++        }
+         av_image_fill_arrays(avinframe->data,
+                              avinframe->linesize,
+-                             *image,
++                             in_av ? in_av : *image,
+                              avinframe->format,
+                              iwidth,
+                              iheight,
+@@ -483,6 +494,7 @@ static int filter_scale(mlt_frame frame,
+         }
+ 
+     exit:
++        av_free(in_av);
+         av_frame_free(&avinframe);
+         av_frame_free(&avoutframe);
+         if (!cached)
+diff --git a/src/modules/avformat/producer_avformat.c b/src/modules/avformat/producer_avformat.c
+index bd71cb5..2dc1eff 100644
+--- a/src/modules/avformat/producer_avformat.c
++++ b/src/modules/avformat/producer_avformat.c
+@@ -2276,17 +2276,18 @@ static int sliced_h_pix_fmt_conv_proc(int id, int idx, int jobs, void *cookie)
+     return 0;
+ }
+ 
+-static mlt_colorspace convert_image_yuvp(producer_avformat self,
+-                                         mlt_profile profile,
+-                                         AVFrame *frame,
+-                                         uint8_t *buffer,
+-                                         mlt_image_format format,
+-                                         int width,
+-                                         int height,
+-                                         int src_pix_fmt,
+-                                         int dst_pix_fmt,
+-                                         int dst_colorspace,
+-                                         int dst_full_range)
++static mlt_colorspace convert_yuvp_planes(producer_avformat self,
++                                          mlt_profile profile,
++                                          AVFrame *frame,
++                                          uint8_t *buffer,
++                                          mlt_image_format format,
++                                          int width,
++                                          int height,
++                                          int src_pix_fmt,
++                                          int dst_pix_fmt,
++                                          int dst_colorspace,
++                                          int dst_full_range,
++                                          int av_layout)
+ {
+     mlt_colorspace result = self->yuv_colorspace;
+ 
+@@ -2371,7 +2372,10 @@ static mlt_colorspace convert_image_yuvp(producer_avformat self,
+ 
+     uint8_t *out_data[4];
+     int out_stride[4];
+-    mlt_image_format_planes(format, width, height, buffer, out_data, out_stride);
++    if (av_layout)
++        av_image_fill_arrays(out_data, out_stride, buffer, AV_PIX_FMT_YUV420P, width, height, 1);
++    else
++        mlt_image_format_planes(format, width, height, buffer, out_data, out_stride);
+ 
+     // Nothing to convert (the same format, colours and range): copy the
+     // planes, without making a swscale context and running it each frame
+@@ -2420,6 +2424,36 @@ static mlt_colorspace convert_image_yuvp(producer_avformat self,
+     return result;
+ }
+ 
++/* As convert_yuvp_planes; yuv420p of an odd size made in FFmpeg's layout
++   and copied into MLT's (common.h): FFmpeg writes more chroma than MLT's
++   layout has room for */
++static mlt_colorspace convert_image_yuvp(producer_avformat self,
++                                         mlt_profile profile,
++                                         AVFrame *frame,
++                                         uint8_t *buffer,
++                                         mlt_image_format format,
++                                         int width,
++                                         int height,
++                                         int src_pix_fmt,
++                                         int dst_pix_fmt,
++                                         int dst_colorspace,
++                                         int dst_full_range)
++{
++    if (format == mlt_image_yuv420p && mlt_avformat_yuv420p_odd(width, height)) {
++        uint8_t *av = av_malloc(av_image_get_buffer_size(AV_PIX_FMT_YUV420P, width, height, 1));
++        if (av) {
++            mlt_colorspace result = convert_yuvp_planes(self, profile, frame, av, format, width, height,
++                                                        src_pix_fmt, dst_pix_fmt, dst_colorspace,
++                                                        dst_full_range, 1);
++            mlt_avformat_yuv420p_av_to_mlt(av, buffer, width, height);
++            av_free(av);
++            return result;
++        }
++    }
++    return convert_yuvp_planes(self, profile, frame, buffer, format, width, height, src_pix_fmt, dst_pix_fmt,
++                               dst_colorspace, dst_full_range, 0);
++}
++
+ static void convert_image_rgb(producer_avformat self,
+                               mlt_profile profile,
+                               AVFrame *frame,
+diff --git a/src/modules/core/transition_composite.c b/src/modules/core/transition_composite.c
+index 6311f96..cba7ccd 100644
+--- a/src/modules/core/transition_composite.c
++++ b/src/modules/core/transition_composite.c
+@@ -1027,14 +1027,18 @@ static void composite_yuv420p(uint8_t *dest,
+     int cw = (w + 1) / 2, ch = (h + 1) / 2;
+     if (x / 2 + cw > width_dest / 2)
+         cw = width_dest / 2 - x / 2;
+-    if (y / 2 + ch > (height_dest + 1) / 2)
+-        ch = (height_dest + 1) / 2 - y / 2;
++    if (y / 2 + ch > height_dest / 2) /* (the rows of chroma there are: an odd height has none for its last) */
++        ch = height_dest / 2 - y / 2;
+     for (int j = 0; j < ch; j++) {
+         int r0 = sy + 2 * j, r1 = r0 + 1 < height_src ? r0 + 1 : r0;
+         uint8_t *du = d.planes[1] + (size_t) (y / 2 + j) * d.strides[1] + x / 2;
+         uint8_t *dv = d.planes[2] + (size_t) (y / 2 + j) * d.strides[2] + x / 2;
+-        const uint8_t *su = s.planes[1] + (size_t) (sy / 2 + j) * s.strides[1] + sx / 2;
+-        const uint8_t *sv = s.planes[2] + (size_t) (sy / 2 + j) * s.strides[2] + sx / 2;
++        /* (an odd size has no chroma for its last row or column: the one before's) */
++        int sr = sy / 2 + j < height_src / 2 ? sy / 2 + j : height_src / 2 - 1, slast = width_src / 2 - 1 - sx / 2;
++        if (sr < 0 || slast < 0)
++            break;
++        const uint8_t *su = s.planes[1] + (size_t) sr * s.strides[1] + sx / 2;
++        const uint8_t *sv = s.planes[2] + (size_t) sr * s.strides[2] + sx / 2;
+         const uint8_t *a0 = alpha_b ? alpha_b + (size_t) r0 * width_src : NULL;
+         const uint8_t *a1 = alpha_b ? alpha_b + (size_t) r1 * width_src : NULL;
+         int i = 0, whole = (width_src - sx) / 2; /* (chroma pixels with both luma columns in the picture) */
+@@ -1051,13 +1055,13 @@ static void composite_yuv420p(uint8_t *dest,
+                 if (!al)
+                     continue;
+             }
+-            int mix = (weight * (al + 1)) >> 8;
++            int mix = (weight * (al + 1)) >> 8, si = i < slast ? i : slast;
+             if (mix >= (1 << 16)) {
+-                du[i] = su[i];
+-                dv[i] = sv[i];
++                du[i] = su[si];
++                dv[i] = sv[si];
+             } else {
+-                du[i] = (su[i] * mix + du[i] * ((1 << 16) - mix)) >> 16;
+-                dv[i] = (sv[i] * mix + dv[i] * ((1 << 16) - mix)) >> 16;
++                du[i] = (su[si] * mix + du[i] * ((1 << 16) - mix)) >> 16;
++                dv[i] = (sv[si] * mix + dv[i] * ((1 << 16) - mix)) >> 16;
+             }
+         }
+     }
+-- 
+2.43.0
+

@@ -61,6 +61,8 @@ mk -f lavfi -i sine=frequency=50:sample_rate=48000:duration=2 -ac 2 "$O/low.wav"
 mk -f lavfi -i sine=frequency=3000:sample_rate=48000:duration=2 -ac 2 "$O/tone3k.wav"
 mk -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=2,volume=0.03" -ac 2 "$O/quiet.wav"
 # (anamorphic: 720x576 shown 16:9, as DVDs are)
+# (an odd height: FFV1 keeps it; yuv420p's chroma laid out as MLT does, patches/mlt 0019)
+mk -f lavfi -i "color=c=red:s=64x38:r=25:d=1,format=yuv444p,crop=64:37:0:0,format=yuv420p" -c:v ffv1 "$O/odd.mkv"
 mk -f lavfi -i color=c=blue:s=720x576:r=25:d=1 -vf setsar=64/45 -c:v libx264 -bf 0 -pix_fmt yuv420p "$O/wide-dvd.mp4"
 
 # ---- the test programs, linked as ReelEdit will be: every module built in

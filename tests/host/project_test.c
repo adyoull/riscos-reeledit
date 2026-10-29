@@ -2870,6 +2870,160 @@ static void still_previews(mlt_profile prof, const char *dir)
     mlt_producer_close(fresh);
 }
 
+/* yuv420p at an odd height (chroma w/2 x h/2, V after U's (w/2) * (h/2), as
+   mlt_image_format_planes lays it out): every way a picture comes, a red
+   one's U and V all where they should be */
+static int odd_planes(mlt_producer prod, int fast, int w, int h, int *bad_u, int *bad_v)
+{
+    mlt_frame f = NULL;
+    mlt_service_get_frame(MLT_PRODUCER_SERVICE(prod), &f, 0);
+    mlt_properties fp = MLT_FRAME_PROPERTIES(f);
+    mlt_properties_set_int(fp, "consumer.fast_scale", fast);
+    mlt_properties_set_int(fp, "distort", 1); /* (that size, whatever its shape) */
+    mlt_image_format fmt = mlt_image_yuv420p;
+    int fw = w, fh = h;
+    uint8_t *img = NULL;
+    mlt_frame_get_image(f, &img, &fmt, &fw, &fh, 0);
+    int ok = img && fmt == mlt_image_yuv420p && fw == w && fh == h;
+    *bad_u = *bad_v = 0;
+    for (int i = 0; ok && i < (w / 2) * (h / 2); i++) {
+        int u = img[w * h + i], v = img[w * h + (w / 2) * (h / 2) + i];
+        *bad_u += u > 110; /* (red: U well below 128, V well above) */
+        *bad_v += v < 200;
+    }
+    mlt_frame_close(f);
+    return ok ? 0 : -1;
+}
+
+static void odd_heights(mlt_profile prof, const char *video)
+{
+    char file[1024];
+    snprintf(file, sizeof(file), "./red.png");
+    uint8_t *rgba = malloc(64 * 36 * 4);
+    for (int i = 0; i < 64 * 36; i++) {
+        rgba[4 * i] = 230;
+        rgba[4 * i + 1] = rgba[4 * i + 2] = 20;
+        rgba[4 * i + 3] = 255;
+    }
+    re_still_write_png(file, rgba, 64, 36);
+    free(rgba);
+    mlt_producer v = mlt_factory_producer(prof, NULL, video), pic = mlt_factory_producer(prof, NULL, file);
+    mlt_producer odd = mlt_factory_producer(prof, NULL, "./odd.mkv"); /* (red, 64x37: decoded at an odd height) */
+    static const int sizes[][2] = {{64, 37}, {66, 35}, {320, 181}, {100, 9}};
+    static const char *const what[3] = {"a video", "a picture", "an odd-height video"};
+    for (int k = 0; k < 4; k++)
+        for (int fast = 0; fast < 2; fast++)
+            for (int which = 0; which < 3; which++) {
+                int bu, bv, w = sizes[k][0], h = sizes[k][1];
+                int r = odd_planes(which == 2 ? odd : which ? pic : v, fast, w, h, &bu, &bv);
+                CHECK(!r && !bu && !bv, "odd height: %s at %dx%d%s: %d U and %d V samples misplaced (%d)", what[which],
+                      w, h, fast ? " (a preview)" : "", bu, bv, r);
+            }
+    {   /* (at its own size: the decoder's picture as it is, no scaling) */
+        mlt_frame f = NULL;
+        mlt_service_get_frame(MLT_PRODUCER_SERVICE(odd), &f, 0);
+        mlt_properties_set(MLT_FRAME_PROPERTIES(f), "consumer.rescale", "none");
+        mlt_image_format fmt = mlt_image_yuv420p;
+        int w = 0, h = 0, bad = 0;
+        uint8_t *img = NULL;
+        mlt_frame_get_image(f, &img, &fmt, &w, &h, 0);
+        for (int i = 0; img && fmt == mlt_image_yuv420p && w == 64 && h == 37 && i < 32 * 18; i++)
+            bad += img[64 * 37 + i] > 110 || img[64 * 37 + 32 * 18 + i] < 200;
+        CHECK(img && fmt == mlt_image_yuv420p && w == 64 && h == 37 && !bad,
+              "odd height: the 64x37 video as it is: %s %dx%d, %d chroma samples misplaced", mlt_image_format_name(fmt),
+              w, h, bad);
+        mlt_frame_close(f);
+        /* (converted by MLT, from its yuv420p: to yuv422, and to full range by the decoder's swscale) */
+        for (int c = 0; c < 2; c++) {
+            mlt_service_get_frame(MLT_PRODUCER_SERVICE(odd), &f, 0);
+            mlt_properties fp = MLT_FRAME_PROPERTIES(f);
+            mlt_properties_set(fp, "consumer.rescale", "none");
+            if (c)
+                mlt_properties_set(fp, "consumer.color_range", "full");
+            fmt = c ? mlt_image_yuv420p : mlt_image_yuv422;
+            w = h = 0;
+            bad = 0;
+            img = NULL;
+            mlt_frame_get_image(f, &img, &fmt, &w, &h, 0);
+            int ok = img && w == 64 && h == 37 && fmt == (c ? mlt_image_yuv420p : mlt_image_yuv422);
+            for (int i = 0; ok && !c && i < 32 * 37; i++)
+                bad += img[4 * i + 1] > 110 || img[4 * i + 3] < 200;
+            for (int i = 0; ok && c && i < 32 * 18; i++)
+                bad += img[64 * 37 + i] > 110 || img[64 * 37 + 32 * 18 + i] < 200;
+            CHECK(ok && !bad, "odd height: the 64x37 video as %s: %s %dx%d, %d chroma samples misplaced",
+                  c ? "full-range yuv420p" : "yuv422", mlt_image_format_name(fmt), w, h, bad);
+            mlt_frame_close(f);
+        }
+    }
+    {   /* (MLT's yuv420p at an odd height, converted to yuv422 by MLT's converter: a preview's picture, asked again) */
+        mlt_frame f = NULL;
+        mlt_service_get_frame(MLT_PRODUCER_SERVICE(pic), &f, 0);
+        mlt_properties fp = MLT_FRAME_PROPERTIES(f);
+        mlt_properties_set_int(fp, "consumer.fast_scale", 1);
+        mlt_properties_set_int(fp, "distort", 1);
+        mlt_image_format fmt = mlt_image_yuv420p;
+        int w = 66, h = 35, bad = 0;
+        uint8_t *img = NULL;
+        mlt_frame_get_image(f, &img, &fmt, &w, &h, 0);
+        fmt = mlt_image_yuv422;
+        int ok = img && !mlt_frame_get_image(f, &img, &fmt, &w, &h, 0) && fmt == mlt_image_yuv422 && w == 66 && h == 35;
+        for (int i = 0; ok && i < 33 * 35; i++)
+            bad += img[4 * i + 1] > 110 || img[4 * i + 3] < 200;
+        CHECK(ok && !bad, "odd height: a 66x35 yuv420p made yuv422: %s, %d chroma samples misplaced",
+              mlt_image_format_name(fmt), bad);
+        mlt_frame_close(f);
+    }
+    mlt_producer_close(odd);
+    /* composited: red 20x13 at 10,10 over green, by MLT's composite in yuv420p: inside red, below it green, the
+       whole of V's first row green (an odd height's last chroma row drawn nowhere it shouldn't be) */
+    mlt_profile p64 = mlt_profile_init(NULL);
+    p64->width = 64;
+    p64->height = 36;
+    p64->sample_aspect_num = p64->sample_aspect_den = 1;
+    p64->display_aspect_num = 16;
+    p64->display_aspect_den = 9;
+    p64->progressive = 1;
+    mlt_producer green = mlt_factory_producer(p64, "color", "#ff00c000");
+    mlt_producer red = mlt_factory_producer(p64, NULL, file);
+    mlt_tractor t = mlt_tractor_new();
+    mlt_tractor_set_track(t, green, 0);
+    mlt_tractor_set_track(t, red, 1);
+    mlt_transition c = mlt_factory_transition(p64, "composite", NULL);
+    mlt_properties cp = MLT_TRANSITION_PROPERTIES(c);
+    mlt_properties_set(cp, "geometry", "10/10:20x13:100");
+    mlt_properties_set_int(cp, "distort", 1);
+    mlt_properties_set_int(cp, "progressive", 1);
+    mlt_field_plant_transition(mlt_tractor_field(t), c, 0, 1);
+    mlt_frame f = NULL;
+    mlt_service_get_frame(MLT_TRACTOR_SERVICE(t), &f, 0);
+    mlt_properties_set_int(MLT_FRAME_PROPERTIES(f), "consumer.progressive", 1);
+    mlt_image_format fmt = mlt_image_yuv420p;
+    int w = 64, h = 36;
+    uint8_t *img = NULL;
+    mlt_frame_get_image(f, &img, &fmt, &w, &h, 0);
+    int ok = img && fmt == mlt_image_yuv420p && w == 64 && h == 36, in_red = 0, below = 0, vrow = 0;
+    const uint8_t *u = ok ? img + 64 * 36 : NULL, *vv = ok ? u + 32 * 18 : NULL;
+    for (int y = 5; ok && y < 11; y++) /* (chroma rows wholly inside: luma 10..21) */
+        for (int x = 5; x < 15; x++)
+            in_red += u[y * 32 + x] > 110 || vv[y * 32 + x] < 200;
+    for (int x = 5; ok && x < 15; x++) {
+        below += vv[12 * 32 + x] > 120; /* (row 12: luma 24..25, below it: green, V 57; red's 220) */
+        vrow += vv[x] > 120;
+    }
+    for (int x = 5; ok && x < 15; x++) /* (chroma row 11: luma 22, the overlay's last, and 23) */
+        in_red += u[11 * 32 + x] > 110 || vv[11 * 32 + x] < 200;
+    CHECK(ok && !in_red && !below && !vrow, "odd height: composited red %d wrong inside, %d below, %d in V's first row (%s)",
+          in_red, below, vrow, ok ? "yuv420p" : "no picture");
+    mlt_frame_close(f);
+    mlt_transition_close(c);
+    mlt_tractor_close(t);
+    mlt_producer_close(green);
+    mlt_producer_close(red);
+    mlt_profile_close(p64);
+    mlt_producer_close(v);
+    mlt_producer_close(pic);
+}
+
 int main(int argc, char **argv)
 {
     if (argc != 16) {
@@ -2885,6 +3039,7 @@ int main(int argc, char **argv)
     CHECK(re_project_add(p, a, -1) == 0, "a not added");
     mlt_profile pr = re_project_profile(p);
     still_previews(pr, ".");
+    odd_heights(pr, a);
     CHECK(pr->width == 320 && pr->height == 180 && re_project_fps(p) == 25, "profile %dx%d %g fps", pr->width,
           pr->height, re_project_fps(p));
     CHECK(re_project_add(p, b, -1) == 1, "b not at the end");
