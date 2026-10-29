@@ -104,6 +104,8 @@ static int even(double x)
 
 static re_engine *setup(re_engine *e, double preview_scale);
 
+extern void mlt_xml_set_latin1(int on); /* (patches/mlt 0021) */
+
 int re_mlt_start(void)
 {
     if (!mlt_started) {
@@ -112,6 +114,12 @@ int re_mlt_start(void)
 #endif
         if (!mlt_factory_init(NULL))
             return -1;
+#ifdef __riscos__
+        /* (names and text are Latin-1 here; the XML UTF-8: patches/mlt 0021.
+           A clip's name with hard spaces made a project that couldn't be
+           read back: exports failed, and undo) */
+        mlt_xml_set_latin1(1);
+#endif
         /* (MLT's NEON loops, patches/mlt 0010, only on a CPU that has it) */
         if (av_get_cpu_flags() & AV_CPU_FLAG_NEON) {
             mlt_environment_set("MLT_NEON", "1");

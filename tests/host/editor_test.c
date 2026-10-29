@@ -189,6 +189,7 @@ static int moritas_sent; /* (TaskWindow_Morite: a child killed) */
 static int plots_wide; /* (OS_Plot given a coordinate past the VDU's 16 bits) */
 static char last_text[128], filetype_path[300], all_text[16384];
 static char last_report[300]; /* (the last Wimp_ReportError's text, with no buttons) */
+static int reports_mark;
 static unsigned colours_seen; /* bit 0: the selected clip's orange set */
 static int ptr[5];            /* Wimp_GetPointerInfo */
 static int datasave_ref, ref_next = 900;
@@ -808,11 +809,15 @@ static int script(int *b, int mask)
         b[0] = 100; b[1] = 20; b[2] = 2; b[3] = -2; b[4] = BAR_ICON;
         return 6;
     case 3002:
+        reports_mark = reports;
         next(3003);
         b[0] = 2; b[1] = -1; /* Logging again */
         return 9;
     case 3003: {
         CHECK(lg_on() && choice_is("on"), "Logging again: not on (%d), or the choice not kept", lg_on());
+        /* (where it goes, said: ReelEdit$Log can send it elsewhere) */
+        CHECK(reports == reports_mark + 1 && !strcmp(last_report, "Logging to editor_test.log"),
+              "Logging again: %d reports, \"%s\"", reports - reports_mark, last_report);
         FILE *f = fopen("editor_test.log", "r");
         char t[300];
         int off = 0, on = 0, quiet = 1, header = 0;

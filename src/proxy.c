@@ -98,6 +98,8 @@ void rp_proxies_free(re_project *p)
     p->n_px = 0;
 }
 
+extern int mlt_xml_latin1(void); /* (patches/mlt 0021) */
+
 /* A name as it is in MLT's XML */
 static void escaped(char *out, size_t size, const char *s)
 {
@@ -107,6 +109,9 @@ static void escaped(char *out, size_t size, const char *s)
         if (e) {
             strcpy(out + n, e);
             n += strlen(e);
+        } else if ((unsigned char) *s >= 0x80 && mlt_xml_latin1()) { /* (Latin-1 here, UTF-8 there: patches/mlt 0021) */
+            out[n++] = (char) (0xC0 | ((unsigned char) *s >> 6));
+            out[n++] = (char) (0x80 | ((unsigned char) *s & 0x3F));
         } else {
             out[n++] = *s;
         }

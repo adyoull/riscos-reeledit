@@ -152,6 +152,11 @@ void lg_set(int on)
         open_log();
         app_log("logging on");
         lg_said();
+        if (L.f) { /* (where it goes: ReelEdit$Log, set by hand or an old !Boot, sends it elsewhere) */
+            char t[400];
+            snprintf(t, sizeof(t), "Logging to %.300s", L.name);
+            app_report(t);
+        }
     } else {
         close_log();
     }

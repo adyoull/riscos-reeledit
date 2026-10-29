@@ -1,0 +1,317 @@
+From 2aee9b26a19d468e1090f9de93642bc6a4d8681f Mon Sep 17 00:00:00 2001
+From: Andrew Youll <andrewyoull86@gmail.com>
+Date: Thu, 29 Oct 2026 21:26:57 +0000
+Subject: [PATCH 21/21] xml: Latin-1 in memory, UTF-8 in the XML
+ (mlt_xml_set_latin1)
+
+On a system whose names and text are Latin-1 (RISC OS), a byte over 127
+in a property (a file name with hard spaces, a title with a pound sign)
+was written into the XML as it was, and libxml2 refused the file when it
+was read back ("Input is not proper UTF-8"). With mlt_xml_set_latin1(1)
+the consumer writes such bytes as UTF-8, and the producer makes the
+attributes and text it reads Latin-1 again (past 255: '?'). A file
+written before, not well formed as UTF-8, is read again as Latin-1.
+---
+ src/modules/xml/common.c       |  62 ++++++++++++++++
+ src/modules/xml/common.h       |  10 +++
+ src/modules/xml/consumer_xml.c |  21 +++++-
+ src/modules/xml/producer_xml.c | 126 ++++++++++++++++++++++++++-------
+ 4 files changed, 194 insertions(+), 25 deletions(-)
+
+diff --git a/src/modules/xml/common.c b/src/modules/xml/common.c
+index bf7ae8e..0558ff0 100644
+--- a/src/modules/xml/common.c
++++ b/src/modules/xml/common.c
+@@ -48,3 +48,65 @@ size_t mlt_xml_prefix_size(mlt_properties properties, const char *name, const ch
+     }
+     return result;
+ }
++
++/* ---- Latin-1 in memory, UTF-8 in the XML ---- */
++
++#include <stdlib.h>
++#include <string.h>
++
++static int latin1 = 0;
++
++void mlt_xml_set_latin1(int on)
++{
++    latin1 = on;
++}
++
++int mlt_xml_latin1(void)
++{
++    return latin1;
++}
++
++char *mlt_xml_latin1_to_utf8(const char *s, size_t len, size_t *out_len)
++{
++    char *out = malloc(2 * len + 1), *o = out;
++    if (!out)
++        return NULL;
++    for (size_t i = 0; i < len; i++) {
++        unsigned char c = (unsigned char) s[i];
++        if (c < 0x80) {
++            *o++ = (char) c;
++        } else {
++            *o++ = (char) (0xC0 | (c >> 6));
++            *o++ = (char) (0x80 | (c & 0x3F));
++        }
++    }
++    *o = 0;
++    if (out_len)
++        *out_len = (size_t) (o - out);
++    return out;
++}
++
++size_t mlt_xml_utf8_to_latin1(char *s, size_t len)
++{
++    size_t i = 0, o = 0;
++    while (i < len) {
++        unsigned char c = (unsigned char) s[i];
++        if (c < 0x80) {
++            s[o++] = (char) c;
++            i++;
++        } else if ((c & 0xE0) == 0xC0 && i + 1 < len && ((unsigned char) s[i + 1] & 0xC0) == 0x80) {
++            unsigned v = ((c & 0x1Fu) << 6) | ((unsigned char) s[i + 1] & 0x3Fu);
++            s[o++] = v < 256 ? (char) v : '?';
++            i += 2;
++        } else { /* (three or four bytes: past Latin-1) */
++            int n = (c & 0xF0) == 0xE0 ? 3 : (c & 0xF8) == 0xF0 ? 4 : 1;
++            s[o++] = '?';
++            i += n;
++            while (i < len && n > 1 && ((unsigned char) s[i] & 0xC0) != 0x80)
++                break;
++        }
++    }
++    if (o < len)
++        s[o] = 0;
++    return o;
++}
+diff --git a/src/modules/xml/common.h b/src/modules/xml/common.h
+index 123a0bb..69037bd 100644
+--- a/src/modules/xml/common.h
++++ b/src/modules/xml/common.h
+@@ -23,4 +23,14 @@
+ 
+ size_t mlt_xml_prefix_size(mlt_properties properties, const char *name, const char *value);
+ 
++/* Latin-1 in memory, UTF-8 in the XML (mlt_xml_set_latin1): for a system
++   whose names and text are Latin-1 (RISC OS), where a byte over 127 in a
++   name made a file libxml2 refused ("Input is not proper UTF-8") */
++void mlt_xml_set_latin1(int on);
++int mlt_xml_latin1(void);
++/* A Latin-1 string as UTF-8 (malloc'd; NULL: no memory) */
++char *mlt_xml_latin1_to_utf8(const char *s, size_t len, size_t *out_len);
++/* UTF-8 made Latin-1 where it is (characters past 255: '?'); its new length */
++size_t mlt_xml_utf8_to_latin1(char *s, size_t len);
++
+ #endif // MLT_XML_COMMON_H
+diff --git a/src/modules/xml/consumer_xml.c b/src/modules/xml/consumer_xml.c
+index 878db67..9df36f2 100644
+--- a/src/modules/xml/consumer_xml.c
++++ b/src/modules/xml/consumer_xml.c
+@@ -990,12 +990,31 @@ static void output_xml(mlt_consumer consumer)
+         xmlChar *buffer = NULL;
+         int length = 0;
+         xmlDocDumpMemoryEnc(doc, &buffer, &length, "utf-8");
+-        mlt_properties_set(properties, resource, _s(buffer));
++        if (mlt_xml_latin1()) { /* (its Latin-1 strings, written as they were: made UTF-8) */
++            char *u = mlt_xml_latin1_to_utf8(_s(buffer), (size_t) length, NULL);
++            mlt_properties_set(properties, resource, u);
++            free(u);
++        } else {
++            mlt_properties_set(properties, resource, _s(buffer));
++        }
+ #ifdef _WIN32
+         xmlFreeFunc xmlFree = NULL;
+         xmlMemGet(&xmlFree, NULL, NULL, NULL);
+ #endif
+         xmlFree(buffer);
++    } else if (mlt_xml_latin1()) {
++        xmlChar *buffer = NULL;
++        int length = 0;
++        size_t n = 0;
++        xmlDocDumpFormatMemoryEnc(doc, &buffer, &length, "utf-8", 1);
++        char *u = buffer ? mlt_xml_latin1_to_utf8(_s(buffer), (size_t) length, &n) : NULL;
++        FILE *f = u ? fopen(resource, "wb") : NULL;
++        if (f) {
++            fwrite(u, 1, n, f);
++            fclose(f);
++        }
++        free(u);
++        xmlFree(buffer);
+     } else {
+         xmlSaveFormatFileEnc(resource, doc, "utf-8", 1);
+     }
+diff --git a/src/modules/xml/producer_xml.c b/src/modules/xml/producer_xml.c
+index 07021ba..aa4a555 100644
+--- a/src/modules/xml/producer_xml.c
++++ b/src/modules/xml/producer_xml.c
+@@ -80,6 +80,7 @@ struct deserialise_context_s
+     mlt_deque stack_node;
+     xmlDocPtr entity_doc;
+     int entity_is_replace;
++    int latin1_input; /* (mlt_xml_latin1: the file read as Latin-1, as one written before was) */
+     mlt_deque stack_branch;
+     const xmlChar *publicId;
+     const xmlChar *systemId;
+@@ -1549,7 +1550,37 @@ static void on_end_properties(deserialise_context context, const xmlChar *name)
+     }
+ }
+ 
++static void on_start_element_utf8(void *ctx, const xmlChar *name, const xmlChar **atts);
++
++/* (mlt_xml_latin1: the attributes' values made Latin-1 first) */
+ static void on_start_element(void *ctx, const xmlChar *name, const xmlChar **atts)
++{
++    if (!mlt_xml_latin1() || !atts) {
++        on_start_element_utf8(ctx, name, atts);
++        return;
++    }
++    int n = 0;
++    while (atts[n])
++        n += 2;
++    const xmlChar **a = calloc((size_t) n + 1, sizeof(*a));
++    if (!a) {
++        on_start_element_utf8(ctx, name, atts);
++        return;
++    }
++    for (int i = 0; i < n; i += 2) {
++        a[i] = atts[i];
++        char *v = atts[i + 1] ? strdup((const char *) atts[i + 1]) : NULL;
++        if (v)
++            mlt_xml_utf8_to_latin1(v, strlen(v));
++        a[i + 1] = (const xmlChar *) v;
++    }
++    on_start_element_utf8(ctx, name, a);
++    for (int i = 0; i < n; i += 2)
++        free((void *) a[i + 1]);
++    free(a);
++}
++
++static void on_start_element_utf8(void *ctx, const xmlChar *name, const xmlChar **atts)
+ {
+     struct _xmlParserCtxt *xmlcontext = (struct _xmlParserCtxt *) ctx;
+     deserialise_context context = (deserialise_context) (xmlcontext->_private);
+@@ -1677,6 +1708,8 @@ static void on_characters(void *ctx, const xmlChar *ch, int len)
+ 
+     value[len] = 0;
+     strncpy(value, (const char *) ch, len);
++    if (mlt_xml_latin1()) /* (Latin-1 in memory) */
++        mlt_xml_utf8_to_latin1(value, strlen(value));
+ 
+     if (mlt_deque_count(context->stack_node))
+         xmlNodeAddContent(mlt_deque_peek_back(context->stack_node), (xmlChar *) value);
+@@ -2072,32 +2105,73 @@ mlt_producer producer_xml_init(mlt_profile profile,
+     xmlSubstituteEntitiesDefault(1);
+     // This is used to facilitate entity substitution in the SAX parser
+     context->entity_doc = xmlNewDoc(_x("1.0"));
+-    if (is_filename)
+-        xmlcontext = xmlCreateFileParserCtxt(filename);
+-    else
+-        xmlcontext = xmlCreateMemoryParserCtxt(data, strlen(data));
++    // (mlt_xml_latin1: a file written before, its Latin-1 left as it was,
++    // not UTF-8, is read again as Latin-1)
++    for (int as_latin1 = 0; as_latin1 < 2; as_latin1++) {
++        if (as_latin1 && (well_formed || !mlt_xml_latin1()))
++            break;
++        if (as_latin1) {
++            context_close(context);
++            context = context_new(profile);
++            if (context == NULL) {
++                free(sax);
++                return NULL;
++            }
++            mlt_properties_set_string(context->producer_map, "root", "");
++            if (is_filename) {
++                mlt_properties_set_string(context->params, "_mlt_xml_resource", data);
++                filename = mlt_properties_get(context->params, "_mlt_xml_resource");
++                parse_url(context->params, url_decode(filename, data));
++                if (strchr(filename, '/') || strchr(filename, '\\')) {
++                    mlt_properties_set_string(context->producer_map, "root", filename);
++                    char *root = mlt_properties_get(context->producer_map, "root");
++                    if (strchr(root, '/'))
++                        *(strrchr(root, '/')) = '\0';
++                    else if (strchr(root, '\\'))
++                        *(strrchr(root, '\\')) = '\0';
++                    if (root[0] != '/' && !strchr(root, ':')) {
++                        char *cwd = getcwd(NULL, 0);
++                        char *real = malloc(strlen(cwd) + strlen(root) + 2);
++                        sprintf(real, "%s/%s", cwd, root);
++                        mlt_properties_set_string(context->producer_map, "root", real);
++                        free(real);
++                        free(cwd);
++                    }
++                }
++            }
++            mlt_properties_set_int(context->destructors, "registered", 0);
++            context->entity_doc = xmlNewDoc(_x("1.0"));
++            context->latin1_input = 1;
++        }
++        if (is_filename)
++            xmlcontext = xmlCreateFileParserCtxt(filename);
++        else
++            xmlcontext = xmlCreateMemoryParserCtxt(data, strlen(data));
+ 
+-    // Invalid context - clean up and return NULL
+-    if (xmlcontext == NULL) {
+-        context_close(context);
+-        free(sax);
+-        return NULL;
++        // Invalid context - clean up and return NULL
++        if (xmlcontext == NULL) {
++            context_close(context);
++            free(sax);
++            return NULL;
++        }
++        xmlCtxtUseOptions(xmlcontext, XML_PARSE_NOENT | (as_latin1 ? XML_PARSE_IGNORE_ENC : 0));
++        if (as_latin1)
++            xmlSwitchEncoding(xmlcontext, XML_CHAR_ENCODING_8859_1);
++
++        // Parse
++        sax_orig = xmlcontext->sax;
++        xmlcontext->sax = sax;
++        xmlcontext->_private = (void *) context;
++        xmlParseDocument(xmlcontext);
++        well_formed = xmlcontext->wellFormed;
++
++        // Cleanup after parsing
++        xmlcontext->sax = sax_orig;
++        xmlcontext->_private = NULL;
++        if (xmlcontext->myDoc)
++            xmlFreeDoc(xmlcontext->myDoc);
++        xmlFreeParserCtxt(xmlcontext);
+     }
+-    xmlCtxtUseOptions(xmlcontext, XML_PARSE_NOENT);
+-
+-    // Parse
+-    sax_orig = xmlcontext->sax;
+-    xmlcontext->sax = sax;
+-    xmlcontext->_private = (void *) context;
+-    xmlParseDocument(xmlcontext);
+-    well_formed = xmlcontext->wellFormed;
+-
+-    // Cleanup after parsing
+-    xmlcontext->sax = sax_orig;
+-    xmlcontext->_private = NULL;
+-    if (xmlcontext->myDoc)
+-        xmlFreeDoc(xmlcontext->myDoc);
+-    xmlFreeParserCtxt(xmlcontext);
+ 
+     // Bad xml - clean up and return NULL
+     if (!well_formed) {
+@@ -2119,6 +2193,10 @@ mlt_producer producer_xml_init(mlt_profile profile,
+         free(sax);
+         return NULL;
+     }
++    if (context->latin1_input) {
++        xmlCtxtUseOptions(xmlcontext, XML_PARSE_IGNORE_ENC);
++        xmlSwitchEncoding(xmlcontext, XML_CHAR_ENCODING_8859_1);
++    }
+ 
+     // Reset the stack.
+     mlt_deque_close(context->stack_service);
+-- 
+2.43.0
+

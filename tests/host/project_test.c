@@ -23,6 +23,7 @@
 #include "render.h"
 #include "proxy.h"
 #include "sprites.h"
+#include <unistd.h>
 #include "still.h"
 #include <dirent.h>
 #include <limits.h>
@@ -2717,6 +2718,110 @@ static void render_previews(const char *a, const char *b, const char *numbered, 
 
 /* ---- proxies: which files want one, one made, the project swapped to
    it and back, saved with the file's name, leftovers wiped -------------------- */
+/* ---- Latin-1 names and text (RISC OS's): UTF-8 in the XML, read back
+   (patches/mlt 0021; an export failed: a clip's name had hard spaces) ---- */
+extern void mlt_xml_set_latin1(int on);
+static int utf8_valid(const char *s)
+{
+    const unsigned char *u = (const unsigned char *) s;
+    while (*u) {
+        if (*u < 0x80) { u++; continue; }
+        if ((*u & 0xE0) == 0xC0 && (u[1] & 0xC0) == 0x80) { u += 2; continue; }
+        return 0;
+    }
+    return 1;
+}
+static char *slurp(const char *file)
+{
+    FILE *f = fopen(file, "rb");
+    if (!f)
+        return NULL;
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    rewind(f);
+    char *x = malloc((size_t) n + 1);
+    if (x && fread(x, 1, (size_t) n, f) != (size_t) n) {
+        free(x);
+        x = NULL;
+    }
+    if (x)
+        x[n] = 0;
+    fclose(f);
+    return x;
+}
+static void latin1(const char *a, const char *out)
+{
+    char name[300], cmd[700], err[200];
+    snprintf(name, sizeof(name), "The\xA0" "Clip\xA0\xA3" ".mp4"); /* (hard spaces, a pound: as RISC OS names them) */
+    snprintf(cmd, sizeof(cmd), "cp '%s' '%s'", a, name);
+    CHECK(system(cmd) == 0, "latin1: no copy of %s", a);
+    char whole[PATH_MAX + 300]; /* (as the project names it: from the root) */
+    if (!getcwd(whole, PATH_MAX))
+        return;
+    strcat(whole, "/");
+    strcat(whole, name);
+    mlt_xml_set_latin1(1);
+    re_project *p = re_project_new();
+    re_project_add(p, name, -1);
+    re_title t;
+    memset(&t, 0, sizeof(t));
+    snprintf(t.text, sizeof(t.text), "Caf\xE9\n\xA3" "5");
+    snprintf(t.font, sizeof(t.font), "Homerton.Bold");
+    t.size = 10;
+    t.colour = 0xFFFFFF;
+    re_project_title_add(p, &t, 2, 10);
+    CHECK(re_project_save(p, "latin1.mlt") == 0, "latin1: not saved");
+    char *x = slurp("latin1.mlt");
+    CHECK(x && utf8_valid(x) && strstr(x, "The\xC2\xA0" "Clip\xC2\xA0\xC2\xA3" ".mp4") && strstr(x, "Caf\xC3\xA9"),
+          "latin1: the file isn't UTF-8, or the names not in it");
+    free(x);
+    /* (undo: a snapshot of it, made again) */
+    re_project_split(p, 5);
+    CHECK(re_project_undo(p) == 1 && re_project_item_file(p, 0) && !strcmp(re_project_item_file(p, 0), whole),
+          "latin1: undone, the clip's file \"%s\"", re_project_item_file(p, 0) ? re_project_item_file(p, 0) : "-");
+    /* (a proxy for it: swapped in the XML and back) */
+    char whole_a[PATH_MAX];
+    if (!realpath(a, whole_a))
+        snprintf(whole_a, sizeof(whole_a), "%s", a);
+    re_project_set_proxy(p, re_project_item_file(p, 0), whole_a);
+    re_project_use_proxies(p, 1);
+    re_project_apply_proxies(p);
+    CHECK(re_project_item_file(p, 0) && !strcmp(re_project_item_file(p, 0), whole_a), "latin1: the proxy not swapped in (%s)",
+          re_project_item_file(p, 0) ? re_project_item_file(p, 0) : "-");
+    re_project_use_proxies(p, 0);
+    re_project_apply_proxies(p);
+    CHECK(re_project_item_file(p, 0) && !strcmp(re_project_item_file(p, 0), whole), "latin1: the proxy not swapped out");
+    re_project_close(p);
+    p = re_project_open("latin1.mlt", 1);
+    re_title back;
+    memset(&back, 0, sizeof(back));
+    CHECK(p && re_project_length(p) > 0 && !strcmp(re_project_item_file(p, 0), whole), "latin1: read back: %s",
+          p ? re_project_item_file(p, 0) : "-");
+    int tr = p ? re_project_title(p, 0, &back) : -9;
+    CHECK(tr == 0 && !strcmp(back.text, t.text), "latin1: the title read back: %d \"%s\"", tr, back.text);
+    re_project_close(p);
+    /* (a file written before, its Latin-1 left as it was: read as Latin-1) */
+    mlt_xml_set_latin1(0);
+    p = re_project_new();
+    re_project_add(p, name, -1);
+    re_project_save(p, "latin1-old.mlt");
+    re_project_close(p);
+    x = slurp("latin1-old.mlt");
+    CHECK(x && !utf8_valid(x), "latin1: the old kind of file not made");
+    free(x);
+    mlt_xml_set_latin1(1);
+    p = re_project_open("latin1-old.mlt", 1);
+    CHECK(p && re_project_length(p) > 0 && !strcmp(re_project_item_file(p, 0), whole),
+          "latin1: an old file not read: %s", p ? re_project_item_file(p, 0) : "-");
+    re_project_close(p);
+    re_export_settings es = {90, RE_EXPORT_NORMAL, 0, "mpeg4"};
+    CHECK(re_export("latin1-old.mlt", out, &es, NULL, NULL, NULL, err, sizeof(err)) == 0, "latin1: export: %s", err);
+    mlt_xml_set_latin1(0);
+    remove("latin1.mlt");
+    remove("latin1-old.mlt");
+    remove(name);
+}
+
 static void proxies(const char *numbered_rel, const char *big_rel, const char *m2v, const char *pic, const char *out)
 {
     char numbered[PATH_MAX], big[PATH_MAX]; /* (as the desktop names them: whole) */
@@ -3453,6 +3558,7 @@ int main(int argc, char **argv)
     speeds(n, argv[9], argv[12], a, out);
     render_previews(a, b, n, argv[12], out);
     proxies(n, argv[7], argv[5], argv[12], out);
+    latin1(a, out);
     overlays(a, b, argv[9], out, argv[10], argv[11], argv[12]);
     video_overlays(a, b, argv[9], n, argv[5], out);
     char dir[512];
