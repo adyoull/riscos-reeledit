@@ -88,3 +88,44 @@ int re_scale_plane(const uint8_t *src, int sw, int sh, int sstride, uint8_t *dst
     free(row);
     return 0;
 }
+
+/* A plane halved (rounded 2x2 means; or along one way only): nw x nh */
+static uint8_t *halved(const uint8_t *src, int sw, int sh, int hx, int hy, int *nw, int *nh)
+{
+    int w = hx ? sw / 2 : sw, h = hy ? sh / 2 : sh;
+    uint8_t *out = malloc((size_t) w * h);
+    if (!out)
+        return NULL;
+    for (int y = 0; y < h; y++) {
+        const uint8_t *a = src + (size_t) (hy ? 2 * y : y) * sw, *b = hy ? a + sw : a;
+        uint8_t *o = out + (size_t) y * w;
+        if (hx)
+            for (int x = 0; x < w; x++)
+                o[x] = (uint8_t) ((a[2 * x] + a[2 * x + 1] + b[2 * x] + b[2 * x + 1] + 2) >> 2);
+        else
+            for (int x = 0; x < w; x++)
+                o[x] = (uint8_t) ((a[x] + b[x] + 1) >> 1);
+    }
+    *nw = w;
+    *nh = h;
+    return out;
+}
+
+int re_scale_fit(const uint8_t *src, int sw, int sh, uint8_t *dst, int dw, int dh)
+{
+    uint8_t *tmp = NULL;
+    while ((sw >= 2 * dw && sw >= 2) || (sh >= 2 * dh && sh >= 2)) {
+        int nw, nh;
+        uint8_t *h = halved(src, sw, sh, sw >= 2 * dw && sw >= 2, sh >= 2 * dh && sh >= 2, &nw, &nh);
+        free(tmp);
+        if (!h)
+            return -1;
+        tmp = h;
+        src = h;
+        sw = nw;
+        sh = nh;
+    }
+    int r = re_scale_plane(src, sw, sh, sw, dst, dw, 0, 0, dw, dh, 0, 0, (double) sw / dw, (double) sh / dh);
+    free(tmp);
+    return r;
+}

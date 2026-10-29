@@ -1,6 +1,6 @@
 # MLT on RISC OS: what was changed, and why
 
-MLT 7.42.0 builds for RISC OS with seventeen patches (`patches/mlt/`), one small
+MLT 7.42.0 builds for RISC OS with eighteen patches (`patches/mlt/`), one small
 compatibility header (`build/riscos-compat.h`) and these build settings
 (`build/build-riscos.sh`). Each patch is written so it could go upstream:
 the RISC OS behaviour is an option, off by default.
@@ -26,6 +26,7 @@ the RISC OS behaviour is an option, off by default.
 | 0015 resize: yuv420p padded as yuv420p | A picture that fits the frame with room to spare is padded in yuv420p (in the middle, at even offsets, its alpha too) when the sizes are even, and a size one pixel short of the one asked for is made even (a pixel's stretch, not a line of padding); odd sizes as before | A picture in a picture was usually a pixel short (209 for 210, by rounding), so every frame of it was converted to yuv422, padded, and scaled in yuv422 for the composite to have it back in yuv420p. With 0014: on the Linux build, the picture in a picture's instructions a frame down by a quarter; on the testbed, a keyframed one from 13.1-13.8 ms a picture to 11.8-12.3 (a still one's within the testbed's noise, about 10 ms either way) |
 | 0016 `MLT_ANIMATION_TIME_FORMAT` read once | mlt_property.c and mlt_animation.c read it the first time it's needed, not every time | Every property got as a string asked the environment, about 430 times a frame in a picture in a picture; UnixLib's getenv looks for a name that isn't there among the OS's variables too |
 | 0017 luma: wipes mix only where the pictures meet | 0013's rows: runs of weight 0 left as they are, runs of 256 copied, only the rest mixed | Most of a wipe's picture is one clip or the other (on the testbed, within its noise: 14.2-15.4 ms a picture against 14.9-15.8) |
+| 0018 core_neon: blends skip see-through runs | `mlt_core_neon_blend` and `_blend_chroma`: sixteen pixels of alpha 0 left as they are, sixteen of alpha 255 at full strength copied, without the NEON mix (the alphas looked at with byte loads first: a NEON-to-ARM move stalls a Cortex-A8). The same to the bit | A logo's box and a keyed picture are mostly see-through. On the testbed, green screen from 12.3-14.2 ms a picture to 10.6-11.5 |
 
 ## UnixLib
 

@@ -1,0 +1,61 @@
+From eede1abc5677f106b095e66f5a883b8e9c88761e Mon Sep 17 00:00:00 2001
+From: Andrew Youll <andrewyoull86@gmail.com>
+Date: Thu, 29 Oct 2026 13:38:11 +0000
+Subject: [PATCH 18/18] core_neon: blends skip see-through runs and copy opaque
+ ones
+
+A logo's box and a keyed picture are mostly alpha 0: sixteen pixels of
+it are left as they are without the NEON mix, and sixteen opaque ones at
+full strength are copied. The same results to the bit.
+---
+ src/modules/core/core_neon.c | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/src/modules/core/core_neon.c b/src/modules/core/core_neon.c
+index 31c4eac..6295051 100644
+--- a/src/modules/core/core_neon.c
++++ b/src/modules/core/core_neon.c
+@@ -125,6 +125,18 @@ static inline int mix1(int a, int w)
+     return w >= 256 ? m : (m * w) >> 8;
+ }
+ 
++/* 16 alphas all 0 (or all 255): three looked at first, the rest only if
++   they are (byte loads: a row's alphas needn't be aligned) */
++static inline int all16(const uint8_t *a, int v)
++{
++    if (a[0] != v || a[7] != v || a[15] != v)
++        return 0;
++    for (int k = 1; k < 15; k++)
++        if (a[k] != v)
++            return 0;
++    return 1;
++}
++
+ /* s over d (8 pixels, u16) by an 8.8 mix */
+ static inline uint8x8_t over(uint8x8_t s, uint8x8_t d, uint16x8_t m)
+ {
+@@ -142,6 +154,12 @@ int mlt_core_neon_blend(uint8_t *d, const uint8_t *s, const uint8_t *a, int n, i
+         return 1;
+     uint16x8_t vw = vdupq_n_u16(w);
+     for (; i + 16 <= n; i += 16) {
++        if (all16(a + i, 0)) /* (see-through: most of a logo's box, a keyed background) */
++            continue;
++        if (w >= 256 && all16(a + i, 255)) {
++            vst1q_u8(d + i, vld1q_u8(s + i));
++            continue;
++        }
+         uint8x16_t va = vld1q_u8(a + i);
+         uint8x16_t vs = vld1q_u8(s + i), vd = vld1q_u8(d + i);
+         uint16x8_t mlo = mix_of(vmovl_u8(vget_low_u8(va)), w, vw);
+@@ -173,6 +191,8 @@ int mlt_core_neon_blend_chroma(uint8_t *du,
+         return 1;
+     uint16x8_t vw = vdupq_n_u16(w), two = vdupq_n_u16(2);
+     for (; i + 8 <= n; i += 8) {
++        if (all16(a0 + 2 * i, 0) && all16(a1 + 2 * i, 0))
++            continue;
+         /* (2x2 sums: pairs across each row, then the two rows) */
+         uint16x8_t sum = vaddq_u16(vpaddlq_u8(vld1q_u8(a0 + 2 * i)), vpaddlq_u8(vld1q_u8(a1 + 2 * i)));
+         uint16x8_t al = vshrq_n_u16(vaddq_u16(sum, two), 2);
+-- 
+2.43.0
+

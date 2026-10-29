@@ -15,4 +15,9 @@
 int re_scale_plane(const uint8_t *src, int sw, int sh, int sstride, uint8_t *dst, int dstride, int x0, int y0,
                    int x1, int y1, double ox, double oy, double fx, double fy);
 
+/* A whole plane (sw x sh, rows sw long) scaled to dw x dh (rows dw long):
+   halved by 2x2 means while it's twice the size or more, so a big
+   reduction doesn't alias, then as re_scale_plane. 0, or -1 (no memory). */
+int re_scale_fit(const uint8_t *src, int sw, int sh, uint8_t *dst, int dw, int dh);
+
 #endif

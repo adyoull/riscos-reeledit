@@ -1075,6 +1075,12 @@ static void scale_planes(void)
     /* (destination x shows source (x + 0.5) / 2 - 0.5: x 3 shows 1.25, a quarter of the way from 40 to 80) */
     CHECK(out[0] == 0 && out[3] == 50 && out[4] == 70 && out[15] == 250, "scale: twice the size: %d %d %d %d", out[0],
           out[3], out[4], out[15]);
+    /* re_scale_fit: a quarter the height, the width kept: the means of each four rows */
+    uint8_t tall[4 * 8], flat[4 * 2];
+    for (int i = 0; i < 4 * 8; i++)
+        tall[i] = (uint8_t) ((i / 4) * 20 + (i % 4));
+    CHECK(!re_scale_fit(tall, 4, 8, flat, 4, 2) && flat[0] == 30 && flat[3] == 33 && flat[4] == 110,
+          "scale: a quarter the height: %d %d %d (30 33 110)", flat[0], flat[3], flat[4]);
 }
 
 
@@ -2788,6 +2794,82 @@ static void media(const char *numbered, const char *snd, const char *pic, const 
     re_media_free(m);
 }
 
+/* still.c: a preview's picture at sizes not its own scaled from its yuv420p
+   (made once), near what's made from the RGBA at each size, alpha too, odd
+   heights as well; a frame that isn't a preview's not given the preview's */
+static uint8_t *still_at(mlt_producer pic, int fast, int w, int h, uint8_t **alpha)
+{
+    mlt_frame f = NULL;
+    mlt_service_get_frame(MLT_PRODUCER_SERVICE(pic), &f, 0);
+    mlt_properties_set_int(MLT_FRAME_PROPERTIES(f), "consumer.fast_scale", fast);
+    mlt_image_format fmt = mlt_image_yuv420p;
+    int fw = w, fh = h, size = 0;
+    uint8_t *img = NULL, *copy = NULL;
+    mlt_frame_get_image(f, &img, &fmt, &fw, &fh, 0);
+    uint8_t *a = mlt_frame_get_alpha_size(f, &size);
+    *alpha = NULL;
+    if (img && fmt == mlt_image_yuv420p && fw == w && fh == h && a && size == w * h) {
+        copy = malloc(w * h * 3 / 2);
+        memcpy(copy, img, w * h + 2 * (w / 2) * (h / 2));
+        *alpha = malloc(w * h);
+        memcpy(*alpha, a, w * h);
+    } else {
+        printf("still: %s at %dx%d: %s %dx%d, alpha %d\n", fast ? "fast" : "made", w, h, mlt_image_format_name(fmt), fw,
+               fh, size);
+    }
+    mlt_frame_close(f);
+    return copy;
+}
+
+static void still_previews(mlt_profile prof, const char *dir)
+{
+    /* (a picture with detail: a red and blue checker of single pixels, opaque at the left, see-through at the right) */
+    char file[1024];
+    snprintf(file, sizeof(file), "%s/checker.png", dir);
+    int pw = 320, ph = 180;
+    uint8_t *rgba = malloc(pw * ph * 4);
+    for (int y = 0; y < ph; y++)
+        for (int x = 0; x < pw; x++) {
+            uint8_t *q = rgba + 4 * (y * pw + x);
+            int odd = (x + y) & 1;
+            q[0] = odd ? 220 : 30;
+            q[1] = 40;
+            q[2] = odd ? 30 : 220;
+            q[3] = x < pw / 2 ? 255 : 0;
+        }
+    CHECK(!re_still_write_png(file, rgba, pw, ph), "still: %s not written", file);
+    free(rgba);
+    mlt_producer pic = mlt_factory_producer(prof, NULL, file), fresh = mlt_factory_producer(prof, NULL, file);
+    static const int sizes[][2] = {{96, 54}, {112, 63}, {168, 94}, {426, 240}}; /* (its shape: down past half, an odd height, near half, up) */
+    for (int k = 0; pic && fresh && k < 4; k++) {
+        int w = sizes[k][0], h = sizes[k][1], nc = (w / 2) * (h / 2); /* (U: where V starts at an odd height isn't agreed) */
+        uint8_t *fa, *ma, *ra;
+        uint8_t *fi = still_at(pic, 1, w, h, &fa), *mi = still_at(pic, 0, w, h, &ma), *ri = still_at(fresh, 0, w, h, &ra);
+        long dy = 0, dc = 0, da = 0;
+        for (int i = 0; fi && mi && i < w * h; i++) {
+            dy += abs(fi[i] - mi[i]);
+            da += abs(fa[i] - ma[i]);
+        }
+        for (int i = 0; fi && mi && i < nc; i++)
+            dc += abs(fi[w * h + i] - mi[w * h + i]);
+        long most = k < 2 ? 1 : 4; /* (well past half: halved first, as close as an area scale; else bilinear) */
+        CHECK(fi && mi && dy <= most * w * h && dc <= 4L * nc && da <= 6L * w * h,
+              "still: preview at %dx%d not near the RGBA's: luma %.2f, chroma %.2f, alpha %.2f", w, h,
+              (double) dy / (w * h), (double) dc / nc, (double) da / (w * h));
+        int off = 0, ran = 0; /* (made again: as a fresh one's, within 1; the preview's scaled its own way) */
+        for (int i = 0; mi && ri && fi && i < w * h + nc; i++) {
+            off |= abs(mi[i] - ri[i]) > 1;
+            ran |= fi[i] != mi[i];
+        }
+        CHECK(mi && ri && !off && !memcmp(ma, ra, w * h) && ran,
+              "still: %dx%d not a preview's but given the preview's (or the preview's not its own: %d)", w, h, ran);
+        free(fi), free(mi), free(ri), free(fa), free(ma), free(ra);
+    }
+    CHECK(pic && fresh, "still: %s not opened", file);
+    mlt_producer_close(pic);
+    mlt_producer_close(fresh);
+}
+
 int main(int argc, char **argv)
 {
     if (argc != 16) {
@@ -2802,6 +2884,7 @@ int main(int argc, char **argv)
 
     CHECK(re_project_add(p, a, -1) == 0, "a not added");
     mlt_profile pr = re_project_profile(p);
+    still_previews(pr, ".");
     CHECK(pr->width == 320 && pr->height == 180 && re_project_fps(p) == 25, "profile %dx%d %g fps", pr->width,
           pr->height, re_project_fps(p));
     CHECK(re_project_add(p, b, -1) == 1, "b not at the end");

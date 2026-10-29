@@ -74,6 +74,9 @@ int main(void)
         fill(d, N, 0);
         fill(a, 2 * N, 1);
         fill(a2, 2 * N, 1);
+        if (t % 3 == 0) /* (runs of see-through and opaque, as a logo's or a keyed picture's: skipped or copied) */
+            for (int k = 0; k < 2 * N; k++)
+                a[k] = a2[k] = (k / 37) % 3 == 0 ? 0 : (k / 37) % 3 == 1 ? 255 : a[k];
 
         /* mix: transition_luma.c dissolve_yuv420p, composite without alpha */
         memcpy(c, d, n);

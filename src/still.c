@@ -23,6 +23,7 @@
  * Part of riscos-reeledit. GPL version 2 or later.
  */
 #include "still.h"
+#include "scale.h"
 
 #include <libavcodec/avcodec.h>
 #include <libswscale/swscale.h>
@@ -45,6 +46,11 @@ typedef struct
        it was last made */
     const re_still_maker *maker;
     char *made_from;
+    /* for previews (consumer.fast_scale): the picture in yuv420p at its own
+       size (made even), its alpha; other sizes scaled from it (scaled()) */
+    uint8_t *base, *base_alpha;
+    int bw, bh;
+    int fast; /* (the picture handed out was scaled so: not for a frame that isn't a preview's) */
 } still;
 
 static void still_free(still *s)
@@ -55,6 +61,8 @@ static void still_free(still *s)
     free(s->image);
     free(s->alpha);
     free(s->made_from);
+    free(s->base);
+    free(s->base_alpha);
     free(s);
 }
 
@@ -196,6 +204,53 @@ static int make(still *s, mlt_frame frame, mlt_image_format format, int w, int h
     return 0;
 }
 
+/* A preview's yuv420p at w x h (chroma w/2 x h/2, as MLT lays out an odd
+   size) scaled from the picture in yuv420p
+   at its own size (made once: RGBA to yuv420p by the frame's converters,
+   as make() does), not scaled and converted again from RGBA for every
+   size: a logo or title whose size is keyframed changes size every
+   frame. 0, or -1 (make() then). */
+static int scaled(still *s, mlt_frame frame, int w, int h)
+{
+    if (w < 2 || h < 2)
+        return -1;
+    if (!s->base) {
+        int bw = s->width & ~1, bh = s->height & ~1;
+        if (bw < 2 || bh < 2 || make(s, frame, mlt_image_yuv420p, bw, bh) || s->format != mlt_image_yuv420p)
+            return -1;
+        s->base = s->image;
+        s->base_alpha = s->alpha;
+        s->image = s->alpha = NULL;
+        s->bw = bw;
+        s->bh = bh;
+    }
+    int bw = s->bw, bh = s->bh, size = w * h * 3 / 2;
+    uint8_t *img = malloc(size), *a = s->base_alpha ? malloc((size_t) w * h) : NULL;
+    if (!img || (s->base_alpha && !a)) {
+        free(img);
+        free(a);
+        return -1;
+    }
+    const uint8_t *bu = s->base + bw * bh, *bv = bu + (bw / 2) * (bh / 2);
+    uint8_t *u = img + w * h, *v = u + (w / 2) * (h / 2);
+    if (re_scale_fit(s->base, bw, bh, img, w, h) || re_scale_fit(bu, bw / 2, bh / 2, u, w / 2, h / 2)
+        || re_scale_fit(bv, bw / 2, bh / 2, v, w / 2, h / 2) || (a && re_scale_fit(s->base_alpha, bw, bh, a, w, h))) {
+        free(img);
+        free(a);
+        return -1;
+    }
+    free(s->image);
+    free(s->alpha);
+    s->image = img;
+    s->alpha = a;
+    s->image_size = size;
+    s->alpha_size = a ? w * h : 0;
+    s->format = s->asked = mlt_image_yuv420p;
+    s->w = w;
+    s->h = h;
+    return 0;
+}
+
 /* A made picture made again if what it's made from has changed (the
    producer's properties). 0, or -1 (none). */
 static int ensure(mlt_producer producer, still *s)
@@ -221,6 +276,9 @@ static int ensure(mlt_producer producer, still *s)
     s->width = w;
     s->height = h;
     s->image = s->alpha = NULL;
+    free(s->base);
+    free(s->base_alpha);
+    s->base = s->base_alpha = NULL;
     s->made_from = strdup(key);
     mlt_properties_set_int(pp, "meta.media.width", w);
     mlt_properties_set_int(pp, "meta.media.height", h);
@@ -250,8 +308,11 @@ static int get_image(mlt_frame frame, uint8_t **buffer, mlt_image_format *format
     }
     mlt_image_format want = *format == mlt_image_none ? mlt_image_rgba : *format;
     mlt_service_lock(MLT_PRODUCER_SERVICE(producer));
-    if (!s->image || s->w != w || s->h != h || s->asked != want || !s->rgba) {
-        if (make(s, frame, want, w, h)) {
+    int fast = want == mlt_image_yuv420p && mlt_properties_get_int(fp0, "consumer.fast_scale")
+               && (w != s->width || h != s->height);
+    if (!s->image || s->w != w || s->h != h || s->asked != want || !s->rgba || (s->fast && !fast)) {
+        s->fast = fast && !scaled(s, frame, w, h);
+        if (!s->fast && make(s, frame, want, w, h)) {
             mlt_service_unlock(MLT_PRODUCER_SERVICE(producer));
             return 1;
         }
