@@ -48,6 +48,7 @@
 #include "project.h"
 #include "export.h"
 #include "fake/screens.h"
+#include "riscos/sound.h"
 int app_position(void); /* (viewer.c's) */
 int re_test_previews(int *thumbs, int *wave_rects); /* (previews.c's) */
 int re_test_previews_stand_ins(void);
@@ -163,6 +164,7 @@ static int ov_block[6], ov_redraws, ov_redraws_outside;
 static int ssb_closes, ssb_playing;
 static unsigned ssb_bytes, ssb_added, ssb_played, ssb_play_cs;
 static double ssb_level;
+static uint32_t ssb_first_word; /* (the last block's first sample pair, as queued) */
 static _kernel_oserror err = {1, "fake: not here"};
 
 static void fail_quit(const char *why, ...) __attribute__((format(printf, 1, 2)));
@@ -225,6 +227,7 @@ static unsigned ssb_heard(void)
 #define TL_V1_TOP (48 + 8 + TL_T + 64 + 8) /* (the ruler, the titles' and V2's rows, the gaps: down to V1) */
 static int script(int *b, int mask);
 int re_test_inspector_controls(void);
+const unsigned char *pv_peaks(const char *file, int *n, int *done);
 void app_edited(void);
 void lg_start(void);
 int lg_on(void);
@@ -366,6 +369,7 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
                 ssb_level = abs(smp[i]);
         ssb_bytes += (unsigned) r->r[2];
         ssb_added += (unsigned) r->r[2];
+        ssb_first_word = *(const uint32_t *) r->r[1];
         break;
     }
     case 0x57288: r->r[0] = ssb_added; r->r[1] = ssb_heard(); break;
@@ -1632,7 +1636,7 @@ static int script(int *b, int mask)
     case 4000: {
         if (nulls)
             return 0;
-        CHECK(re_test_selected() == 1 && re_test_inspector_controls() >= 10, "the Inspector: sel %d, %d controls",
+        CHECK(re_test_selected() == 1 && re_test_inspector_controls() >= 8, "the Inspector: sel %d, %d controls",
               re_test_selected(), re_test_inspector_controls());
         shot("36-inspector");
         next(4001);
@@ -1724,9 +1728,14 @@ static int script(int *b, int mask)
         re_project_item(re_test_project(), 1, &it);
         CHECK(re_colour_is_none(&c) && !it.coloured, "Inspector: Reset: brightness %d", c.brightness);
         mark = it.muted;
-        next(4009);
-        return in_row(b, 10, 300, 0x400); /* Mute */
+        next(4020);
+        return in_row(b, 0, 450, 0x400); /* the Sound page */
     }
+    case 4020:
+        if (nulls)
+            return 0;
+        next(4009);
+        return in_row(b, 2, 300, 0x400); /* Mute */
     case 4009: {
         if (nulls)
             return 0;
@@ -1734,6 +1743,43 @@ static int script(int *b, int mask)
         re_project_item(re_test_project(), 1, &it);
         CHECK(it.muted == !mark, "Inspector: Mute: %d (was %d)", it.muted, mark);
         re_project_mute(re_test_project(), 1, mark); /* (back as it was) */
+        app_edited();
+        next(4014);
+        return in_row(b, 3, 212, 0x400); /* Pan, at its left end */
+    }
+    case 4014: {
+        if (nulls)
+            return 0;
+        re_sound_fx fx;
+        re_project_sound_fx(re_test_project(), 1, &fx);
+        CHECK(fx.pan == -100 && !fx.rumble, "Inspector: Pan to the left: %d", fx.pan);
+        next(4015);
+        return in_row(b, 4, 300, 0x400); /* Rumble: cut */
+    }
+    case 4015: {
+        if (nulls)
+            return 0;
+        re_sound_fx fx;
+        re_project_sound_fx(re_test_project(), 1, &fx);
+        CHECK(fx.rumble && !fx.voice && !fx.gate && fx.pan == -100, "Inspector: Rumble cut: %d", fx.rumble);
+        re_item it;
+        re_project_item(re_test_project(), 1, &it);
+        mark = it.volume;
+        mark2_reports = reports;
+        next(4016);
+        return in_row(b, 7, 300, 0x400); /* Normalise */
+    }
+    case 4016: {
+        if (nulls)
+            return 0;
+        re_item it;
+        re_project_item(re_test_project(), 1, &it);
+        CHECK(reports == mark2_reports + 1 || it.volume != mark,
+              "Inspector: Normalise: neither a level (%d, was %d) nor a word why", it.volume, mark);
+        re_sound_fx none;
+        re_sound_fx_none(&none);
+        re_project_set_sound_fx(re_test_project(), 1, &none); /* (back as it was) */
+        re_project_volume(re_test_project(), 1, mark);
         app_edited();
         next(4010);
         return key_to(b, TL, 9); /* Ctrl-I: closed */
@@ -1744,8 +1790,52 @@ static int script(int *b, int mask)
         return key_to(b, TL, 9); /* and open */
     case 4011:
         CHECK(W[2].open, "Ctrl-I didn't open the Inspector again");
+        {
+            int k = 0, i = 0; /* (a sound on an audio track too: normalised with the clips) */
+            re_project_audio_add(re_test_project(), "tone880.wav", 0, 0, &k, &i);
+            app_edited();
+        }
+        next(4017);
+        b[0] = W[0].box[0] + 200; b[1] = W[0].box[3] - 100; b[2] = 2; b[3] = VIEWER; b[4] = -1; /* Menu */
+        return 6;
+    case 4017: {
+        int n = 0, done = 0;
+        pv_peaks(re_project_audio_file(re_test_project(), 0, 0), &n, &done);
+        if (!done) { /* (its waveform made first: on null events) */
+            if (fake_cs - phase_cs > 3000)
+                fail_quit("the sound's waveform never made");
+            return 0;
+        }
+        next(4018);
+        b[0] = 1; b[1] = 18; b[2] = -1; /* Edit > Normalise all the sound */
+        return 9;
+    }
+    case 4018: {
+        if (nulls)
+            return 0;
+        re_item it;
+        re_project_item(re_test_project(), 1, &it);
+        re_audio a;
+        re_project_audio(re_test_project(), 0, 0, &a);
+        CHECK(it.volume == 12 && a.volume != 0, "Edit > Normalise all the sound: the clip at %+d dB, the sound %+d dB",
+              it.volume, a.volume);
+        next(4019);
+        return key_to(b, TL, 0x188); /* F8: all of it undone in one */
+    }
+    case 4019: {
+        if (nulls)
+            return 0;
+        re_item it;
+        re_project_item(re_test_project(), 1, &it);
+        re_audio a;
+        re_project_audio(re_test_project(), 0, 0, &a);
+        CHECK(it.volume == -6 && a.volume == 0, "Normalise all undone in one: the clip %+d dB, the sound %+d dB",
+              it.volume, a.volume);
+        re_project_audio_remove(re_test_project(), 0, 0); /* (as it was) */
+        app_edited();
         next(144);
         return click_tl(b, 15, 0, 2);
+    }
     case 144:
         next(145);
         b[0] = 5; b[1] = -1; /* Dissolve into the clip after */
@@ -3145,6 +3235,21 @@ int main(int argc, char **argv)
     lg_end();
     remove(LOG_CHOICE);
     remove("<Wimp$ScrapDir>.ReelEditLog");
+    { /* the engine's left, right queued as RISC OS has it: right in the low halfword */
+        char why[80];
+        re_sound *snd = re_sound_open(48000, why, sizeof(why));
+        static int16_t lr[2 * 4096];
+        for (int f = 0; f < 4096; f++) {
+            lr[2 * f] = 1000;
+            lr[2 * f + 1] = -2000;
+        }
+        ssb_first_word = 0;
+        re_sound_add(snd, lr, 4096);
+        CHECK(snd && ssb_first_word == ((uint32_t) (uint16_t) -2000 | 1000u << 16),
+              "sound: left 1000, right -2000 queued as %08x, not %08x", (unsigned) ssb_first_word,
+              (unsigned) ((uint32_t) (uint16_t) -2000 | 1000u << 16));
+        re_sound_close(snd);
+    }
     printf("editor_test: %d polls, %d null events, %d Wimp_PollIdle, %u cs asleep; overlay %d pictures; "
            "%u bytes of sound\n", polls, null_events, idle_polls, slept, ov_displays, ssb_bytes);
     if (S.on)

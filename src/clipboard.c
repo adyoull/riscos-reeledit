@@ -23,6 +23,7 @@ struct re_copy
     int in, length;
     re_item item;
     re_colour colour;     /* (a clip's) */
+    re_sound_fx fx;       /* (a clip's, a video overlay's, a sound's) */
     re_overlay overlay;
     re_title title;
     re_audio sound;
@@ -69,6 +70,7 @@ re_copy *re_project_copy(re_project *p, int kind, int track, int i)
         c->in = c->item.in;
         c->length = c->item.length;
         re_project_colour(p, i, &c->colour);
+        re_project_sound_fx(p, i, &c->fx);
         c->parent = parent_of(p->v1, i);
         if (c->parent)
             return c;
@@ -80,6 +82,7 @@ re_copy *re_project_copy(re_project *p, int kind, int track, int i)
         c->length = c->overlay.length;
         if (c->overlay.title)
             return re_project_title(p, i, &c->title) ? (free(c), NULL) : c;
+        re_project_overlay_sound_fx(p, i, &c->fx);
         mlt_playlist opl;
         int e = rp_overlay_entry(p, i, &opl);
         c->parent = parent_of(opl, e);
@@ -91,6 +94,7 @@ re_copy *re_project_copy(re_project *p, int kind, int track, int i)
             break;
         c->in = c->sound.in;
         c->length = c->sound.length;
+        re_project_audio_sound_fx(p, track, i, &c->fx);
         mlt_playlist pl = rp_audio_track(p, track);
         c->parent = pl ? parent_of(pl, rp_track_entry(pl, i)) : NULL;
         if (c->parent)
@@ -144,6 +148,7 @@ int re_project_paste(re_project *p, const re_copy *c, int frame, int *track)
         if (it->volume)
             re_project_volume(p, i, it->volume);
         re_project_set_colour(p, i, &c->colour);
+        re_project_set_sound_fx(p, i, &c->fx);
         break;
     }
     case RE_COPY_OVERLAY: {
@@ -160,6 +165,7 @@ int re_project_paste(re_project *p, const re_copy *c, int frame, int *track)
             re_project_overlay_mute(p, i, 1);
         if (o->volume)
             re_project_overlay_volume(p, i, o->volume);
+        re_project_overlay_set_sound_fx(p, i, &c->fx);
         break;
     }
     case RE_COPY_SOUND: {
@@ -173,6 +179,7 @@ int re_project_paste(re_project *p, const re_copy *c, int frame, int *track)
             re_project_audio_mute(p, k, i, 1);
         if (a->volume)
             re_project_audio_volume(p, k, i, a->volume);
+        re_project_audio_set_sound_fx(p, k, i, &c->fx);
         break;
     }
     default:

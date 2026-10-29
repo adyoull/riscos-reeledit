@@ -35,9 +35,14 @@ below) and Quit.
 
 The Inspector, to the right of the Viewer, shows the settings of what's
 selected on the Timeline: a clip's colour (Look, Brightness, Contrast,
-Saturation, Warmth, Midtones, Reset) and sound (Volume, Mute); an
-overlay's Place, Size and Opacity (and a title's Edit title...); a sound's
-Volume and Mute. Click or drag along a slider (the Viewer shows it as you
+Saturation, Warmth, Midtones, Reset) and, on its Sound tab, its sound
+(Volume, Mute, Pan, Rumble, Voices, Background, Normalise the level); an
+overlay's Place, Size and Opacity (and a title's Edit title...), with a
+Sound tab for a video with sound; a sound's Volume, Mute and the same
+clean-up. Rumble cuts below 100 Hz; Voices lifts about 3 kHz; Background
+turns quiet stretches down; Normalise sets the Volume so the loud parts
+come to -3 dB (from the waveform, so it has to be made first). Edit >
+Normalise all the sound does every clip and sound in one undo. Click or drag along a slider (the Viewer shows it as you
 drag; a drag is one step for Undo). Ctrl-I (View > Inspector) closes and
 opens it.
 

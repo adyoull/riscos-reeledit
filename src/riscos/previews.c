@@ -242,6 +242,14 @@ static void file_frames(const pv_sound *s, int g0, int g1, int *k0, int *k1)
         *k1 = *k0 + 1;
 }
 
+const unsigned char *pv_peaks(const char *file, int *n, int *done)
+{
+    *n = *done = 0;
+    if (!file || !ready(P.h_os ? P.h_os : 96))
+        return NULL;
+    return re_media_peaks(P.m, file, n, done);
+}
+
 void pv_wave(const char *file, const pv_sound *s, int x0, double scale, int y0, int h, unsigned colour,
              const ro_box *clip)
 {

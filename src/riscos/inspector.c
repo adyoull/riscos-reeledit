@@ -33,9 +33,11 @@
 #define ColourTrans_SetGCOL 0x40743
 #define OS_Plot             0x45
 
-enum { K_HEADING, K_SLIDER, K_BUTTON, K_TOGGLE, K_TEXT };
+enum { K_HEADING, K_SLIDER, K_BUTTON, K_TOGGLE, K_TEXT, K_TABS }; /* (tabs: label and text the two names) */
 enum { C_LOOK = 1, C_BRIGHTNESS, C_CONTRAST, C_SATURATION, C_WARMTH, C_MIDTONES, C_RESET, C_VOLUME, C_MUTE,
-       O_PLACE, O_SIZE, O_OPACITY, O_TITLE, O_VOLUME, O_MUTE, A_VOLUME, A_MUTE };
+       O_PLACE, O_SIZE, O_OPACITY, O_TITLE, O_VOLUME, O_MUTE, A_VOLUME, A_MUTE,
+       F_PAN, F_RUMBLE, F_VOICE, F_GATE, F_NORMAL, /* (F_: the sound's clean-up, of whatever is selected) */
+       T_TABS };
 
 typedef struct
 {
@@ -45,7 +47,7 @@ typedef struct
     char text[48];   /* a button's, a toggle's or a value's words */
 } control;
 
-#define MAX_CONTROLS 20
+#define MAX_CONTROLS 26
 
 static struct
 {
@@ -55,7 +57,8 @@ static struct
     int drag_value;  /* its value when last set */
     int menu;        /* the menu open: C_LOOK or O_PLACE */
     int closed;      /* closed by the user: not opened with the editor */
-} I = {0, "Inspector", 0, 0, 0, 0};
+    int tab;         /* the page shown: 0 Colour (or Overlay), 1 Sound */
+} I = {0, "Inspector", 0, 0, 0, 0, 0};
 
 static const char *const PLACE_NAMES[RE_PLACES] = {"Full frame", "Centre", "Top left", "Top right", "Bottom left",
                                                    "Bottom right", "Lower third"};
@@ -79,6 +82,43 @@ static int add(control *c, int n, int kind, int id, const char *label, int lo, i
     c[n].value = value < lo ? lo : value > hi ? hi : value;
     snprintf(c[n].text, sizeof(c[n].text), "%s", text ? text : "");
     return n + 1;
+}
+
+/* The selection's sound clean-up: 0, or -1 (none: nothing with sound selected) */
+static int sel_fx(re_sound_fx *fx)
+{
+    if (A.sel >= 0)
+        return re_project_sound_fx(A.proj, A.sel, fx);
+    if (A.ov_sel >= 0)
+        return re_project_overlay_sound_fx(A.proj, A.ov_sel, fx);
+    if (A.au_sel >= 0)
+        return re_project_audio_sound_fx(A.proj, A.au_track, A.au_sel, fx);
+    return -1;
+}
+
+static int sel_set_fx(const re_sound_fx *fx)
+{
+    if (A.sel >= 0)
+        return re_project_set_sound_fx(A.proj, A.sel, fx);
+    if (A.ov_sel >= 0)
+        return re_project_overlay_set_sound_fx(A.proj, A.ov_sel, fx);
+    if (A.au_sel >= 0)
+        return re_project_audio_set_sound_fx(A.proj, A.au_track, A.au_sel, fx);
+    return 0;
+}
+
+/* The sound clean-up's rows (after Volume and Mute) */
+static int fx_rows(control *c, int n)
+{
+    re_sound_fx fx;
+    if (sel_fx(&fx))
+        return n;
+    n = add(c, n, K_SLIDER, F_PAN, "Pan", -100, 100, fx.pan, NULL);
+    n = add(c, n, K_TOGGLE, F_RUMBLE, "Rumble", 0, 1, fx.rumble, fx.rumble ? "Cut" : "As it is");
+    n = add(c, n, K_TOGGLE, F_VOICE, "Voices", 0, 1, fx.voice, fx.voice ? "Clearer" : "As they are");
+    n = add(c, n, K_TOGGLE, F_GATE, "Background", 0, 1, fx.gate, fx.gate ? "Quieter between sounds" : "As it is");
+    n = add(c, n, K_BUTTON, F_NORMAL, "", 0, 0, 0, "Normalise the level");
+    return n;
 }
 
 /* What's selected, in words (for the window's head) */
@@ -109,46 +149,54 @@ static int controls(control *c)
     if (!A.proj)
         return 0;
     if (A.sel >= 0 && !re_project_item(A.proj, A.sel, &it) && !it.gap && !it.mix) {
-        re_colour col;
-        re_project_colour(A.proj, A.sel, &col);
-        int look = re_colour_look_of(&col);
-        n = add(c, n, K_HEADING, 0, "Colour", 0, 0, 0, NULL);
-        n = add(c, n, K_BUTTON, C_LOOK, "Look", 0, 0, 0, look >= 0 ? re_colour_looks[look] : "Your own");
-        n = add(c, n, K_SLIDER, C_BRIGHTNESS, "Brightness", -100, 100, col.brightness, NULL);
-        n = add(c, n, K_SLIDER, C_CONTRAST, "Contrast", 0, 200, col.contrast, NULL);
-        n = add(c, n, K_SLIDER, C_SATURATION, "Saturation", 0, 200, col.saturation, NULL);
-        n = add(c, n, K_SLIDER, C_WARMTH, "Warmth", -100, 100, col.warmth, NULL);
-        n = add(c, n, K_SLIDER, C_MIDTONES, "Midtones", -100, 100, col.midtones, NULL);
-        n = add(c, n, K_BUTTON, C_RESET, "", 0, 0, 0, "Reset the colour");
-        n = add(c, n, K_HEADING, 0, "Sound", 0, 0, 0, NULL);
-        if (it.sound) {
+        n = add(c, n, K_TABS, T_TABS, "Colour", 0, 1, I.tab, "Sound");
+        if (I.tab == 0) {
+            re_colour col;
+            re_project_colour(A.proj, A.sel, &col);
+            int look = re_colour_look_of(&col);
+            n = add(c, n, K_BUTTON, C_LOOK, "Look", 0, 0, 0, look >= 0 ? re_colour_looks[look] : "Your own");
+            n = add(c, n, K_SLIDER, C_BRIGHTNESS, "Brightness", -100, 100, col.brightness, NULL);
+            n = add(c, n, K_SLIDER, C_CONTRAST, "Contrast", 0, 200, col.contrast, NULL);
+            n = add(c, n, K_SLIDER, C_SATURATION, "Saturation", 0, 200, col.saturation, NULL);
+            n = add(c, n, K_SLIDER, C_WARMTH, "Warmth", -100, 100, col.warmth, NULL);
+            n = add(c, n, K_SLIDER, C_MIDTONES, "Midtones", -100, 100, col.midtones, NULL);
+            n = add(c, n, K_BUTTON, C_RESET, "", 0, 0, 0, "Reset the colour");
+            if (it.speed != 100) {
+                snprintf(v, sizeof(v), it.speed < 0 ? "Speed: reversed, %d%%" : "Speed: %d%%",
+                         it.speed < 0 ? -it.speed : it.speed);
+                n = add(c, n, K_TEXT, 0, "", 0, 0, 0, v);
+            }
+        } else if (it.sound) {
             n = add(c, n, K_SLIDER, C_VOLUME, "Volume", -36, 12, it.volume, NULL);
             n = add(c, n, K_TOGGLE, C_MUTE, "Mute", 0, 1, it.muted, it.muted ? "Muted" : "Not muted");
+            n = fx_rows(c, n);
         } else {
             n = add(c, n, K_TEXT, 0, "", 0, 0, 0, "This clip has no sound.");
         }
-        if (it.speed != 100) {
-            snprintf(v, sizeof(v), it.speed < 0 ? "Reversed, %d%%" : "%d%%", it.speed < 0 ? -it.speed : it.speed);
-            n = add(c, n, K_HEADING, 0, "Speed", 0, 0, 0, NULL);
-            n = add(c, n, K_TEXT, 0, "", 0, 0, 0, v);
-        }
     } else if (A.ov_sel >= 0 && !re_project_overlay(A.proj, A.ov_sel, &o)) {
-        n = add(c, n, K_HEADING, 0, o.title ? "Title" : "Overlay", 0, 0, 0, NULL);
-        if (o.title)
-            n = add(c, n, K_BUTTON, O_TITLE, "Text", 0, 0, 0, "Edit title...");
-        n = add(c, n, K_BUTTON, O_PLACE, "Place", 0, 0, 0, PLACE_NAMES[o.place >= 0 && o.place < RE_PLACES ? o.place : 0]);
-        if (!o.title && o.place != RE_PLACE_FULL)
-            n = add(c, n, K_SLIDER, O_SIZE, "Size", 10, 100, o.size, NULL);
-        n = add(c, n, K_SLIDER, O_OPACITY, "Opacity", 0, 100, o.opacity, NULL);
-        if (o.video && o.sound) {
-            n = add(c, n, K_HEADING, 0, "Sound", 0, 0, 0, NULL);
+        int sound = o.video && o.sound;
+        if (sound)
+            n = add(c, n, K_TABS, T_TABS, o.title ? "Title" : "Overlay", 0, 1, I.tab, "Sound");
+        else
+            n = add(c, n, K_HEADING, 0, o.title ? "Title" : "Overlay", 0, 0, 0, NULL);
+        if (!sound || I.tab == 0) {
+            if (o.title)
+                n = add(c, n, K_BUTTON, O_TITLE, "Text", 0, 0, 0, "Edit title...");
+            n = add(c, n, K_BUTTON, O_PLACE, "Place", 0, 0, 0,
+                    PLACE_NAMES[o.place >= 0 && o.place < RE_PLACES ? o.place : 0]);
+            if (!o.title && o.place != RE_PLACE_FULL)
+                n = add(c, n, K_SLIDER, O_SIZE, "Size", 10, 100, o.size, NULL);
+            n = add(c, n, K_SLIDER, O_OPACITY, "Opacity", 0, 100, o.opacity, NULL);
+        } else {
             n = add(c, n, K_SLIDER, O_VOLUME, "Volume", -36, 12, o.volume, NULL);
             n = add(c, n, K_TOGGLE, O_MUTE, "Mute", 0, 1, o.muted, o.muted ? "Muted" : "Not muted");
+            n = fx_rows(c, n);
         }
     } else if (A.au_sel >= 0 && !re_project_audio(A.proj, A.au_track, A.au_sel, &a)) {
         n = add(c, n, K_HEADING, 0, "Sound", 0, 0, 0, NULL);
         n = add(c, n, K_SLIDER, A_VOLUME, "Volume", -36, 12, a.volume, NULL);
         n = add(c, n, K_TOGGLE, A_MUTE, "Mute", 0, 1, a.muted, a.muted ? "Muted" : "Not muted");
+        n = fx_rows(c, n);
     }
     return n;
 }
@@ -161,6 +209,12 @@ static void value_text(const control *c, char *t, int size)
         break;
     case C_VOLUME: case O_VOLUME: case A_VOLUME:
         snprintf(t, size, "%+d dB", c->value);
+        break;
+    case F_PAN:
+        if (c->value == 0)
+            snprintf(t, size, "Middle");
+        else
+            snprintf(t, size, "%s %d", c->value < 0 ? "L" : "R", c->value < 0 ? -c->value : c->value);
         break;
     default:
         snprintf(t, size, "%+d", c->value);
@@ -408,6 +462,12 @@ void in_redraw(int *b)
             case K_TEXT:
                 text(k->text, ox + 32, y0 + 14, DARK, GREY);
                 break;
+            case K_TABS: {
+                int mid = ox + WIDTH / 2;
+                button(ox + 16, y0 + 6, mid - 4, y1 - 2, k->label, k->value == 0 ? 0xE0C09000u : WHITE);
+                button(mid + 4, y0 + 6, ox + WIDTH - 24, y1 - 2, k->text, k->value == 1 ? 0xE0C09000u : WHITE);
+                break;
+            }
             }
         }
         r.r[1] = (intptr_t) b;
@@ -459,6 +519,17 @@ static int set(int id, int value)
     case A_VOLUME:
         done = re_project_audio_volume(A.proj, A.au_track, A.au_sel, value);
         break;
+    case F_PAN: case F_RUMBLE: case F_VOICE: case F_GATE: {
+        re_sound_fx fx;
+        if (sel_fx(&fx))
+            return 0;
+        if (id == F_PAN) fx.pan = value;
+        if (id == F_RUMBLE) fx.rumble = !fx.rumble;
+        if (id == F_VOICE) fx.voice = !fx.voice;
+        if (id == F_GATE) fx.gate = !fx.gate;
+        done = sel_set_fx(&fx);
+        break;
+    }
     case A_MUTE:
         done = !re_project_audio(A.proj, A.au_track, A.au_sel, &a)
                && re_project_audio_mute(A.proj, A.au_track, A.au_sel, !a.muted);
@@ -533,6 +604,102 @@ void in_menu_select(int *b)
         app_edited();
 }
 
+/* An item's normalising level (kind 0 a clip, 1 an overlay, 2 a sound on
+   track k) from its file's peaks over the part used (the waveform's, made
+   in the background): 0, 1 (its waveform isn't made yet), 2 (too little
+   sound) or 3 (no sound) */
+static int level_of(int kind, int k, int i, int *db)
+{
+    const char *file = NULL;
+    int f0 = 0, f1 = 0, n = 0, done = 0;
+    re_item it;
+    re_overlay o;
+    re_audio a;
+    if (kind == 0 && !re_project_item(A.proj, i, &it) && !it.gap && !it.mix && it.sound) {
+        file = re_project_item_file(A.proj, i);
+        f0 = re_item_file_frame(&it, it.in);
+        f1 = re_item_file_frame(&it, it.out) + 1;
+        if (f1 < f0) { /* (reversed) */
+            int t = f0;
+            f0 = f1 - 1;
+            f1 = t + 1;
+        }
+    } else if (kind == 1 && !re_project_overlay(A.proj, i, &o) && o.video && o.sound) {
+        file = re_project_overlay_file(A.proj, i);
+        f0 = o.in;
+        f1 = o.in + o.length;
+    } else if (kind == 2 && !re_project_audio(A.proj, k, i, &a)) {
+        file = re_project_audio_file(A.proj, k, i);
+        f0 = a.in;
+        f1 = a.in + a.length;
+    }
+    if (!file)
+        return 3;
+    const unsigned char *pk = pv_peaks(file, &n, &done);
+    if (!pk || !done)
+        return 1;
+    return re_normal_level(pk, n, f0, f1, db) ? 2 : 0;
+}
+
+static int set_level(int kind, int k, int i, int db)
+{
+    return kind == 0 ? re_project_volume(A.proj, i, db)
+           : kind == 1 ? re_project_overlay_volume(A.proj, i, db)
+                       : re_project_audio_volume(A.proj, k, i, db);
+}
+
+/* The selection's sound made as loud as the rest */
+static void normalise(void)
+{
+    int kind = A.sel >= 0 ? 0 : A.ov_sel >= 0 ? 1 : 2, i = kind == 0 ? A.sel : kind == 1 ? A.ov_sel : A.au_sel;
+    int db = 0, r = level_of(kind, A.au_track, i, &db);
+    if (r == 1)
+        app_report("Its waveform is still being made: try again in a moment.");
+    else if (r)
+        app_report("There's too little sound there to normalise.");
+    if (r)
+        return;
+    app_log("inspector: normalised to %+d dB", db);
+    if (set_level(kind, A.au_track, i, db))
+        app_edited();
+}
+
+void in_normalise_all(void)
+{
+    int done = 0, waiting = 0, db;
+    if (!A.proj)
+        return;
+    re_project_begin(A.proj); /* (one undo for all of it) */
+    for (int i = 0; i < re_project_items(A.proj); i++) {
+        int r = level_of(0, 0, i, &db);
+        if (!r)
+            done += set_level(0, 0, i, db) >= 0;
+        waiting += r == 1;
+    }
+    for (int i = 0; i < re_project_overlays(A.proj); i++) {
+        int r = level_of(1, 0, i, &db);
+        if (!r)
+            done += set_level(1, 0, i, db) >= 0;
+        waiting += r == 1;
+    }
+    for (int k = 0; k < re_project_audio_tracks(A.proj); k++)
+        for (int i = 0; i < re_project_audio_count(A.proj, k); i++) {
+            int r = level_of(2, k, i, &db);
+            if (!r)
+                done += set_level(2, k, i, db) >= 0;
+            waiting += r == 1;
+        }
+    re_project_end(A.proj);
+    app_log("normalised: %d, %d waiting for their waveforms", done, waiting);
+    if (waiting) {
+        char t[160];
+        snprintf(t, sizeof(t), "%d of the sounds have been normalised; %d are still having their waveforms made: "
+                 "choose this again in a moment for those.", done, waiting);
+        app_report(t);
+    }
+    app_edited();
+}
+
 void in_click(int *b)
 {
     int st[9];
@@ -578,6 +745,10 @@ void in_click(int *b)
     if (!(b[2] & 0x500))
         return;
     switch (k->id) {
+    case T_TABS:
+        I.tab = wx < WIDTH / 2 ? 0 : 1;
+        redraw_all();
+        break;
     case C_LOOK: case O_PLACE:
         open_menu(k->id, b[0], b[1]);
         break;
@@ -593,7 +764,10 @@ void in_click(int *b)
     case O_TITLE:
         ti_open(A.ov_sel);
         break;
-    case C_MUTE: case O_MUTE: case A_MUTE:
+    case F_NORMAL:
+        normalise();
+        break;
+    case C_MUTE: case O_MUTE: case A_MUTE: case F_RUMBLE: case F_VOICE: case F_GATE:
         if (set(k->id, 0)) {
             app_log("inspector: %s", k->label);
             app_edited();

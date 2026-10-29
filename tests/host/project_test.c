@@ -1044,6 +1044,134 @@ static void colours(const char *a, const char *b, const char *out)
     re_project_close(p);
 }
 
+/* ---- sound clean-up: a clip panned (one side, then the other); a sound's
+   rumble cut (a 50 Hz hum much quieter), its voice made clearer (a 3 kHz
+   tone louder), its quiet background turned down (a quiet tone quieter);
+   kept by a split, copy and paste, saving and opening; one undo each;
+   the normalising level from peaks */
+static int chan_peak(re_project *p, int frame, int which)
+{
+    mlt_producer prod = re_project_producer(p);
+    mlt_frame f = NULL;
+    mlt_producer_seek(prod, frame);
+    if (mlt_service_get_frame(MLT_PRODUCER_SERVICE(prod), &f, 0) || !f)
+        return -1;
+    mlt_audio_format fmt = mlt_audio_s16;
+    int freq = 48000, ch = 2, n = mlt_audio_calculate_frame_samples(25, freq, frame), peak = 0;
+    int16_t *pcm = NULL;
+    if (!mlt_frame_get_audio(f, (void **) &pcm, &fmt, &freq, &ch, &n) && pcm && ch == 2)
+        for (int i = 0; i < n; i++)
+            if (abs(pcm[i * 2 + which]) > peak)
+                peak = abs(pcm[i * 2 + which]);
+    mlt_frame_close(f);
+    return peak;
+}
+
+/* A sound alone in a project (over a silent clip): its peak at frame 20 (past any filter's start) */
+static int sound_peak(const char *silent, const char *sound, const re_sound_fx *fx)
+{
+    re_project *p = re_project_new();
+    re_project_add(p, silent, -1);
+    int k = 0, i = 0;
+    re_project_audio_add(p, sound, 0, 0, &k, &i);
+    re_project_mute(p, 0, 1);
+    if (fx)
+        re_project_audio_set_sound_fx(p, k, i, fx);
+    chan_peak(p, 19, 0);
+    int pk = chan_peak(p, 20, 0);
+    re_project_close(p);
+    return pk;
+}
+
+static void sound_fx(const char *snd, const char *out)
+{
+    re_project *p = re_project_new();
+    re_project_add(p, snd, -1);
+    re_project_add(p, snd, -1);
+    re_sound_fx fx, g;
+    CHECK(!re_project_sound_fx(p, 0, &g) && !g.pan && !g.rumble && !g.voice && !g.gate, "sound fx: none at first");
+    int l0 = chan_peak(p, 10, 0), r0 = chan_peak(p, 10, 1);
+    re_sound_fx_none(&fx);
+    fx.pan = -100;
+    CHECK(re_project_set_sound_fx(p, 0, &fx) == 1 && re_project_set_sound_fx(p, 0, &fx) == 0, "sound fx: panned (once)");
+    int l1 = chan_peak(p, 10, 0), r1 = chan_peak(p, 10, 1), r2 = chan_peak(p, 100, 1);
+    CHECK(l0 > 1000 && abs(r0 - l0) < l0 / 10 && l1 > l0 * 8 / 10 && r1 < l0 / 20 && r2 > l0 * 8 / 10,
+          "sound fx: panned left: left %d right %d (were %d %d); the next clip's right %d", l1, r1, l0, r0, r2);
+    fx.pan = 100;
+    re_project_set_sound_fx(p, 0, &fx);
+    CHECK(chan_peak(p, 10, 0) < l0 / 20 && chan_peak(p, 10, 1) > l0 * 8 / 10, "sound fx: panned right: %d %d",
+          chan_peak(p, 10, 0), chan_peak(p, 10, 1));
+    fx.pan = 300;
+    re_project_set_sound_fx(p, 0, &fx);
+    re_project_sound_fx(p, 0, &g);
+    CHECK(g.pan == 100, "sound fx: kept in range: %d", g.pan);
+    CHECK(re_project_undo(p) && !re_project_sound_fx(p, 0, &g) && g.pan == -100, "sound fx: undone: %d", g.pan);
+    /* split, paste, save, open */
+    fx.pan = -60;
+    fx.rumble = fx.voice = fx.gate = 1;
+    re_project_set_sound_fx(p, 0, &fx);
+    CHECK(re_project_split(p, 30), "sound fx: split");
+    re_sound_fx g2;
+    re_project_sound_fx(p, 0, &g);
+    re_project_sound_fx(p, 1, &g2);
+    CHECK(!memcmp(&g, &g2, sizeof(g)) && g.pan == -60 && g.rumble && g.voice && g.gate, "sound fx: both parts");
+    re_copy *cp = re_project_copy(p, RE_COPY_CLIP, 0, 0);
+    int track = 0;
+    CHECK(cp && re_project_paste(p, cp, 0, &track) == 0 && !re_project_sound_fx(p, 0, &g) && g.pan == -60 && g.gate,
+          "sound fx: pasted: %d", g.pan);
+    re_copy_free(cp);
+    CHECK(re_project_save(p, out) == 0 && count(out, "reeleditPan") >= 3 && count(out, "reeleditGate") >= 3,
+          "sound fx: saved: %d", count(out, "reeleditPan"));
+    re_project_close(p);
+    p = re_project_open(out, 1);
+    CHECK(p && !re_project_sound_fx(p, 1, &g) && g.pan == -60 && g.rumble && g.voice && g.gate, "sound fx: opened");
+    re_project_close(p);
+    /* a dissolve: its end keeps the clip's pan */
+    p = re_project_new();
+    re_project_add(p, snd, -1);
+    re_project_add(p, snd, -1);
+    re_sound_fx_none(&fx);
+    fx.pan = -100;
+    re_project_set_sound_fx(p, 0, &fx);
+    re_project_set_sound_fx(p, 1, &fx);
+    int mx = re_project_dissolve(p, 0, 20, 1);
+    re_item it;
+    CHECK(mx >= 0 && !re_project_item(p, mx, &it) && it.mix, "sound fx: a dissolve");
+    int mid = it.start + it.length / 2, right = chan_peak(p, mid, 1);
+    re_sound_fx_none(&fx);
+    re_project_set_sound_fx(p, 0, &fx);
+    re_project_set_sound_fx(p, 2, &fx);
+    int right_without = chan_peak(p, mid, 1);
+    CHECK(right < right_without / 5 && right_without > 1000, "sound fx: through the dissolve: right %d panned, %d not",
+          right, right_without);
+    re_project_close(p);
+    /* what each does to the sound */
+    re_sound_fx_none(&fx);
+    fx.rumble = 1;
+    int hum = sound_peak(snd, "low.wav", NULL), hum_cut = sound_peak(snd, "low.wav", &fx);
+    CHECK(hum > 2000 && hum_cut < hum / 2, "sound fx: rumble cut: a 50 Hz hum %d, then %d", hum, hum_cut);
+    re_sound_fx_none(&fx);
+    fx.voice = 1;
+    int tone = sound_peak(snd, "tone3k.wav", NULL), clearer = sound_peak(snd, "tone3k.wav", &fx);
+    CHECK(clearer > tone * 14 / 10, "sound fx: voice clearer: a 3 kHz tone %d, then %d", tone, clearer);
+    re_sound_fx_none(&fx);
+    fx.gate = 1;
+    int quiet = sound_peak(snd, "quiet.wav", NULL), gated = sound_peak(snd, "quiet.wav", &fx);
+    CHECK(quiet > 50 && gated < quiet / 3, "sound fx: quiet background turned down: %d, then %d", quiet, gated);
+    /* the normalising level */
+    unsigned char pk[200];
+    memset(pk, 0, sizeof(pk));
+    for (int f = 0; f < 100; f++)
+        pk[f] = 64; /* (-12 dB) */
+    pk[50] = 255; /* (a bang: not what decides it) */
+    int db = 0;
+    CHECK(!re_normal_level(pk, 200, 0, 200, &db) && db == 9, "sound fx: normalising -12 dB to -3: %+d dB", db);
+    CHECK(re_normal_level(pk, 200, 100, 200, &db) == -1, "sound fx: nothing to normalise in silence");
+    for (int f = 0; f < 100; f++)
+        pk[f] = 2 + 1;
+    CHECK(!re_normal_level(pk, 200, 0, 100, &db) && db == 12, "sound fx: very quiet: kept to +12: %+d", db);
+}
+
 /* ---- titles: text over the video (blocks for letters here: no Font
    Manager); its picture made by style; put on V2 at the lower third, its
    own size; changed (made again, its box with it); placed; kept through
@@ -2209,6 +2337,7 @@ int main(int argc, char **argv)
     stills(argv[10]);
     titles(a, argv[10], out);
     colours(a, b, out);
+    sound_fx(argv[9], out);
     export(a, argv[9], out, "export-test.mp4");
     audio_tracks(a, argv[9], argv[11], out);
     source_editing(a, b, n, out);

@@ -37,6 +37,7 @@ void rp_changed(re_project *p)
     rp_relink(p);
     rp_fit_fades(p);
     rp_fit_sound(p);
+    rp_fit_sound_fx(p);
     rp_fit_colour(p);
     rp_fit_overlays(p);
     rp_fit_audio(p);
@@ -306,6 +307,7 @@ static int adopt(re_project *p, mlt_producer prod)
     }
     rp_relink(p);
     rp_fit_sound(p);
+    rp_fit_sound_fx(p);
     rp_fit_colour(p);
     rp_fit_overlays(p);
     rp_fit_audio(p);
@@ -537,6 +539,8 @@ int rp_split_at(re_project *p, int frame)
     int volume = rp_cut_volume(mlt_playlist_get_clip(p->v1, i));
     re_colour colour;
     rp_cut_colour(mlt_playlist_get_clip(p->v1, i), &colour);
+    re_sound_fx fx;
+    rp_cut_sound_fx(mlt_playlist_get_clip(p->v1, i), &fx);
     /* (the first part: its in to the frame before; the second, a new cut,
        is given the fades out and the mute) */
     if (mlt_playlist_split(p->v1, i, frame - it.start - 1))
@@ -549,6 +553,7 @@ int rp_split_at(re_project *p, int frame)
     if (volume)
         rp_cut_set_volume(p, mlt_playlist_get_clip(p->v1, i + 1), volume);
     rp_cut_set_colour(p, mlt_playlist_get_clip(p->v1, i + 1), &colour);
+    rp_cut_set_sound_fx(p, mlt_playlist_get_clip(p->v1, i + 1), &fx);
     return 1;
 }
 

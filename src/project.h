@@ -186,6 +186,28 @@ int re_colour_look_of(const re_colour *c);
 int re_project_colour(re_project *p, int item, re_colour *c);
 int re_project_set_colour(re_project *p, int item, const re_colour *c);
 
+/* Sound clean-up (soundfx.c): a clip's, a video overlay's or a sound's */
+typedef struct
+{
+    int pan;    /* -100 (left) .. 100 (right); 0 the middle */
+    int rumble; /* 1: low rumble cut (wind, traffic, handling) */
+    int voice;  /* 1: voices made clearer */
+    int gate;   /* 1: the background turned down when it's quiet */
+} re_sound_fx;
+void re_sound_fx_none(re_sound_fx *fx);
+/* 0, or -1 (no such item, or it has no sound); set: 1 changed, 0 not.
+   Between begin and end too. */
+int re_project_sound_fx(re_project *p, int item, re_sound_fx *fx);
+int re_project_set_sound_fx(re_project *p, int item, const re_sound_fx *fx);
+int re_project_overlay_sound_fx(re_project *p, int i, re_sound_fx *fx);
+int re_project_overlay_set_sound_fx(re_project *p, int i, const re_sound_fx *fx);
+int re_project_audio_sound_fx(re_project *p, int track, int i, re_sound_fx *fx);
+int re_project_audio_set_sound_fx(re_project *p, int track, int i, const re_sound_fx *fx);
+/* The level (dB, -36..12) that brings a stretch [f0, f1) of a file's peaks
+   (media.h's: a byte a frame) to -3 dB at its loud parts: 0, or -1 (too
+   little sound to tell) */
+int re_normal_level(const unsigned char *peaks, int n, int f0, int f1, int *db);
+
 /* Overlays: pictures (logos, titles) and videos (a picture in the
    picture) over the video, on V2, the track above V1 (overlay.c). Each is
    a still picture (PNG, with its alpha, or JPEG: still.h) or a video, shown

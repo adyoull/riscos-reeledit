@@ -1,5 +1,10 @@
 /* sound.c - SharedSoundBuffer/StreamManager (sound.h), from reelcore.c.
  *
+ * RISC OS's 16-bit stereo has the right sample in each word's low halfword
+ * and the left in its high one (as SoundDMA and a linear handler have it),
+ * the other way round from the engine's interleaved left, right; so each
+ * pair is swapped as it's queued.
+ *
  * Part of riscos-reeledit. GPL version 2 or later.
  */
 #include "sound.h"
@@ -153,7 +158,12 @@ void re_sound_add(re_sound *s, const int16_t *samples, int frames)
         s->pend = p;
         s->pend_size = size;
     }
-    memcpy(s->pend + s->pend_len, samples, bytes);
+    uint8_t *to = s->pend + s->pend_len; /* (little-endian words: right, then left) */
+    for (int f = 0; f < frames; f++, to += 4) {
+        uint16_t l = (uint16_t) samples[2 * f], r = (uint16_t) samples[2 * f + 1];
+        to[0] = (uint8_t) r; to[1] = (uint8_t) (r >> 8);
+        to[2] = (uint8_t) l; to[3] = (uint8_t) (l >> 8);
+    }
     s->pend_len += bytes;
     push(s);
 }

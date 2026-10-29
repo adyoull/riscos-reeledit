@@ -1271,7 +1271,7 @@ static MENU(4) m_file = {"File", 7, 2, 7, 0, 300, 44, 0,
                           {0x80, -1, IT("Export...      ^E")}}};
 /* (the Edit menu's items: E_ */
 enum { E_UNDO, E_REDO, E_CUT, E_COPY, E_PASTE, E_SPLIT, E_TRIM_START, E_TRIM_END, E_ROLL, E_DISSOLVE, E_FADE_IN,
-       E_FADE_OUT, E_DELETE, E_DELETE_GAP, E_EXTRACT, E_LIFT, E_CLEAR, E_TITLE, E_N };
+       E_FADE_OUT, E_DELETE, E_DELETE_GAP, E_EXTRACT, E_LIFT, E_CLEAR, E_TITLE, E_NORMALISE, E_N };
 static MENU(E_N) m_edit = {"Edit", 7, 2, 7, 0, 520, 44, 0,
                          {{0, -1, IT("Undo                     F8")}, {2, -1, IT("Redo                     F9")},
                           {0, -1, IT("Cut                      ^X")}, {0, -1, IT("Copy                     ^C")},
@@ -1284,7 +1284,8 @@ static MENU(E_N) m_edit = {"Edit", 7, 2, 7, 0, 520, 44, 0,
                           {2, -1, IT("Delete, leaving a gap   \x8b" "Del")},
                           {0, -1, IT("Extract the marked part   '")}, {2, -1, IT("Lift the marked part      ;")},
                           {2, -1, IT("Clear the selection      ^Z")},
-                          {0x80, -1, IT("New title...              T")}}};
+                          {2, -1, IT("New title...              T")},
+                          {0x80, -1, IT("Normalise all the sound")}}};
 static char play_item[24] = "Play           Space";
 static MENU(9) m_play = {"Play", 7, 2, 7, 0, 420, 44, 0,
                          {{0, -1, ITEM_FLAGS, play_item, (const char *) -1, sizeof(play_item)},
@@ -1367,6 +1368,7 @@ void app_menu(int x, int y)
     menu_shade(&m_edit.item[E_LIFT].iflags, !marked);
     menu_shade(&m_edit.item[E_CLEAR].iflags, A.sel < 0 && A.ov_sel < 0 && A.au_sel < 0);
     menu_shade(&m_edit.item[E_TITLE].iflags, !has);
+    menu_shade(&m_edit.item[E_NORMALISE].iflags, !has);
     for (int i = 3; i <= 4; i++)
         menu_shade(&m_play.item[i].iflags, !has);
     menu_shade(&m_play.item[5].iflags, !marked);
@@ -1520,6 +1522,7 @@ static void menu_select(int *b)
         case E_LIFT: mk_take(0); break;
         case E_CLEAR: tl_select(-1); break;
         case E_TITLE: ti_open(-1); break;
+        case E_NORMALISE: in_normalise_all(); break;
         }
         break;
     case 2: /* Play */

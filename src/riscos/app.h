@@ -66,6 +66,7 @@ int in_width(void);                           /* its width and gap beside the Vi
 void in_open(void);
 void in_close(void);
 void in_toggle(void);
+void in_normalise_all(void);                  /* Edit > Normalise all the sound */
 void in_edited(void);                         /* the project or the selection changed */
 void in_place(int x1, int y0, int y1, int behind); /* to the right of x1, from y0 to y1 */
 void in_redraw(int *block);
@@ -240,6 +241,9 @@ int pv_thumb(const char *file, int frame, int x, int y1, int h_os, const ro_box 
    a frame, from y0 (h high), within a box (asked for if not made yet) */
 void pv_wave(const char *file, const pv_sound *s, int x0, double scale, int y0, int h, unsigned colour,
              const ro_box *clip);
+/* A file's sound's peaks (media.h's; *done 0: still being made, more to
+   come), or NULL */
+const unsigned char *pv_peaks(const char *file, int *n, int *done);
 int pv_busy(void);  /* things to make, and nothing playing or being dragged: null events wanted */
 void pv_tick(void); /* a null event: some made (the Timeline drawn again when there's something to see) */
 void pv_close(void); /* the editor closed: all forgotten */

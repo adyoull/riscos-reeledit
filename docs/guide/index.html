@@ -197,10 +197,11 @@ a { color:#1f5fa8; }
 <h4>The Inspector</h4>
 <p>To the right of the Viewer is the <b>Inspector</b>. It shows the settings of whatever you've selected on the Timeline, so you can change them while you watch the picture:</p>
 <ul>
-<li>for a clip: its colour (<a href="#ch10">Chapter 10</a>) and its sound;</li>
-<li>for a logo, picture or title: where it goes, its size and how see-through it is (<a href="#ch12">Chapter 12</a>);</li>
-<li>for a sound on an audio track: its volume.</li>
+<li>for a clip: its colour (<a href="#ch10">Chapter 10</a>) and, on its <b>Sound</b> tab, its sound (<a href="#ch11">Chapter 11</a>);</li>
+<li>for a logo, picture or title: where it goes, its size and how see-through it is (<a href="#ch12">Chapter 12</a>). A video with sound has a Sound tab too;</li>
+<li>for a sound on an audio track: its volume and clean-up.</li>
 </ul>
+<p>Click a tab's name at the top of the Inspector to change pages.</p>
 <p>Click or drag along a slider to set it; click a button such as Look or Place for a menu. Press <kbd>Ctrl-I</kbd> (or choose <b>View &gt; Inspector</b>) to close it if you want the room, and again to bring it back. It moves with the Viewer.</p>
 
 <h4>The menus</h4>
@@ -415,6 +416,18 @@ That's your first edit. Your screen should look like the picture in <a href="#ch
 <figure><img src="images/audio-stacked.png" alt="Two stacked sounds"><figcaption>Two tones dropped so that they overlap. The second went on to its own track, A2.</figcaption></figure>
 <p>Drag a sound by its middle to move it, or by its ends to trim it. Press Menu over it for its menu:</p>
 <figure><img src="images/sound-menu.png" alt="The Sound menu for a sound on an audio track"><figcaption>The menu for a sound on an audio track.</figcaption></figure>
+<h4>Cleaning up the sound</h4>
+<p>Select a clip and click <b>Sound</b> at the top of the Inspector. (For a sound on an audio track there's only the one page.) As well as Volume and Mute you'll find:</p>
+<figure><img src="images/inspector-sound.png" alt="The Inspector's Sound page"><figcaption>A clip's Sound page, panned to the left with the rumble cut.</figcaption></figure>
+<ul>
+<li><b>Pan</b> moves the sound to the left or right. The middle is where it was recorded.</li>
+<li><b>Rumble</b> cuts the low sounds below about 100 Hz: wind on the microphone, traffic, the camera being handled.</li>
+<li><b>Voices</b> lifts the range where speech is clearest, so people are easier to understand.</li>
+<li><b>Background</b> turns down the quiet stretches between words, where hiss and room noise are most noticeable.</li>
+<li><b>Normalise the level</b> sets the Volume so that the loud parts come to just below the top. It works from the waveform, so wait for that to be drawn first.</li>
+</ul>
+<p>To even out a whole film, choose <b>Edit &gt; Normalise all the sound</b>. That does every clip and every sound on the audio tracks in one go, and one Undo puts them all back.</p>
+<div class="box tip"><b class="label">TIP</b>Background works best on speech recorded close to the microphone. On music it can cut the quiet notes, so leave it off there.</div>
 <div class="box rem"><b class="label">REMEMBER</b>Waveforms show the sound as you'll hear it, so they take the volume and fades into account, and a muted clip has none. If a waveform looks flat, the sound really is quiet.</div>
 
 <h3 class="chapter" id="ch12"><span>12</span> Logos and picture in picture</h3>

@@ -125,6 +125,11 @@ void rp_cut_mute(re_project *p, mlt_producer cut, int on);
 int rp_cut_colour(mlt_producer cut, re_colour *c);
 void rp_cut_set_colour(re_project *p, mlt_producer cut, const re_colour *c);
 void rp_fit_colour(re_project *p);
+/* soundfx.c: a cut's sound clean-up (1: any), set; the dissolves' ends
+   given their clips' */
+int rp_cut_sound_fx(mlt_producer cut, re_sound_fx *fx);
+void rp_cut_set_sound_fx(re_project *p, mlt_producer cut, const re_sound_fx *fx);
+void rp_fit_sound_fx(re_project *p);
 int rp_cut_volume(mlt_producer cut);                          /* dB (0: as it is) */
 void rp_cut_set_volume(re_project *p, mlt_producer cut, int db);
 void rp_fit_sound(re_project *p);

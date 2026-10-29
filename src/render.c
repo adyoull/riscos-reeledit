@@ -131,6 +131,9 @@ uint64_t re_render_signature(re_project *p, int start, int length)
         re_colour c;
         if (it.coloured && !re_project_colour(p, i, &c))
             h = fnv(h, "C %d %d %d %d %d|", c.brightness, c.contrast, c.saturation, c.warmth, c.midtones);
+        re_sound_fx fx;
+        if (!it.gap && !it.mix && !re_project_sound_fx(p, i, &fx))
+            h = fnv(h, "S %d %d %d %d|", fx.pan, fx.rumble, fx.voice, fx.gate);
     }
     for (int i = 0; i < re_project_overlays(p); i++) {
         re_overlay o;
@@ -142,6 +145,9 @@ uint64_t re_render_signature(re_project *p, int start, int length)
         h = fnv(h, "V%d %d %d %d %d %d %d %d %d %d %d %d %d %d %s|", o.track, o.start - start, o.length, o.in, o.place,
                 o.size, o.opacity, o.fade_in, o.fade_out, o.video, o.muted, o.volume, o.sound_fade_in, o.sound_fade_out,
                 resource(p, pl, e));
+        re_sound_fx fx;
+        if (o.video && !re_project_overlay_sound_fx(p, i, &fx))
+            h = fnv(h, "S %d %d %d %d|", fx.pan, fx.rumble, fx.voice, fx.gate);
         if (o.title && !re_project_title(p, i, &t))
             h = fnv(h, "T %s %s %d %06X %d %d|", t.text, t.font, t.size, (unsigned) t.colour, t.style, t.align);
     }
@@ -152,6 +158,9 @@ uint64_t re_render_signature(re_project *p, int start, int length)
                 continue;
             h = fnv(h, "A %d %d %d %d %d %d %d %d %s|", k, a.start - start, a.length, a.in, a.muted, a.volume,
                     a.fade_in, a.fade_out, resource(p, rp_audio_track(p, k), rp_track_entry(rp_audio_track(p, k), i)));
+            re_sound_fx fx;
+            if (!re_project_audio_sound_fx(p, k, i, &fx))
+                h = fnv(h, "S %d %d %d %d|", fx.pan, fx.rumble, fx.voice, fx.gate);
         }
     return h;
 }
