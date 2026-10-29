@@ -191,12 +191,51 @@ static int export_open(re_project *p, const char *out, const re_export_settings 
                        void (*progress)(void *ctx, int done, int total), int (*stop)(void *ctx), void *ctx, char *err,
                        int errsize);
 
+/* Why a project (or a clip, for a proxy) couldn't be exported: which of
+   its checks failed, said short (the Export box shows about 100
+   characters); more of it printed, for the editor's log. NULL: it can go
+   on. */
+static const char *unreadable(const char *file, re_project *p, char *err, int errsize)
+{
+    const char *leaf = strrchr(file, '/');
+    leaf = leaf ? leaf + 1 : file;
+    long size = size_of(file);
+    if (size < 0)
+        snprintf(err, errsize, "%s isn't there (or can't be opened)", leaf);
+    else if (!p)
+        snprintf(err, errsize, "%s (%ld bytes) couldn't be loaded", leaf, size);
+    else if (re_project_length(p) <= 0)
+        snprintf(err, errsize, "%s has no frames in it", leaf);
+    else
+        return NULL;
+    printf("couldn't read %s: %s\n", file, err); /* (the whole name, for the log) */
+    if (size > 0) { /* (how it starts: XML, or not) */
+        char head[81] = "";
+        FILE *f = fopen(file, "rb");
+        size_t n = f ? fread(head, 1, sizeof(head) - 1, f) : 0;
+        if (f)
+            fclose(f);
+        head[n] = 0;
+        for (size_t i = 0; i < n; i++)
+            if (head[i] < 32 || head[i] > 126)
+                head[i] = ' ';
+        printf("it starts: %s\n", head);
+    }
+    fflush(stdout);
+    return err;
+}
+
 int re_export(const char *project, const char *out, const re_export_settings *s,
               void (*progress)(void *ctx, int done, int total), int (*stop)(void *ctx), void *ctx, char *err,
               int errsize)
 {
     snprintf(err, errsize, "%s", "");
-    return export_open(re_project_open(project, 1), out, s, progress, stop, ctx, err, errsize);
+    re_project *p = re_project_open(project, 1);
+    if (unreadable(project, p, err, errsize)) {
+        re_project_close(p);
+        return -1;
+    }
+    return export_open(p, out, s, progress, stop, ctx, err, errsize);
 }
 
 int re_export_proxy(const char *file, const char *out, int hardware, void (*progress)(void *ctx, int done, int total),
@@ -205,7 +244,11 @@ int re_export_proxy(const char *file, const char *out, int hardware, void (*prog
     re_export_settings s = {RE_PROXY_HEIGHT, RE_EXPORT_SMALL, hardware, NULL, 0, 0, 0, 5, 1};
     snprintf(err, errsize, "%s", "");
     re_project *p = re_project_open(file, 0); /* (the clip as a project of it: its own size and rate) */
-    if (p && re_project_profile(p)->height <= RE_PROXY_HEIGHT)
+    if (unreadable(file, p, err, errsize)) {
+        re_project_close(p);
+        return -1;
+    }
+    if (re_project_profile(p)->height <= RE_PROXY_HEIGHT)
         s.height = 0; /* (as it is: small already, but not H.264) */
     return export_open(p, out, &s, progress, stop, ctx, err, errsize);
 }

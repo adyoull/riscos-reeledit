@@ -382,6 +382,7 @@ static void heard(const char *line)
         X.result = X.result == -2 ? -2 : -1;
         snprintf(t, sizeof(t), "The export failed: %.150s", line + 8);
         say("%.119s", t);
+        app_log("export: the project's copy it was given is kept, <Wimp$ScrapDir>.ReelEdExp, until the next export");
     }
 }
 

@@ -2171,6 +2171,30 @@ static void export(const char *a, const char *snd, const char *proj, const char 
     stop_at = 0;
     int r = re_export(proj, out, &s, count_progress, stop_when, NULL, err, sizeof(err));
     CHECK(r == 0 && counted == len, "export: %d (%s), told %d of %d frames", r, err, counted, len);
+    { /* a project that can't be exported: which check failed, said */
+        CHECK(re_export("no-such-project.mlt", "e-none.mp4", &s, NULL, NULL, NULL, err, sizeof(err)) < 0
+                  && !strcmp(err, "no-such-project.mlt isn't there (or can't be opened)"),
+              "export: a missing project: \"%s\"", err);
+        FILE *g = fopen("e-garbled.mlt", "w");
+        if (g) {
+            fputs("<?xml version=\"1.0\"?><mlt><tractor", g); /* (cut short) */
+            fclose(g);
+        }
+        CHECK(re_export("e-garbled.mlt", "e-none.mp4", &s, NULL, NULL, NULL, err, sizeof(err)) < 0
+                  && !strcmp(err, "e-garbled.mlt (34 bytes) couldn't be loaded"),
+              "export: a garbled project: \"%s\"", err);
+        g = fopen("e-empty.mlt", "w"); /* (a project with nothing on its track) */
+        if (g) {
+            fputs("<?xml version=\"1.0\"?><mlt><playlist id=\"v1\"/><tractor id=\"t\"><track producer=\"v1\"/></tractor></mlt>\n", g);
+            fclose(g);
+        }
+        CHECK(re_export("e-empty.mlt", "e-none.mp4", &s, NULL, NULL, NULL, err, sizeof(err)) < 0
+                  && !strcmp(err, "e-empty.mlt has no frames in it"),
+              "export: an empty project: \"%s\"", err);
+        remove("e-garbled.mlt");
+        remove("e-empty.mlt");
+        remove("e-none.mp4");
+    }
     AVFormatContext *fc = NULL;
     int w = 0, h = 0, audio = 0;
     double secs = 0;

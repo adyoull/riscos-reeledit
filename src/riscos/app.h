@@ -55,6 +55,7 @@ void app_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
    Choices) or ReelEdit$Log names a file; app_log does nothing while off */
 void lg_start(void);
 int lg_on(void);
+void lg_said(void); /* logging on but its file couldn't be opened: said (once) */
 void lg_set(int on);
 void lg_end(void);
 /* guide.c: the User Guide opened in a browser (or why not, reported) */

@@ -188,6 +188,7 @@ void tl_refresh(void);
 static int moritas_sent; /* (TaskWindow_Morite: a child killed) */
 static int plots_wide; /* (OS_Plot given a coordinate past the VDU's 16 bits) */
 static char last_text[128], filetype_path[300], all_text[16384];
+static char last_report[300]; /* (the last Wimp_ReportError's text, with no buttons) */
 static unsigned colours_seen; /* bit 0: the selected clip's orange set */
 static int ptr[5];            /* Wimp_GetPointerInfo */
 static int datasave_ref, ref_next = 900;
@@ -266,6 +267,7 @@ const unsigned char *pv_peaks(const char *file, int *n, int *done);
 void app_edited(void);
 void lg_start(void);
 int lg_on(void);
+void lg_said(void);
 void lg_end(void);
 void app_log(const char *fmt, ...);
 #define LOG_CHOICE "<Choices$Write>.ReelEdit.Logging" /* (the RISC OS name, as a file here) */
@@ -569,6 +571,8 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
             r->r[1] = answer;
         } else {
             reports++;
+            if (r->r[0])
+                snprintf(last_report, sizeof(last_report), "%s", (const char *) r->r[0] + 4);
             r->r[1] = 1;
         }
         break;
@@ -3661,6 +3665,30 @@ int main(int argc, char **argv)
     lg_end();
     remove(LOG_CHOICE);
     remove("<Wimp$ScrapDir>.ReelEditLog");
+    { /* an old run's log, with logging off: deleted, not left to look like this run's */
+        FILE *old = fopen("<Wimp$ScrapDir>.ReelEditLog", "w");
+        if (old) {
+            fputs("33093.82 Reel Edit 0.3-test10\n", old);
+            fclose(old);
+        }
+        lg_start();
+        old = fopen("<Wimp$ScrapDir>.ReelEditLog", "r");
+        CHECK(!lg_on() && !old, "logging off: an old run's log left (%d)", old != NULL);
+        if (old)
+            fclose(old);
+    }
+    { /* on, but the file can't be opened: said, and not ticked */
+        int was = reports;
+        setenv("ReelEdit$Log", "no-such-directory/ReelEditLog", 1);
+        lg_start();
+        lg_said();
+        CHECK(!lg_on() && reports == was + 1 && strstr(last_report, "couldn't open its log")
+                  && strstr(last_report, "no-such-directory/ReelEditLog"),
+              "a log that can't be opened: on %d, %d reports, \"%s\"", lg_on(), reports - was, last_report);
+        lg_said();
+        CHECK(reports == was + 1, "a log that can't be opened: said %d times", reports - was);
+        unsetenv("ReelEdit$Log");
+    }
     { /* the engine's left, right queued as RISC OS has it: right in the low halfword */
         char why[80];
         re_sound *snd = re_sound_open(48000, why, sizeof(why));

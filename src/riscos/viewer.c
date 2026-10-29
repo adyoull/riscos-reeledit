@@ -2130,6 +2130,7 @@ int reeledit_main(int argc, char **argv)
     re_title_set_font(fm_line); /* (titles' text by the Font Manager; the Linux tests' are blocks) */
 #endif
     iconbar_icon();
+    lg_said(); /* (the log couldn't be opened at start-up: said now) */
     V.idle_cs = -1;
 
     while (!V.quit) {
