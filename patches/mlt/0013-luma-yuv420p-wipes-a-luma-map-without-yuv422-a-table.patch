@@ -1,0 +1,186 @@
+From 2200282eecf709da340ae86c4ce30442a1fcb268 Mon Sep 17 00:00:00 2001
+From: Andrew Youll <andrewyoull86@gmail.com>
+Date: Thu, 29 Oct 2026 10:20:40 +0000
+Subject: [PATCH 13/13] luma: yuv420p wipes (a luma map) without yuv422, a
+ table of mixes and NEON rows
+
+---
+ src/modules/core/core_neon.c       | 23 +++++++
+ src/modules/core/core_neon.h       |  4 ++
+ src/modules/core/transition_luma.c | 97 ++++++++++++++++++++++++++++++
+ 3 files changed, 124 insertions(+)
+
+diff --git a/src/modules/core/core_neon.c b/src/modules/core/core_neon.c
+index b0b3a19..31c4eac 100644
+--- a/src/modules/core/core_neon.c
++++ b/src/modules/core/core_neon.c
+@@ -47,6 +47,23 @@ static inline int to8(int32_t v)
+     return v < 0 ? 0 : v > 256 ? 256 : v;
+ }
+ 
++int mlt_core_neon_mix_w(uint8_t *d, const uint8_t *s, const uint16_t *w, int n)
++{
++    if (!mlt_core_neon())
++        return 0;
++    int i = 0;
++    uint16x8_t full = vdupq_n_u16(256);
++    for (; i + 8 <= n; i += 8) {
++        uint16x8_t vw = vld1q_u16(w + i), vi = vsubq_u16(full, vw);
++        uint16x8_t sum = vmulq_u16(vmovl_u8(vld1_u8(s + i)), vw);
++        sum = vmlaq_u16(sum, vmovl_u8(vld1_u8(d + i)), vi);
++        vst1_u8(d + i, vshrn_n_u16(sum, 8));
++    }
++    for (; i < n; i++)
++        d[i] = (s[i] * w[i] + d[i] * (256 - w[i])) >> 8;
++    return 1;
++}
++
+ int mlt_core_neon_mix(uint8_t *d, const uint8_t *s, int n, int32_t mix)
+ {
+     if (!mlt_core_neon())
+@@ -179,6 +196,12 @@ int mlt_core_neon(void)
+     return 0;
+ }
+ 
++int mlt_core_neon_mix_w(uint8_t *d, const uint8_t *s, const uint16_t *w, int n)
++{
++    (void) d, (void) s, (void) w, (void) n;
++    return 0;
++}
++
+ int mlt_core_neon_mix(uint8_t *d, const uint8_t *s, int n, int32_t mix)
+ {
+     (void) d, (void) s, (void) n, (void) mix;
+diff --git a/src/modules/core/core_neon.h b/src/modules/core/core_neon.h
+index 9093d1e..e4fe8e5 100644
+--- a/src/modules/core/core_neon.h
++++ b/src/modules/core/core_neon.h
+@@ -39,6 +39,10 @@
+            average alpha of its 2x2 luma pixels (rows a0 and a1, 2n wide) */
+ int mlt_core_neon(void);
+ int mlt_core_neon_mix(uint8_t *d, const uint8_t *s, int n, int32_t mix);
++/* mix_w:  d = (s * w + d * (256 - w)) >> 8, a weight w (8.8: 0 .. 256) for
++           each pixel (transition_luma.c's yuv420p wipes); the same as the
++           C to the bit */
++int mlt_core_neon_mix_w(uint8_t *d, const uint8_t *s, const uint16_t *w, int n);
+ int mlt_core_neon_scale(uint8_t *p, int n, int32_t m, int32_t add, int min, int max);
+ int mlt_core_neon_blend(uint8_t *d, const uint8_t *s, const uint8_t *a, int n, int32_t weight);
+ int mlt_core_neon_blend_chroma(uint8_t *du,
+diff --git a/src/modules/core/transition_luma.c b/src/modules/core/transition_luma.c
+index 7b46f06..713942d 100644
+--- a/src/modules/core/transition_luma.c
++++ b/src/modules/core/transition_luma.c
+@@ -510,6 +510,92 @@ static void luma_composite_yuv422(mlt_frame a_frame,
+     }
+ }
+ 
++/** A wipe of two opaque yuv420p progressive pictures by the luma map,
++ * plane by plane: each pixel's mix (the yuv422 path's integer smoothstep)
++ * looked up in a table made for this frame (the map's values in 1024
++ * steps), a row of weights at a time, and the two rows mixed by them
++ * (core_neon.h's mix_w: NEON where there is). It saves converting both
++ * pictures to yuv422 and back, and a smoothstep for every pixel. A chroma
++ * pixel takes the weight of the top-left luma pixel of its 2x2.
++ *
++ * \return 0 if it was done; non-zero (nothing changed) if a picture isn't
++ * yuv420p, isn't opaque, or the sizes differ: the yuv422 path then.
++ */
++
++static int luma_composite_yuv420p(mlt_frame a_frame,
++                                  mlt_frame b_frame,
++                                  int luma_width,
++                                  int luma_height,
++                                  uint16_t *luma_bitmap,
++                                  float pos,
++                                  float softness,
++                                  int width,
++                                  int height)
++{
++    mlt_image_format format = mlt_image_yuv420p;
++    int width_src = width, height_src = height;
++    uint8_t *p_dest = NULL, *p_src = NULL;
++    if ((width | height) & 1 || width < 2 || height < 2)
++        return 1;
++    if (mlt_frame_get_image(a_frame, &p_dest, &format, &width, &height, 1) || !p_dest
++        || format != mlt_image_yuv420p)
++        return 1;
++    format = mlt_image_yuv420p;
++    if (mlt_frame_get_image(b_frame, &p_src, &format, &width_src, &height_src, 0) || !p_src
++        || format != mlt_image_yuv420p || width_src != width || height_src != height)
++        return 1;
++    uint8_t *alpha_dst = mlt_frame_get_alpha(a_frame), *alpha_src = mlt_frame_get_alpha(b_frame);
++    if ((alpha_dst && !is_opaque(alpha_dst, width, height))
++        || (alpha_src && !is_opaque(alpha_src, width, height)))
++        return 1;
++    uint16_t *table = mlt_pool_alloc(1024 * sizeof(uint16_t));
++    uint16_t *w_row = mlt_pool_alloc(width * sizeof(uint16_t));
++    uint16_t *c_row = mlt_pool_alloc((width / 2) * sizeof(uint16_t));
++    if (!table || !w_row || !c_row) {
++        mlt_pool_release(table);
++        mlt_pool_release(w_row);
++        mlt_pool_release(c_row);
++        return 1;
++    }
++    uint32_t i_softness = softness * (1 << 16), field_pos = (1 << 16) * (pos * (1.f + softness));
++    for (int k = 0; k < 1024; k++) { /* (16.16 to 8.8: 0 .. 256) */
++        int32_t weight = (k << 6) + 32;
++        table[k] = (smoothstep(weight, i_softness + weight, field_pos) + 128) >> 8;
++    }
++    int32_t x_diff = (luma_width << 16) / width, y_diff = (luma_height << 16) / height;
++    int cw = width / 2, ch = height / 2;
++    uint8_t *du = p_dest + width * height, *dv = du + cw * ch;
++    const uint8_t *su = p_src + width * height, *sv = su + cw * ch;
++    for (int y = 0; y < height; y++) {
++        int ly = (int) (((int64_t) y * y_diff) >> 16);
++        const uint16_t *l = luma_bitmap + (ly < luma_height ? ly : luma_height - 1) * luma_width;
++        int32_t x_offset = 0;
++        for (int x = 0; x < width; x++, x_offset += x_diff)
++            w_row[x] = table[l[x_offset >> 16] >> 6];
++        uint8_t *d = p_dest + y * width;
++        const uint8_t *s = p_src + y * width;
++        if (!mlt_core_neon_mix_w(d, s, w_row, width))
++            for (int x = 0; x < width; x++)
++                d[x] = (s[x] * w_row[x] + d[x] * (256 - w_row[x])) >> 8;
++        if (y & 1)
++            continue;
++        for (int x = 0; x < cw; x++)
++            c_row[x] = w_row[2 * x];
++        int cy = y / 2;
++        for (int c = 0; c < 2; c++) {
++            uint8_t *dc = (c ? dv : du) + cy * cw;
++            const uint8_t *sc = (c ? sv : su) + cy * cw;
++            if (!mlt_core_neon_mix_w(dc, sc, c_row, cw))
++                for (int x = 0; x < cw; x++)
++                    dc[x] = (sc[x] * c_row[x] + dc[x] * (256 - c_row[x])) >> 8;
++        }
++    }
++    mlt_pool_release(table);
++    mlt_pool_release(w_row);
++    mlt_pool_release(c_row);
++    return 0;
++}
++
+ static int luma_composite_rgba32(mlt_frame a_frame,
+                                  mlt_frame b_frame,
+                                  int luma_width,
+@@ -1037,6 +1123,17 @@ static int transition_get_image(mlt_frame a_frame,
+                                         *height,
+                                         invert,
+                                         alpha_over);
++        } else if (*format == mlt_image_yuv420p && progressive
++                   && !luma_composite_yuv420p(!invert ? a_frame : b_frame,
++                                              !invert ? b_frame : a_frame,
++                                              luma_width,
++                                              luma_height,
++                                              luma_bitmap,
++                                              mix,
++                                              luma_softness,
++                                              *width,
++                                              *height)) {
++            ret = 0;
+         } else {
+             *format = mlt_image_yuv422;
+             luma_composite_yuv422(!invert ? a_frame : b_frame,
+-- 
+2.43.0
+

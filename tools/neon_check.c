@@ -1,6 +1,7 @@
 /*
- * neon_check.c -- the MLT core module's NEON loops (patches/mlt 0011)
- * against the C loops they stand in for, on random rows
+ * neon_check.c -- the MLT core module's NEON loops (patches/mlt 0011), and
+ * ReelEdit's own (src/neon.c: pan and zoom, green screen), against the C
+ * loops they stand in for, on random rows
  * Copyright (C) 2026 Andrew Youll
  *
  * Built by build/build-riscos.sh as neon_check,ff8; run on the machine
@@ -12,6 +13,8 @@
  */
 
 #include "core_neon.h"
+#include "scale.h"
+#include "neon.h"
 
 #include <framework/mlt_factory.h>
 #include <stdio.h>
@@ -78,6 +81,20 @@ int main(void)
             bad = 1;
         compare("mix", x, c, n, 2);
 
+        /* mix_w: transition_luma.c's yuv420p wipe, a weight for each pixel (to the bit) */
+        {
+            static uint16_t wts[N];
+            for (int i = 0; i < n; i++)
+                wts[i] = (uint16_t) (rand() % 257);
+            memcpy(c, d, n);
+            for (int i = 0; i < n; i++)
+                c[i] = (s[i] * wts[i] + c[i] * (256 - wts[i])) >> 8;
+            memcpy(x, d, n);
+            if (!mlt_core_neon_mix_w(x, s, wts, n))
+                bad = 1;
+            compare("mix_w", x, c, n, 0);
+        }
+
         /* blend: composite_yuv420p's luma with alpha */
         memcpy(c, d, n);
         for (int i = 0; i < n; i++) {
@@ -140,6 +157,97 @@ int main(void)
         if (!mlt_core_neon_scale(x, n, m, add, 16, 240))
             bad = 1;
         compare("scale chroma", x, c, n, 2);
+    }
+    /* ReelEdit's: scale.c's rows, which must be the C's to the bit */
+    re_neon_on(1);
+    static int32_t xi[N];
+    static uint16_t xw[N];
+    for (int t = 0; t < 200; t++) {
+        int n = t % 2 ? N - 1 : 1 + rand() % (N - 1), w = t < 3 ? (int[]){1, 128, 255}[t] : 1 + rand() % 255;
+        fill(s, N, 0);
+        fill(d, N, 0);
+        uint8_t x[N];
+        for (int i = 0; i < n; i++)
+            c[i] = (uint8_t) ((s[i] * (256 - w) + d[i] * w + 128) >> 8);
+        if (!re_neon_mix(s, d, x, n, w))
+            bad = 1;
+        compare("scale mix", x, c, n, 0);
+        for (int i = 0; i < n; i++) {
+            xi[i] = rand() % (N - 1);
+            xw[i] = (uint16_t) (rand() % 257 > 255 ? 0 : rand() % 256);
+            c[i] = (uint8_t) ((s[xi[i]] * (256 - xw[i]) + s[xi[i] + 1] * xw[i] + 128) >> 8);
+        }
+        if (!re_neon_row(s, xi, xw, x, n))
+            bad = 1;
+        compare("scale row", x, c, n, 0);
+    }
+    /* chroma.c's key: two rows of alpha zeroed under the chroma near the key */
+    for (int t = 0; t < 200; t++) {
+        int n = t % 2 ? N / 2 - 1 : 1 + rand() % (N / 2 - 1), ku = rand() % 256, kv = rand() % 256, var = rand() % 80;
+        fill(u, N, 0);
+        fill(v, N, 0);
+        for (int i = 0; i < n; i += 3) { /* (some near the key) */
+            u[i] = (uint8_t) (ku + rand() % 9 - 4 < 0 ? 0 : ku + rand() % 9 - 4 > 255 ? 255 : ku + rand() % 9 - 4);
+            v[i] = (uint8_t) kv;
+        }
+        uint8_t x0[N], x1[N], c0[N], c1[N];
+        fill(x0, N, 1);
+        fill(x1, N, 1);
+        memcpy(c0, x0, N);
+        memcpy(c1, x1, N);
+        for (int i = 0; i < n; i++)
+            if (abs(u[i] - ku) <= var && abs(v[i] - kv) <= var)
+                c0[2 * i] = c0[2 * i + 1] = c1[2 * i] = c1[2 * i + 1] = 0;
+        if (!re_neon_key(u, v, x0, x1, n, ku, kv, var))
+            bad = 1;
+        compare("key row 0", x0, c0, N, 0);
+        compare("key row 1", x1, c1, N, 0);
+    }
+    /* looks.c's charcoal: three rows, each pixel from its 3x3, as plus's charcoal (to the bit) */
+    for (int t = 0; t < 100; t++) {
+        static uint8_t r0[N], r1[N], r2[N], co[N], cx[N];
+        fill(r0, N, 0);
+        fill(r1, N, 0);
+        fill(r2, N, 0);
+        if (t % 3 == 0) /* (gentle slopes, so the sums aren't all over the top) */
+            for (int i = 0; i < N; i++) {
+                r0[i] = (uint8_t) (100 + (i * 3 + t) % 20);
+                r1[i] = (uint8_t) (100 + (i * 5) % 17);
+                r2[i] = (uint8_t) (100 + (i * 7 + t) % 23);
+            }
+        int xs = 1 + t % 2, n = N - 2 * xs, invert = t % 5 == 0;
+        float scale = t % 4 ? 1.5f : 0.75f;
+        for (int i = 0; i < n; i++) {
+            const uint8_t *a0 = r0 + xs + i, *a1 = r1 + xs + i, *a2 = r2 + xs + i;
+            int m00 = a0[-xs], m01 = a0[0], m02 = a0[xs], m10 = a1[-xs], m12 = a1[xs], m20 = a2[-xs], m21 = a2[0],
+                m22 = a2[xs];
+            int sum1 = (m20 - m00) + ((m21 - m01) << 1) + (m22 - m20);
+            int sum2 = (m02 - m00) + ((m12 - m10) << 1) + (m22 - m20);
+            int q = sum1 * sum1 + sum2 * sum2, root = 0;
+            while ((root + 1) * (root + 1) <= q)
+                root++;
+            float sum = scale * root;
+            co[i] = (uint8_t) (!invert ? (sum >= 16 && sum <= 235 ? 251 - sum : sum < 16 ? 235 : 16)
+                                       : (sum >= 16 && sum <= 235 ? sum : sum < 16 ? 16 : 235));
+        }
+        /* (the table looks.c makes: each q's value, the rest past max) */
+        static uint8_t lut[65536];
+        double most = 235 / scale + 2;
+        int lut_n = (int) (most * most);
+        if (lut_n >= 65536) /* (looks.c works those out a pixel at a time: no table) */
+            continue;
+        for (int q = 0; q < lut_n; q++) {
+            int root = 0;
+            while ((root + 1) * (root + 1) <= q)
+                root++;
+            float sum = scale * root;
+            lut[q] = (uint8_t) (!invert ? (sum >= 16 && sum <= 235 ? 251 - sum : sum < 16 ? 235 : 16)
+                                        : (sum >= 16 && sum <= 235 ? sum : sum < 16 ? 16 : 235));
+        }
+        int done = re_neon_charcoal(r0 + xs, r1 + xs, r2 + xs, cx, n, xs, lut, lut_n, invert ? 235 : 16);
+        if (done != (n & ~7))
+            bad = 1;
+        compare("charcoal", cx, co, done, 0);
     }
     printf("neon_check: %s (largest difference from the C: %d)\n", bad ? "FAILED" : "passed", worst);
     return bad;

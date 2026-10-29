@@ -26,6 +26,8 @@
 #include "still.h"
 #include "title.h"
 #include "project.h"
+#include "scale.h"
+#include "neon.h"
 
 #include <framework/mlt.h>
 #include <libavutil/cpu.h>
@@ -111,12 +113,16 @@ int re_mlt_start(void)
         if (!mlt_factory_init(NULL))
             return -1;
         /* (MLT's NEON loops, patches/mlt 0010, only on a CPU that has it) */
-        if (av_get_cpu_flags() & AV_CPU_FLAG_NEON)
+        if (av_get_cpu_flags() & AV_CPU_FLAG_NEON) {
             mlt_environment_set("MLT_NEON", "1");
+            re_neon_on(1); /* (and ours: scale.c's) */
+        }
         re_still_register();
         re_title_register();
         re_motion_register();
         re_hold_register();
+        re_chroma_register();
+        re_looks_register();
         mlt_started = 1;
     }
     return 0;

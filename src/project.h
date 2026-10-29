@@ -256,6 +256,9 @@ void re_motion_register(void);
 extern const char *const re_effects[RE_EFFECTS];
 int re_project_effect(re_project *p, int item);
 int re_project_set_effect(re_project *p, int item, int kind);
+/* The filters that do them, in yuv420p (looks.c; over the plus module's), registered with MLT (re_mlt_start does
+   it) */
+void re_looks_register(void);
 
 /* The whole project's sound evened out as it plays and is exported
    (loudness.c): its target loudness (LUFS, -40..-5; 0: off, as it is).
@@ -391,6 +394,9 @@ extern const char *const re_keys[RE_KEYS];
 void re_key_none(re_key *k);
 int re_project_overlay_key(re_project *p, int i, re_key *k);
 int re_project_overlay_set_key(re_project *p, int i, const re_key *k);
+/* The chroma filter that does it, in yuv420p (chroma.c; over the plus module's), registered with MLT (re_mlt_start
+   does it) */
+void re_chroma_register(void);
 
 /* Titles (title.h): text over the video, an overlay made from it. Put on
    the titles' track (over V2, so a title goes over a logo or a picture in

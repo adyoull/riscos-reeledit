@@ -17,6 +17,7 @@
 #include "export.h"
 #include <libavformat/avformat.h>
 #include "project.h"
+#include "scale.h"
 #include "measure.h"
 #include "media.h"
 #include "render.h"
@@ -1056,8 +1057,29 @@ static int ramp_y(int x) /* (ramp.png's luma at x, as the engine shows it: video
     return 16 + (219 * (x * 255 / 319) + 127) / 255;
 }
 
+/* scale.c: a plane copied as it is at 1:1, and twice the size between its pixels */
+static void scale_planes(void)
+{
+    uint8_t src[16 * 8], dst[32 * 16];
+    for (int i = 0; i < 16 * 8; i++)
+        src[i] = (uint8_t) (i * 7);
+    memset(dst, 0, sizeof(dst));
+    re_scale_plane(src, 16, 8, 16, dst, 32, 0, 0, 16, 8, 0, 0, 1, 1);
+    int same = 1;
+    for (int y = 0; y < 8; y++)
+        for (int x = 0; x < 16; x++)
+            same &= dst[y * 32 + x] == src[y * 16 + x];
+    CHECK(same && dst[16] == 0, "scale: 1:1 not a copy (or past its edge: %d)", dst[16]);
+    uint8_t ramp[8] = {0, 40, 80, 120, 160, 200, 240, 250}, out[16];
+    re_scale_plane(ramp, 8, 1, 8, out, 16, 0, 0, 16, 1, 0, 0, 0.5, 1);
+    /* (destination x shows source (x + 0.5) / 2 - 0.5: x 3 shows 1.25, a quarter of the way from 40 to 80) */
+    CHECK(out[0] == 0 && out[3] == 50 && out[4] == 70 && out[15] == 250, "scale: twice the size: %d %d %d %d", out[0],
+          out[3], out[4], out[15]);
+}
+
 static void motion(const char *a, const char *ramp, const char *out)
 {
+    scale_planes();
     re_engine_io io = {show, NULL, clk, NULL, 48000, 2, NULL};
     re_project *p = re_project_new();
     re_project_add(p, a, -1);    /* (320x180: the project's size) */
@@ -1326,10 +1348,67 @@ static void extras(const char *a, const char *b, const char *green, const char *
     re_project_set_effect(p, 0, 3);
     re_engine_refresh(e);
     int post = luma_xy(e, 10, 160, 90);
-    CHECK(post <= 24 || post >= 228, "effect: posterised: %d", post);
+    CHECK(post <= 20, "effect: posterised: %d (red's 81 is below the middle: black)", post);
     re_project_set_effect(p, 0, 2);
     re_engine_refresh(e);
     int sketch = luma_xy(e, 10, 160, 90);
+    {   /* (ours, not plus's; its yuv420p and yuv422 drawings the same, on a picture with edges) */
+        mlt_filter lf = mlt_factory_filter(re_project_profile(p), "charcoal", NULL);
+        CHECK(lf && mlt_properties_get(MLT_FILTER_PROPERTIES(lf), "_reeledit_look"), "effect: charcoal is plus's");
+        int same = 1;
+        uint8_t y420[64 * 36];
+        for (int fmt = 0; fmt < 2 && lf; fmt++) {
+            mlt_producer pic = mlt_factory_producer(re_project_profile(p), "color", "#ff000000");
+            mlt_filter box = mlt_factory_filter(re_project_profile(p), "invert", NULL); /* (not it: a box drawn below) */
+            (void) box;
+            mlt_filter_close(box);
+            mlt_producer_attach(pic, lf);
+            mlt_frame fr = NULL;
+            mlt_service_get_frame(MLT_PRODUCER_SERVICE(pic), &fr, 0);
+            mlt_image_format want = fmt ? mlt_image_yuv422 : mlt_image_yuv420p;
+            uint8_t *img = NULL;
+            int fw = 64, fh = 36;
+            mlt_frame_get_image(fr, &img, &want, &fw, &fh, 0);
+            for (int i = 0; img && i < fw * fh; i++) {
+                int v = fmt ? img[2 * i] : img[i];
+                if (!fmt)
+                    y420[i] = (uint8_t) v;
+                else if (v != y420[i]) {
+                    if (same)
+                        printf("charcoal differs at %d: %d (yuv422) %d (yuv420p)\n", i, v, y420[i]);
+                    same = 0;
+                }
+            }
+            CHECK(img && (fmt ? want == mlt_image_yuv422 : want == mlt_image_yuv420p), "effect: charcoal's form %d", want);
+            mlt_frame_close(fr);
+            mlt_producer_detach(pic, lf);
+            mlt_producer_close(pic);
+        }
+        /* (flat black: white inside, dark lines at its edges, where what's beyond counts as white) */
+        CHECK(same && y420[0] < 100 && y420[64 * 18 + 32] == 235,
+              "effect: charcoal's yuv420p and yuv422 differ, or flat black isn't white inside, edged: %d, %d",
+              y420[64 * 18 + 32], y420[0]);
+        /* (a known answer: a step of 10 across the middle; plus's sums give 251 - 1.5 * isqrt(1700) there) */
+        mlt_frame fr = mlt_frame_init(NULL);
+        int fw = 64, fh = 36, fsize = fw * fh * 3 / 2;
+        uint8_t *buf = mlt_pool_alloc(fsize);
+        for (int i = 0; i < fw * fh; i++)
+            buf[i] = (uint8_t) (i % fw < 32 ? 100 : 110);
+        memset(buf + fw * fh, 128, fsize - fw * fh);
+        mlt_frame_set_image(fr, buf, fsize, mlt_pool_release);
+        mlt_properties_set_int(MLT_FRAME_PROPERTIES(fr), "format", mlt_image_yuv420p);
+        mlt_properties_set_int(MLT_FRAME_PROPERTIES(fr), "width", fw);
+        mlt_properties_set_int(MLT_FRAME_PROPERTIES(fr), "height", fh);
+        mlt_filter_process(lf, fr);
+        mlt_image_format want = mlt_image_yuv420p;
+        uint8_t *img = NULL;
+        mlt_frame_get_image(fr, &img, &want, &fw, &fh, 0);
+        CHECK(img && img[18 * 64 + 31] == 189 && img[18 * 64 + 32] == 189 && img[18 * 64 + 10] == 235,
+              "effect: charcoal at a step of 10: %d %d (want 189), flat %d (235)", img ? img[18 * 64 + 31] : -1,
+              img ? img[18 * 64 + 32] : -1, img ? img[18 * 64 + 10] : -1);
+        mlt_frame_close(fr);
+        mlt_filter_close(lf);
+    }
     CHECK(abs(sketch - y0) > 40, "effect: a sketch: %d (was %d)", sketch, y0);
     re_project_split(p, 20);
     CHECK(re_project_effect(p, 1) == 2, "effect: split: the second part's %d", re_project_effect(p, 1));
@@ -1347,6 +1426,27 @@ static void extras(const char *a, const char *b, const char *green, const char *
     int box = luma_xy(e, 10, 160, 90);
     re_key k;
     CHECK(ov == 0 && !re_project_overlay_key(p, 0, &k) && k.kind == 0 && y0 > 120, "key: none at first: %d (green)", y0);
+    mlt_filter ourk = mlt_factory_filter(re_project_profile(p), "chroma", NULL);
+    CHECK(ourk && mlt_properties_get_int(MLT_FILTER_PROPERTIES(ourk), "_reeledit_chroma"), "key: chroma is plus's, not ours");
+    mlt_filter_close(ourk);
+    for (int fmt = 0; fmt < 2; fmt++) /* (asked for in yuv422 and in yuv420p: green keyed, red not) */
+        for (int c = 0; c < 2; c++) {
+            mlt_producer col = mlt_factory_producer(re_project_profile(p), "color", c ? "#ffff0000" : "#ff00ff00");
+            mlt_filter kf = mlt_factory_filter(re_project_profile(p), "chroma", "#00ff00");
+            mlt_producer_attach(col, kf);
+            mlt_frame fr = NULL;
+            mlt_service_get_frame(MLT_PRODUCER_SERVICE(col), &fr, 0);
+            mlt_image_format want = fmt ? mlt_image_yuv420p : mlt_image_yuv422;
+            uint8_t *img = NULL;
+            int fw = 64, fh = 36;
+            mlt_frame_get_image(fr, &img, &want, &fw, &fh, 0);
+            uint8_t *al = mlt_frame_get_alpha(fr);
+            CHECK(img && al && al[0] == (c ? 255 : 0) && al[fw * fh - 1] == (c ? 255 : 0),
+                  "key: chroma in %s on %s: alpha %d", fmt ? "yuv420p" : "yuv422", c ? "red" : "green", al ? al[0] : -1);
+            mlt_frame_close(fr);
+            mlt_filter_close(kf);
+            mlt_producer_close(col);
+        }
     k.kind = 1;
     k.tolerance = RE_KEY_TOLERANCE;
     CHECK(re_project_overlay_set_key(p, 0, &k) == 1 && re_project_overlay_set_key(p, 0, &k) == 0, "key: green (once)");
@@ -1480,7 +1580,10 @@ static void wipes(const char *a, const char *b, const char *out)
     re_project_set_wipe(p, d, &w);
     re_engine_refresh(e);
     int c = luma_xy(e, mid, 160, 90), k = luma_xy(e, mid, 3, 3);
-    CHECK(abs(c - yb) <= 6 && abs(k - ya) <= 6, "wipe: a circle: %d in the middle, %d in the corner", c, k);
+    luma_xy(e, mid, 160, 90);
+    int cb_mid = chroma(0);
+    CHECK(abs(c - yb) <= 6 && abs(k - ya) <= 6 && cb_mid > 200, "wipe: a circle: %d in the middle (Cb %d), %d in the corner",
+          c, cb_mid, k);
     /* softer: the edge blurred (halfway across a bar, a mix of the two) */
     w.kind = 1;
     w.softness = 100;

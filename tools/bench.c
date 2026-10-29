@@ -17,6 +17,10 @@
  * Part of riscos-reeledit. GPL version 2 or later.
  */
 #include "../src/still.h"
+#include "../src/title.h"
+#include "../src/project.h"
+#include "../src/scale.h"
+#include "../src/neon.h"
 #include <framework/mlt.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -136,12 +140,20 @@ int main(int argc, char **argv)
     mlt_static_modules_register();
 #endif
     mlt_factory_init(NULL);
-    re_still_register(); /* (pictures as ReelEdit reads them) */
+    re_still_register(); /* (pictures as ReelEdit reads them, its titles, pan and zoom, freeze frames) */
+    re_title_register();
+    re_motion_register();
+    re_hold_register();
+    re_chroma_register();
+    re_looks_register();
     /* (as ReelEdit: NEON where there is, quick scaling; BENCH_C or
        BENCH_ACCURATE set to any value leaves either out, to compare) */
     int fast = !getenv("BENCH_ACCURATE");
     if ((av_get_cpu_flags() & AV_CPU_FLAG_NEON) && !getenv("BENCH_C"))
+    {
         mlt_environment_set("MLT_NEON", "1");
+        re_neon_on(1);
+    }
     fprintf(stderr, "bench: NEON %s, scaling %s\n", mlt_environment("MLT_NEON") ? "on" : "off",
             fast ? "fast" : "accurate");
     mlt_log_set_level(MLT_LOG_INFO);
