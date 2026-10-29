@@ -229,7 +229,6 @@ void ex_open(void)
 static int start(const char *path, int safe)
 {
     char proj[300], unix_proj[512], unix_out[512], cmd[1400];
-    _kernel_swi_regs r;
     if (!safe) {
         app_report("Drag the video to a directory display: it's made in the background.");
         return -1;
@@ -244,12 +243,12 @@ static int start(const char *path, int safe)
     }
     snprintf(X.out, sizeof(X.out), "%s", path);
     const char *uout = app_mlt_name(path, unix_out, sizeof(unix_out));
-    snprintf(cmd, sizeof(cmd),
-             "TaskWindow \"<ReelEdit$Dir>.!RunImage -export %s %s %d %d %d\" -wimpslot 40960K -name \"ReelEdit "
-             "export\" -task &%08X -txt &%08X -quit",
-             uproj, uout, HEIGHTS[X.size], X.quality, X.hw && X.can_hw, A.task, TXT_ID);
-    r.r[0] = (intptr_t) cmd;
-    _kernel_oserror *e = ro_swi(Wimp_StartTask, &r);
+    char nums[3][16];
+    snprintf(nums[0], 16, "%d", HEIGHTS[X.size]);
+    snprintf(nums[1], 16, "%d", X.quality);
+    snprintf(nums[2], 16, "%d", X.hw && X.can_hw);
+    const char *args[5] = {uproj, uout, nums[0], nums[1], nums[2]};
+    _kernel_oserror *e = app_child_start("export", args, 5, "ReelEdit export", TXT_ID, cmd, sizeof(cmd));
     app_log("export to %s: %s%s%s", path, cmd, e ? ": " : "", e ? e->errmess : "");
     if (e) {
         app_report("The export couldn't be started (TaskWindow).");

@@ -2142,11 +2142,18 @@ int reeledit_main(int argc, char **argv)
         int ev, busy = (A.e && re_engine_busy(A.e)) || tl_scrubbing() || V.ms /* (scrubbing: the pointer followed) */
                        || in_dragging()
                        || pv_busy(); /* (thumbnails and waveforms to make) */
+        px_tick(); /* (a proxy or render that has said nothing for long: stopped) */
+        rr_tick();
         unsigned before = ro_now_cs();
         r.r[0] = busy ? 0 : 1;
         r.r[1] = (intptr_t) block;
         if (busy && re_engine_speed(A.e) != 0 && V.idle_cs > 0) {
             r.r[2] = (int) (V.poll_cs + V.idle_cs);
+            if (ro_swi(Wimp_PollIdle, &r))
+                break;
+        } else if (!busy && (px_watching() || rr_watching())) { /* (a null event every 2 s to watch them) */
+            r.r[0] = 0;
+            r.r[2] = (int) (ro_now_cs() + 200);
             if (ro_swi(Wimp_PollIdle, &r))
                 break;
         } else if (ro_swi(Wimp_Poll, &r)) {

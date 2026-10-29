@@ -46,4 +46,11 @@ int re_export_bitrate(int width, int height, double fps, int quality);
    !RunImage -proxy file out hardware: re_export_proxy, the same way. */
 int re_export_main(int argc, char **argv);
 
+/* The arguments after -export or -proxy in a file instead (one a line: a
+   name may hold spaces, which a command line would split): !RunImage
+   -export @file. re_export_args reads them (the file then deleted): how
+   many (*args malloc'd, each too; re_export_args_free), or -1. */
+int re_export_args(const char *file, char ***args);
+void re_export_args_free(char **args, int n);
+
 #endif

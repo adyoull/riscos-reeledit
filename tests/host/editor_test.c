@@ -150,9 +150,35 @@ static int whole_redraws;
 static int starts, guide_starts, morites, exports_typed, mark2_reports;
 static char saved_layout[256], saved_title[300];
 static char start_cmd[1500];
+/* A child's arguments (children.c: in a scrap file, !RunImage -MODE @file):
+   how many, read into a (the file then gone), or -1 */
+static int child_args(const char *mode, char a[][300], int max)
+{
+    char key[32], file[600];
+    snprintf(key, sizeof(key), "-%s @", mode);
+    const char *x = strstr(start_cmd, key);
+    if (!x)
+        return -1;
+    x += strlen(key);
+    int n = 0;
+    while (x[n] && x[n] != '"' && n < (int) sizeof(file) - 1) {
+        file[n] = x[n];
+        n++;
+    }
+    file[n] = 0;
+    char **args;
+    int k = re_export_args(file, &args);
+    for (int i = 0; i < k && i < max; i++)
+        snprintf(a[i], 300, "%s", args[i]);
+    if (k >= 0)
+        re_export_args_free(args, k);
+    return k;
+}
+
 static int plots, reports, questions, answer = 3, closedown, acks, menus, savebox_opens, drags;
 static int filetypes_set, dataloads_sent, plots_tl, prequit_acks, key_sent;
 void tl_refresh(void);
+static int moritas_sent; /* (TaskWindow_Morite: a child killed) */
 static int plots_wide; /* (OS_Plot given a coordinate past the VDU's 16 bits) */
 static char last_text[128], filetype_path[300], all_text[16384];
 static unsigned colours_seen; /* bit 0: the selected clip's orange set */
@@ -429,11 +455,14 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
                 fake_cs++;
                 return NULL;
             }
-        ev = script(b, last_mask);
+        /* (a Wimp_PollIdle 1.5 s or more ahead: the editor watching a proxy or a render, idle otherwise; the
+           script sees it as idle) */
+        int watch = no == 0x400E1 && !(last_mask & 1) && (int) (r->r[2] - fake_cs) >= 150;
+        ev = script(b, watch ? last_mask | 1 : last_mask);
         if (ev == 9 || ev == 6)
             S.menu = NULL;
         if (ev == 0) {
-            if (last_mask & 1)
+            if ((last_mask & 1) && !watch)
                 fail_quit("the script wanted a null event, but they're masked out");
             null_events++;
             if (no == 0x400E1) {
@@ -548,6 +577,8 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
             break;
         }
         b[2] = ++ref_next;
+        if (b[4] == 0x808C4)
+            moritas_sent++;
         if (b[4] == 0x503)
             snprintf(help_text, sizeof(help_text), "%s", (char *) &b[5]);
         else if (b[4] == 4)
@@ -1183,7 +1214,7 @@ static int script(int *b, int mask)
         next(86);
         return 17;
     case 86:
-        CHECK(strstr(help_text, "Timeline's ruler") != NULL, "help on the Timeline's ruler: \"%s\"", help_text);
+        CHECK(strstr(help_text, "The ruler") && strstr(help_text, "Render previews"), "help on the Timeline's ruler: \"%s\"", help_text);
         mark = W[1].extent_w;
         ctrl_key = 1;
         ptr[0] = W[1].box[0] + 100; ptr[1] = W[1].box[3] - 60; ptr[2] = 0; ptr[3] = TL; ptr[4] = -1;
@@ -2837,19 +2868,22 @@ static int script(int *b, int mask)
         return 9;
     case 253:
         shot("25-export");
-        snprintf(re_test_export_name(), 256, "ADFS::Disc.$.Video/mp4");
+        snprintf(re_test_export_name(), 256, "ADFS::Disc.$.My Video/mp4"); /* (a space in it: one argument still) */
         next(254);
         b[0] = W[6].box[2] - 50; b[1] = W[6].box[1] + 40; b[2] = 4; b[3] = EXPW; b[4] = 8; /* Export */
         return 6;
-    case 254:
-        CHECK(starts == 1 && strstr(start_cmd, "TaskWindow") && strstr(start_cmd, "-export")
-                  && strstr(start_cmd, " ADFS::Disc.$.Video/mp4 720 1 0\"") && re_project_modified(re_test_project()),
-              "Export: %d tasks started, \"%s\", modified %d", starts, start_cmd,
+    case 254: {
+        char a[8][300];
+        int n = child_args("export", a, 8);
+        CHECK(starts == 1 && strstr(start_cmd, "TaskWindow") && n == 5 && !strcmp(a[1], "ADFS::Disc.$.My Video/mp4")
+                  && !strcmp(a[2], "720") && !strcmp(a[3], "1") && !strcmp(a[4], "0") && re_project_modified(re_test_project()),
+              "Export: %d tasks started, \"%s\" (%d arguments: %s), modified %d", starts, start_cmd, n, n > 1 ? a[1] : "-",
               re_project_modified(re_test_project()));
         next(255);
         memset(b, 0, 24);
         b[0] = 24; b[1] = 0x777; b[2] = 70; b[4] = 0x808C2; b[5] = 0x52454558; /* TaskWindow_Ego */
         return 17;
+    }
     case 255:
         next(256);
         memset(b, 0, 64);
@@ -2873,7 +2907,7 @@ static int script(int *b, int mask)
         b[0] = 20; b[1] = 0x777; b[2] = 73; b[4] = 0x808C3; /* TaskWindow_Morio */
         return 17;
     case 258:
-        CHECK(exports_typed == 1 && !strcmp(re_test_export_status(), "Exported: Video/mp4") && W[6].open,
+        CHECK(exports_typed == 1 && !strcmp(re_test_export_status(), "Exported: My Video/mp4") && W[6].open,
               "the export done: typed %d, \"%s\"", exports_typed, re_test_export_status());
         next(259);
         b[0] = W[6].box[2] - 50; b[1] = W[6].box[1] + 40; b[2] = 4; b[3] = EXPW; b[4] = 8; /* Export again */
@@ -3336,9 +3370,15 @@ static int script(int *b, int mask)
     case 346: { /* a render started: made here; the TaskWindow's messages */
         char proj[300], outf[300];
         int h = 0, q = 0, hw = 0, in = 0, out = 0;
-        const char *x = strstr(start_cmd, "-export ");
-        CHECK(starts == render_starts + 1 && x && sscanf(x, "-export %299s %299s %d %d %d %d %d", proj, outf, &h, &q, &hw, &in, &out) == 7
-                  && q == 2 && out >= in,
+        char a[8][300];
+        int na = child_args("export", a, 8);
+        const char *x = na == 7 ? start_cmd : NULL;
+        if (x) {
+            snprintf(proj, sizeof(proj), "%s", a[0]);
+            snprintf(outf, sizeof(outf), "%s", a[1]);
+            h = atoi(a[2]), q = atoi(a[3]), hw = atoi(a[4]), in = atoi(a[5]), out = atoi(a[6]);
+        }
+        CHECK(starts == render_starts + 1 && x && q == 2 && out >= in,
               "render: %d started (%d before): \"%s\"", starts, render_starts, start_cmd);
         if (!x)
             fail_quit("render: not started");
@@ -3427,8 +3467,15 @@ static int script(int *b, int mask)
             return 0;
         char file[300], outf[300];
         int hw = -1;
-        const char *x = strstr(start_cmd, "-proxy ");
-        CHECK(starts == proxy_starts + 1 && x && sscanf(x, "-proxy %299s %299s %d", file, outf, &hw) == 3
+        char a[4][300];
+        int na = child_args("proxy", a, 4);
+        const char *x = na == 3 ? start_cmd : NULL;
+        if (x) {
+            snprintf(file, sizeof(file), "%s", a[0]);
+            snprintf(outf, sizeof(outf), "%s", a[1]);
+            hw = atoi(a[2]);
+        }
+        CHECK(starts == proxy_starts + 1 && x
                   && strstr(file, "big.mp4") && strstr(re_test_tl_title(), "making proxies"),
               "proxy: %d started (%d before): \"%s\"; the Timeline \"%s\"", starts, proxy_starts, start_cmd,
               re_test_tl_title());
@@ -3490,10 +3537,48 @@ static int script(int *b, int mask)
             return 0;
         int i = big_item();
         const char *f = i >= 0 ? re_project_item_file(re_test_project(), i) : NULL;
-        CHECK(f && !strcmp(f, proxy_made), "proxy: on again: the clip's file %s", f ? f : "-");
+        CHECK(f && !strcmp(f, proxy_made) && starts == proxy_starts + 1 && !strstr(re_test_tl_title(), "making"),
+              "proxy: on again: the clip's file %s, %d started (one: no second proxy of it), the Timeline \"%s\"",
+              f ? f : "-", starts - proxy_starts, re_test_tl_title());
+        /* a clip whose name has spaces, wanting a proxy: its TaskWindow given its whole name; it says nothing
+           for 90 s (stuck): stopped, the clip's own file kept */
+        CHECK(system("cp big.mp4 'big copy - two.mp4'") == 0, "proxy: no copy of big.mp4");
+        proxy_starts = starts;
+        moritas_sent = 0;
+        next(5010);
+        data_load(b, TL, W[1].box[0] - W[1].scroll_x + 16 + (int) ((re_project_length(re_test_project()) + 5) * tl_scale),
+                  0xBF6, "big copy - two.mp4");
+        b[8] = W[1].box[3] - TL_V1_TOP - 48;
+        return 17;
+    }
+    case 5010: {
+        if (nulls)
+            return 0;
+        char a[4][300];
+        int na = child_args("proxy", a, 4);
+        CHECK(starts == proxy_starts + 1 && na == 3 && strstr(a[0], "big copy - two.mp4") && strstr(re_test_tl_title(), "making"),
+              "proxy: a name with spaces: %d started, %d arguments (%s), the Timeline \"%s\"", starts - proxy_starts, na,
+              na > 0 ? a[0] : "-", re_test_tl_title());
+        next(5011);
+        memset(b, 0, 24);
+        b[0] = 24; b[1] = 0x791; b[2] = 93; b[4] = 0x808C2; b[5] = 0x52455058; /* TaskWindow_Ego, then nothing */
+        return 17;
+    }
+    case 5011:
+        if (!moritas_sent && fake_cs - phase_cs < 12000)
+            return 0; /* (time going by: the editor's watch, a null event every 2 s) */
+        CHECK(moritas_sent == 1 && fake_cs - phase_cs >= 9000, "proxy: stuck 90 s: %d killed after %d s", moritas_sent,
+              (fake_cs - phase_cs) / 100);
+        next(5012);
+        memset(b, 0, 24);
+        b[0] = 20; b[1] = 0x791; b[2] = 94; b[4] = 0x808C3; /* TaskWindow_Morio */
+        return 17;
+    case 5012:
+        if (nulls)
+            return 0;
+        CHECK(!strstr(re_test_tl_title(), "making"), "proxy: stuck, stopped: the Timeline \"%s\"", re_test_tl_title());
         next(45);
         return key_to(b, TL, 0x18D);
-    }
     case 45: /* the desktop shutting down: asked, Discard; the shutdown started again; quit */
         if (nulls)
             return 0;

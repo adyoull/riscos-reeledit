@@ -271,6 +271,12 @@ mlt_producer rr_playlist(int *rendered);
 void rr_close(void);   /* the editor closed: stopped, the files deleted */
 
 /* ---- proxies.c: proxies ---- */
+/* children.c: an export, render or proxy (!RunImage -MODE, its arguments in
+   a scrap file: export.h) started in a TaskWindow named name, its messages
+   tagged txt; cmd: the command (for the log). NULL, or why not. */
+_kernel_oserror *app_child_start(const char *mode, const char *const *args, int n, const char *name, unsigned txt,
+                                 char *cmd, int size);
+
 void px_edited(void);  /* the project changed: files wanting proxies found, made one after another */
 int px_message(int *block); /* 1: it was a proxy's (TaskWindow's) */
 int px_pending(void);  /* the project to be made again (proxies made, or turned on or off) */
@@ -278,6 +284,11 @@ void px_applied(void); /* (viewer.c: done) */
 int px_on(void);       /* View > Use proxies */
 void px_toggle(void);
 int px_making(int *made, int *all); /* 1: being made (*made of *all) */
+int px_progress(void); /* the one being made: percent, or -1 (not known) */
+int px_watching(void); /* one being made: px_tick wanted now and then */
+void px_tick(void);    /* (one that has said nothing for 90 s: stopped, given up) */
+int rr_watching(void);
+void rr_tick(void);    /* (the same for a render) */
 void px_close(void);   /* the editor closed, quitting: stopped, deleted */
 void px_wipe(void);    /* deleted (and anything left in their directory) */
 void px_forget(void);  /* forgotten, the files left (ReelEdit stopping: tests) */

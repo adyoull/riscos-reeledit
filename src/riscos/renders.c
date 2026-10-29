@@ -53,6 +53,7 @@ static struct
     int n;
     unsigned changes;     /* (worked out again when the project changes) */
     int known;
+    unsigned heard_cs;    /* when it last said anything (or started): rr_tick's watch */
 } R;
 
 static void stretches(void)
@@ -121,13 +122,13 @@ static int next(void)
     ro_swi(OS_File, &r);
     snprintf(R.file, sizeof(R.file), DIR ".R%u", ++R.serial);
     const char *uout = app_mlt_name(R.file, unix_out, sizeof(unix_out));
-    snprintf(cmd, sizeof(cmd),
-             "TaskWindow \"<ReelEdit$Dir>.!RunImage -export %s %s %d 2 %d %d %d\" -wimpslot 40960K -name \"ReelEdit "
-             "render\" -task &%08X -txt &%08X -quit",
-             uproj, uout, re_engine_height(A.e), can_hw(), R.job.start, R.job.start + R.job.length - 1, A.task,
-             TXT_ID);
-    r.r[0] = (intptr_t) cmd;
-    _kernel_oserror *e = ro_swi(Wimp_StartTask, &r);
+    char nums[4][16];
+    snprintf(nums[0], 16, "%d", re_engine_height(A.e));
+    snprintf(nums[1], 16, "%d", can_hw());
+    snprintf(nums[2], 16, "%d", R.job.start);
+    snprintf(nums[3], 16, "%d", R.job.start + R.job.length - 1);
+    const char *args[7] = {uproj, uout, nums[0], "2", nums[1], nums[2], nums[3]};
+    _kernel_oserror *e = app_child_start("export", args, 7, "ReelEdit render", TXT_ID, cmd, sizeof(cmd));
     app_log("render: frames %d-%d: %s%s%s", R.job.start, R.job.start + R.job.length - 1, cmd, e ? ": " : "",
             e ? e->errmess : "");
     if (e) {
@@ -138,6 +139,7 @@ static int next(void)
     R.child = 0;
     R.done = R.ok = 0;
     R.line_len = 0;
+    R.heard_cs = ro_now_cs();
     tl_refresh();
     return 1;
 }
@@ -216,15 +218,41 @@ static void heard(const char *line)
     }
 }
 
+/* Nothing said for 90 s (it says its progress four times a second): stuck,
+   so stopped (the stretch left red, rendering stopped, said) */
+#define STUCK_CS 9000
+
+int rr_watching(void)
+{
+    return R.running;
+}
+
+void rr_tick(void)
+{
+    if (!R.running || ro_now_cs() - R.heard_cs < STUCK_CS)
+        return;
+    app_log("render: frames %d-%d: nothing from it for %d s: stopped", R.job.start, R.job.start + R.job.length - 1,
+            STUCK_CS / 100);
+    R.heard_cs = ro_now_cs();
+    if (R.child) {
+        kill_child(); /* (its TaskWindow_Morio ends it: not ok, so rendering stops and says so) */
+    } else {
+        R.ok = 0;
+        ended();
+    }
+}
+
 int rr_message(int *b)
 {
     if (b[4] == MSG_TW_EGO && R.running && b[5] == TXT_ID) {
         R.child = b[1];
+        R.heard_cs = ro_now_cs();
         if (!R.on)
             kill_child(); /* (stopped before it said who it was) */
         return 1;
     }
     if (b[4] == MSG_TW_OUTPUT && R.running && b[1] == R.child) {
+        R.heard_cs = ro_now_cs();
         const char *d = (const char *) &b[6];
         for (int i = 0; i < b[5] && i < 232; i++) {
             if (d[i] == '\n' || d[i] == '\r') {

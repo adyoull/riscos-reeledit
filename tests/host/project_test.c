@@ -2704,6 +2704,24 @@ static void proxies(const char *numbered_rel, const char *big_rel, const char *m
           made ? re_project_length(made) : -1, orig ? re_project_length(orig) : -1);
     re_project_close(made);
     re_project_close(orig);
+    {   /* (as the editor starts it, children.c: !RunImage -proxy @file, a clip whose name has spaces) */
+        char cmd[4200];
+        snprintf(cmd, sizeof(cmd), "cp %s 'proxy-test/The Big Clip - One.mp4'", big);
+        CHECK(system(cmd) == 0, "proxy: no copy of %s", big);
+        FILE *f = fopen("proxy-test/args", "w");
+        fprintf(f, "proxy-test/The Big Clip - One.mp4\nproxy-test/P 2\n0\n");
+        fclose(f);
+        char a0[] = "!RunImage", a1[] = "-proxy", a2[] = "@proxy-test/args";
+        char *argv[] = {a0, a1, a2, NULL};
+        int r = re_export_main(3, argv);
+        FILE *args_left = fopen("proxy-test/args", "r"), *out = fopen("proxy-test/P 2", "r");
+        CHECK(r == 0 && out && !args_left, "proxy: from an arguments' file, a name with spaces: %d (made %d, file left %d)",
+              r, out != NULL, args_left != NULL);
+        if (out)
+            fclose(out);
+        if (args_left)
+            fclose(args_left);
+    }
 
     re_project *p = re_project_new();
     re_item it;

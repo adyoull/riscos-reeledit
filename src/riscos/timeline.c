@@ -1570,8 +1570,9 @@ const char *tl_help(int screen_y)
     r.r[1] = (intptr_t) st;
     int wy = ro_swi(Wimp_GetWindowState, &r) ? 0 : screen_y - (st[4] - st[6]);
     if (wy > -RULER_H)
-        return "This is the Timeline's ruler.|MClick or drag here to move the playhead.|M"
-               "I and O mark a stretch on it; Return plays the stretch, ' takes it out.";
+        return "The ruler: click or drag to move the playhead; I and O mark a stretch (Return plays it).|M"
+               "The bar under it is red where playing may not keep up: Ctrl-R (Play > Render previews) renders "
+               "that, amber, then green.";
     if (titles_row() && wy > V3_BOTTOM - 4)
         return "These are the titles (T makes one), over V2: a title can go over a logo or a picture in the picture."
                "|MDrag one to move it, its ends to trim it; Menu over it to edit it, place it or fade it.";
@@ -1589,8 +1590,13 @@ void tl_title(void)
 {
     char t[sizeof(T.title)];
     int made, all;
-    if (px_making(&made, &all))
-        snprintf(t, sizeof(t), "Timeline (making proxies: %d of %d made)", made, all);
+    if (px_making(&made, &all)) {
+        int pc = px_progress();
+        if (pc >= 0)
+            snprintf(t, sizeof(t), "Timeline (making proxies: %d of %d made, the next %d%%)", made, all, pc);
+        else
+            snprintf(t, sizeof(t), "Timeline (making proxies: %d of %d made)", made, all);
+    }
     else
         snprintf(t, sizeof(t), "Timeline");
     if (!strcmp(t, T.title))

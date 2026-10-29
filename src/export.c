@@ -242,8 +242,58 @@ static void say_progress(void *ctx, int done, int total)
     }
 }
 
+int re_export_args(const char *file, char ***args)
+{
+    FILE *f = fopen(file, "r");
+    char line[2048];
+    int n = 0;
+    *args = NULL;
+    if (!f)
+        return -1;
+    while (n < 16 && fgets(line, sizeof(line), f)) {
+        size_t len = strlen(line);
+        while (len && (line[len - 1] == '\n' || line[len - 1] == '\r'))
+            line[--len] = 0;
+        char **more = realloc(*args, sizeof(char *) * (n + 1));
+        if (!more)
+            break;
+        *args = more;
+        (*args)[n++] = strdup(line);
+    }
+    fclose(f);
+    remove(file);
+    return n;
+}
+
+void re_export_args_free(char **args, int n)
+{
+    for (int i = 0; i < n; i++)
+        free(args[i]);
+    free(args);
+}
+
 int re_export_main(int argc, char **argv)
 {
+    if (argc == 3 && argv[2][0] == '@') { /* (the arguments in a file: names with spaces) */
+        char **a;
+        int n = re_export_args(argv[2] + 1, &a);
+        if (n < 0) {
+            printf("failed: the arguments' file %s couldn't be read\n", argv[2] + 1);
+            return 2;
+        }
+        char **all = malloc(sizeof(char *) * (n + 3));
+        if (!all)
+            return 2;
+        all[0] = argv[0];
+        all[1] = argv[1];
+        for (int i = 0; i < n; i++)
+            all[2 + i] = a[i];
+        all[2 + n] = NULL;
+        int r = re_export_main(n + 2, all);
+        free(all);
+        re_export_args_free(a, n);
+        return r;
+    }
     int proxy = argc > 1 && !strcmp(argv[1], "-proxy");
     if (argc < 4) {
         printf("failed: usage: -export project out [height [quality [hardware [in out]]]], -proxy file out [hardware]\n");

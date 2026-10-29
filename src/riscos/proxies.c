@@ -54,12 +54,28 @@ static struct
     int line_len;
     unsigned serial;
     int apply;            /* the project to be made again (with them, or without) */
+    unsigned heard_cs;    /* when it last said anything (or started): px_tick's watch */
+    int done, total;      /* its progress (frames) */
 } X;
+
+/* A file's name as one: MLT's names are from the root, but one given from
+   where the program is (the Linux tests) is made so too, or the same clip
+   had a second proxy made under its other name */
+static const char *whole(const char *file, char *buf, int size)
+{
+    char cwd[400];
+    if (file[0] == '/' || !getcwd(cwd, sizeof(cwd)))
+        return file;
+    snprintf(buf, size, "%s/%s", cwd, file);
+    return buf;
+}
 
 static int find(const char *file)
 {
+    char a[600], b[600];
+    file = whole(file, a, sizeof(a));
     for (int i = 0; i < X.n; i++)
-        if (!strcmp(X.f[i].file, file))
+        if (!strcmp(whole(X.f[i].file, b, sizeof(b)), file))
             return i;
     return -1;
 }
@@ -141,12 +157,10 @@ static int next(void)
         ro_swi(OS_File, &r);
         snprintf(X.out, sizeof(X.out), DIR ".P%X%u", ro_now_cs(), ++X.serial); /* (none a recovered one's) */
         const char *uout = full_name(X.out, unix_out, sizeof(unix_out));
-        snprintf(cmd, sizeof(cmd),
-                 "TaskWindow \"<ReelEdit$Dir>.!RunImage -proxy %s %s %d\" -wimpslot 40960K -name \"ReelEdit proxy\" "
-                 "-task &%08X -txt &%08X -quit",
-                 X.f[i].file, uout, can_hw(), A.task, TXT_ID);
-        r.r[0] = (intptr_t) cmd;
-        _kernel_oserror *e = ro_swi(Wimp_StartTask, &r);
+        char hw[4];
+        snprintf(hw, sizeof(hw), "%d", can_hw());
+        const char *args[3] = {X.f[i].file, uout, hw};
+        _kernel_oserror *e = app_child_start("proxy", args, 3, "ReelEdit proxy", TXT_ID, cmd, sizeof(cmd));
         app_log("proxy: %s: %s%s%s", X.f[i].file, cmd, e ? ": " : "", e ? e->errmess : "");
         if (e) {
             X.f[i].state = FAILED;
@@ -157,6 +171,8 @@ static int next(void)
         X.running = 1;
         X.child = X.ok = 0;
         X.line_len = 0;
+        X.heard_cs = ro_now_cs();
+        X.done = X.total = 0;
         tl_title();
         return 1;
     }
@@ -254,19 +270,60 @@ static void ended(void)
 
 static void heard(const char *line)
 {
+    int d, t;
     if (!strcmp(line, "done"))
         X.ok = 1;
-    else if (!strncmp(line, "failed", 6))
-        app_log("proxy: %s", line);
+    else if (sscanf(line, "progress %d %d", &d, &t) == 2) {
+        int was = X.total > 0 ? X.done * 100 / X.total : -1;
+        X.done = d;
+        X.total = t;
+        if ((t > 0 ? d * 100 / t : -1) != was)
+            tl_title();
+    } else if (!strstr(line, "Duplicate filter registration")) /* (ReelEdit's own over MLT's: as meant) */
+        app_log("proxy: %s", line); /* (failed: why; anything else it said) */
+}
+
+/* Nothing said for this long: it's stuck (it says its progress four times a
+   second), so stopped and the proxy given up (the clip's file used) */
+#define STUCK_CS 9000
+
+void px_tick(void)
+{
+    if (!X.running || ro_now_cs() - X.heard_cs < STUCK_CS)
+        return;
+    app_log("proxy: %s: nothing from it for %d s: stopped", X.at >= 0 && X.at < X.n ? X.f[X.at].file : "?",
+            STUCK_CS / 100);
+    X.heard_cs = ro_now_cs();
+    if (X.child) { /* (killed: its TaskWindow_Morio ends it) */
+        _kernel_swi_regs r;
+        int m[6] = {20, 0, 0, 0, MSG_TW_MORITE, 0};
+        r.r[0] = 17; r.r[1] = (intptr_t) m; r.r[2] = X.child;
+        ro_swi(Wimp_SendMessage, &r);
+    } else { /* (it never said who it was: given up here) */
+        X.ok = 0;
+        ended();
+    }
+}
+
+int px_watching(void)
+{
+    return X.running;
+}
+
+int px_progress(void)
+{
+    return X.running && X.total > 0 ? X.done * 100 / X.total : -1;
 }
 
 int px_message(int *b)
 {
     if (b[4] == MSG_TW_EGO && X.running && b[5] == TXT_ID) {
         X.child = b[1];
+        X.heard_cs = ro_now_cs();
         return 1;
     }
     if (b[4] == MSG_TW_OUTPUT && X.running && b[1] == X.child) {
+        X.heard_cs = ro_now_cs();
         const char *d = (const char *) &b[6];
         for (int i = 0; i < b[5] && i < 232; i++) {
             if (d[i] == '\n' || d[i] == '\r') {
