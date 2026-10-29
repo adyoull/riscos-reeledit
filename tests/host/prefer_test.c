@@ -32,6 +32,11 @@
  *           idle, then takes its place (that one closed first). And a
  *           clip's first picture part way in, its preferred decoder opened
  *           for it, is the right one (it was a GOP late)
+ *   share   the application's own limit (mlt_avformat_prefer_limit), as
+ *           ReelEdit shares the VideoCore with the copy of it making a
+ *           proxy: held counts what's open; a limit of 1 lets one open
+ *           beside the build's 3; 0 lets none (the default decoder, every
+ *           picture right); the limit cleared, the build's again
  *   exit    a program that exits without closing its clips still closes the
  *           hardware decoder (on RISC OS nothing else would, and it would
  *           keep its VideoCore memory until a restart)
@@ -51,6 +56,11 @@ static AVCodecContext *preferred_ctx = NULL;
 static int preferred_now = 0, preferred_most = 0; /* open at once, and the most */
 static int opened_beside_another = 0;              /* opened while another was open */
 static const char *mode = "normal";
+
+/* (patches/mlt 0020) */
+#define PREFERRED "h264_vchiq"
+extern int mlt_avformat_prefer_held(const char *name);
+extern void mlt_avformat_prefer_limit(const char *spec);
 static int64_t drop_before = INT64_MIN;
 static int drop_before_sets = 0;
 
@@ -175,6 +185,43 @@ int main(int argc, char **argv)
         CHECK(abs(mltt_centre(&t, 4, yuv) - 24) <= 1, "exit: frame 4 has luma %d", yuv[0]);
         CHECK(preferred_now == 1, "exit: %d open before exiting", preferred_now);
         exit(mltt_failures != 0); /* without closing anything */
+    }
+    if (!strcmp(mode, "share")) {
+        setenv("MLT_AVFORMAT_PREFER_MAX", "hevc_hwdec=1,h264_vchiq=3", 1);
+        mltt a, b;
+        if (!mltt_open(&a, "hdv_720_25p", "avformat", argv[2]) || !mltt_open(&b, "hdv_720_25p", "avformat", argv[2]))
+            return 1;
+        int yuv[3] = {0}, f;
+#define FRAME(t, n, what) CHECK(abs(mltt_centre(&t, n, yuv) - (16 + 2 * (n))) <= 1, "share: %s frame %d has luma %d", what, n, yuv[0])
+        CHECK(mlt_avformat_prefer_held(PREFERRED) == 0, "share: %d held before any picture",
+              mlt_avformat_prefer_held(PREFERRED));
+        mlt_avformat_prefer_limit("h264_vchiq=0,hevc_hwdec=0");
+        for (f = 0; f < 5; f++)
+            FRAME(a, f, "A (none allowed)");
+        CHECK(opened_preferred == 0 && mlt_avformat_prefer_held(PREFERRED) == 0,
+              "share: limit 0 still opened %d (%d held)", opened_preferred, mlt_avformat_prefer_held(PREFERRED));
+        mlt_avformat_prefer_limit("h264_vchiq=1");
+        for (f = 5; f < 10; f++) {
+            FRAME(a, f, "A (one allowed)");
+            FRAME(b, 20 + f, "B (one allowed)");
+        }
+        CHECK(opened_preferred == 1 && preferred_now == 1 && mlt_avformat_prefer_held(PREFERRED) == 1,
+              "share: limit 1: opened %d, %d now, %d held", opened_preferred, preferred_now,
+              mlt_avformat_prefer_held(PREFERRED));
+        mlt_avformat_prefer_limit(NULL);
+        for (f = 10; f < 14; f++) {
+            FRAME(a, f, "A (the build's limit)");
+            FRAME(b, 25 + f, "B (the build's limit)");
+        }
+        CHECK(opened_preferred == 2 && preferred_now == 2 && mlt_avformat_prefer_held(PREFERRED) == 2,
+              "share: limit cleared: opened %d, %d now, %d held", opened_preferred, preferred_now,
+              mlt_avformat_prefer_held(PREFERRED));
+        mltt_close(&a);
+        mltt_close(&b);
+        CHECK(mlt_avformat_prefer_held(PREFERRED) == 0, "share: %d held after closing", mlt_avformat_prefer_held(PREFERRED));
+#undef FRAME
+        printf("prefer_test %s: %s\n", mode, mltt_failures ? "FAILED" : "passed");
+        return mltt_failures != 0;
     }
     if (!strcmp(mode, "max3")) {
         setenv("MLT_AVFORMAT_PREFER_MAX", "hevc_hwdec=1,h264_vchiq=3", 1);

@@ -160,7 +160,7 @@ static int next(void)
         char hw[4];
         snprintf(hw, sizeof(hw), "%d", can_hw());
         const char *args[3] = {X.f[i].file, uout, hw};
-        _kernel_oserror *e = app_child_start("proxy", args, 3, "ReelEdit proxy", TXT_ID, cmd, sizeof(cmd));
+        _kernel_oserror *e = app_child_start("proxy", args, 3, "ReelEdit proxy", TXT_ID, 1, cmd, sizeof(cmd));
         app_log("proxy: %s: %s%s%s", X.f[i].file, cmd, e ? ": " : "", e ? e->errmess : "");
         if (e) {
             X.f[i].state = FAILED;
@@ -244,6 +244,7 @@ static void ended(void)
     const char *uout = full_name(X.out, unix_out, sizeof(unix_out));
     X.running = 0;
     X.child = 0;
+    app_child_ended(TXT_ID);
     if (X.at >= 0 && X.at < X.n) {
         if (X.ok) {
             X.f[X.at].state = MADE;

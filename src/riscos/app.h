@@ -273,9 +273,13 @@ void rr_close(void);   /* the editor closed: stopped, the files deleted */
 /* ---- proxies.c: proxies ---- */
 /* children.c: an export, render or proxy (!RunImage -MODE, its arguments in
    a scrap file: export.h) started in a TaskWindow named name, its messages
-   tagged txt; cmd: the command (for the log). NULL, or why not. */
+   tagged txt; given up to decoders of the VideoCore's H.264 decoders that
+   the editor and other children aren't using (and the HEVC block if free);
+   cmd: the command (for the log). NULL, or why not. app_child_ended: it has
+   ended (its decoders back to the editor). */
 _kernel_oserror *app_child_start(const char *mode, const char *const *args, int n, const char *name, unsigned txt,
-                                 char *cmd, int size);
+                                 int decoders, char *cmd, int size);
+void app_child_ended(unsigned txt);
 
 void px_edited(void);  /* the project changed: files wanting proxies found, made one after another */
 int px_message(int *block); /* 1: it was a proxy's (TaskWindow's) */

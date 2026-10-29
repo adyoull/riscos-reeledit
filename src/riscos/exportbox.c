@@ -248,7 +248,7 @@ static int start(const char *path, int safe)
     snprintf(nums[1], 16, "%d", X.quality);
     snprintf(nums[2], 16, "%d", X.hw && X.can_hw);
     const char *args[5] = {uproj, uout, nums[0], nums[1], nums[2]};
-    _kernel_oserror *e = app_child_start("export", args, 5, "ReelEdit export", TXT_ID, cmd, sizeof(cmd));
+    _kernel_oserror *e = app_child_start("export", args, 5, "ReelEdit export", TXT_ID, 3, cmd, sizeof(cmd));
     app_log("export to %s: %s%s%s", path, cmd, e ? ": " : "", e ? e->errmess : "");
     if (e) {
         app_report("The export couldn't be started (TaskWindow).");
@@ -392,6 +392,7 @@ static void ended(void)
     char t[300];
     X.running = 0;
     X.child = 0;
+    app_child_ended(TXT_ID);
     const char *leaf = strrchr(X.out, '.');
     leaf = leaf ? leaf + 1 : X.out;
     if (X.result == 1) {

@@ -1,0 +1,105 @@
+From 6ddf236b1dca35f22fa372f2225df261358a5b13 Mon Sep 17 00:00:00 2001
+From: Andrew Youll <andrewyoull86@gmail.com>
+Date: Thu, 29 Oct 2026 17:43:31 +0000
+Subject: [PATCH 20/20] avformat: the application's own limit on preferred
+ decoders, and how many are open
+
+mlt_avformat_prefer_limit(spec) sets a limit over MLT_AVFORMAT_PREFER_MAX
+and the build's default, in the same form, where 0 means none may be
+opened; NULL clears it. mlt_avformat_prefer_held(name) says how many of a
+preferred decoder are open in all producers. With these an application
+shares a hardware decoder's places with another program of its own (on
+RISC OS, a second copy making a proxy in a TaskWindow): each counts only
+its own.
+---
+ src/modules/avformat/producer_avformat.c | 45 ++++++++++++++++++++++--
+ 1 file changed, 42 insertions(+), 3 deletions(-)
+
+diff --git a/src/modules/avformat/producer_avformat.c b/src/modules/avformat/producer_avformat.c
+index 2dc1eff..52ce11c 100644
+--- a/src/modules/avformat/producer_avformat.c
++++ b/src/modules/avformat/producer_avformat.c
+@@ -3593,6 +3593,19 @@ static int prefer_exit_registered = 0;
+    (The Pi's HEVC block takes one stream; with direct output, riscos-
+    reelhwaccel devkit 0.2.18, the VideoCore decodes three 1080p H.264
+    streams at once in gpu_mem=128, where before one filled it.) */
++/* The application's own limit (mlt_avformat_prefer_limit), over the
++   environment's and the build's; in it 0 means none may be opened. */
++static char *prefer_limit_spec = NULL;
++
++void mlt_avformat_prefer_limit(const char *spec)
++{
++    pthread_mutex_lock(&prefer_lock);
++    free(prefer_limit_spec);
++    prefer_limit_spec = spec ? strdup(spec) : NULL;
++    pthread_mutex_unlock(&prefer_lock);
++}
++
++/* (-1: none may be opened, from the application's limit) */
+ static int prefer_max(const char *name)
+ {
+     const char *e = getenv("MLT_AVFORMAT_PREFER_MAX");
+@@ -3600,7 +3613,17 @@ static int prefer_max(const char *name)
+     if (!e)
+         e = MLT_AVFORMAT_PREFER_MAX_DEFAULT;
+ #endif
+-    int rest = 0;
++    int own = 0;
++    pthread_mutex_lock(&prefer_lock);
++    if (prefer_limit_spec) {
++        own = 1;
++        e = prefer_limit_spec; /* (read under the lock: copied below) */
++    }
++    char spec[256];
++    snprintf(spec, sizeof(spec), "%s", e ? e : "");
++    pthread_mutex_unlock(&prefer_lock);
++    e = spec;
++    int rest = own ? -1 : 0;
+     size_t len = name ? strlen(name) : 0;
+     while (e && *e) {
+         const char *item = e, *end = strchr(e, ','), *eq = strchr(e, '=');
+@@ -3608,9 +3631,9 @@ static int prefer_max(const char *name)
+             end = item + strlen(item);
+         if (eq && eq < end) {
+             if (name && (size_t) (eq - item) == len && !strncmp(item, name, len))
+-                return atoi(eq + 1);
++                return own && atoi(eq + 1) <= 0 ? -1 : atoi(eq + 1);
+         } else {
+-            rest = atoi(item);
++            rest = own && atoi(item) <= 0 ? -1 : atoi(item);
+         }
+         e = *end ? end + 1 : end;
+     }
+@@ -3668,6 +3691,8 @@ static void prefer_close_all(void)
+ static int prefer_claim(producer_avformat self, const char *name)
+ {
+     int max = prefer_max(name), idle = prefer_idle(), n = 0, victim = -1, free_slot = -1;
++    if (max < 0)
++        return 0; /* (none of it may be opened here: the application's limit) */
+     pthread_mutex_lock(&prefer_lock);
+     if (!prefer_exit_registered) {
+         prefer_exit_registered = 1;
+@@ -3722,6 +3747,20 @@ static int prefer_claim(producer_avformat self, const char *name)
+     return 1;
+ }
+ 
++/* How many of a preferred decoder are open now, in all producers: an
++   application whose other programs use the same hardware (on RISC OS, a
++   second copy making a proxy in a TaskWindow) shares them out with this
++   and mlt_avformat_prefer_limit. */
++int mlt_avformat_prefer_held(const char *name)
++{
++    int n = 0;
++    pthread_mutex_lock(&prefer_lock);
++    for (int i = 0; i < PREFER_HOLDERS; i++)
++        n += prefer_holders[i].self && name && !strcmp(prefer_holders[i].name, name);
++    pthread_mutex_unlock(&prefer_lock);
++    return n;
++}
++
+ /* A picture is being decoded: the clock moves on, and a holder is in use. */
+ static void prefer_touch(producer_avformat self)
+ {
+-- 
+2.43.0
+

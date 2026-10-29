@@ -28,12 +28,34 @@
 #include <string.h>
 #include <time.h>
 
+/* (patches/mlt 0020) */
+extern void mlt_avformat_prefer_limit(const char *spec);
+
 int re_export_bitrate(int width, int height, double fps, int quality)
 {
     static const double BPP[3] = {0.07, 0.10, 0.15};
     double b = BPP[quality < 0 ? 0 : quality > 2 ? 2 : quality] * width * height * (fps > 0 ? fps : 25);
     int k = (int) (b / 50000 + 0.5) * 50000;
     return k < 300000 ? 300000 : k > 20000000 ? 20000000 : k;
+}
+
+static char report[200];
+
+const char *re_export_report(void)
+{
+    return report;
+}
+
+/* Proxies: each frame scaled by the previews' scaler (patches/mlt 0014's,
+   halving then bilinear, NEON rows) instead of swscale's general bilinear,
+   which at 1080p to 360 lines was half of all a proxy's work on Linux, and
+   nearly all of what's left to the ARM when the VideoCore decodes and
+   encodes. (Only a yuv420p picture with nothing but its size to change.) */
+static mlt_frame fast_process(mlt_filter filter, mlt_frame frame)
+{
+    (void) filter;
+    mlt_properties_set_int(MLT_FRAME_PROPERTIES(frame), "consumer.fast_scale", 1);
+    return frame;
 }
 
 typedef struct
@@ -115,6 +137,11 @@ static int encode(re_project *p, const char *out, const re_export_settings *s, c
         }
         prod = cut;
     }
+    mlt_filter fast = NULL;
+    if (s->fast && (fast = mlt_filter_new())) {
+        fast->process = fast_process;
+        mlt_service_attach(MLT_PRODUCER_SERVICE(prod), fast);
+    }
     mlt_consumer_connect(c, MLT_PRODUCER_SERVICE(prod));
     mlt_producer_seek(prod, 0);
     mlt_producer_set_speed(prod, 1);
@@ -126,6 +153,10 @@ static int encode(re_project *p, const char *out, const re_export_settings *s, c
     mlt_consumer_stop(c);
     mlt_consumer_close(c);
     mlt_producer_set_speed(prod, 0);
+    if (fast) {
+        mlt_service_detach(MLT_PRODUCER_SERVICE(prod), fast);
+        mlt_filter_close(fast);
+    }
     if (cut)
         mlt_producer_close(cut);
     return r->done;
@@ -171,7 +202,7 @@ int re_export(const char *project, const char *out, const re_export_settings *s,
 int re_export_proxy(const char *file, const char *out, int hardware, void (*progress)(void *ctx, int done, int total),
                     int (*stop)(void *ctx), void *ctx, char *err, int errsize)
 {
-    re_export_settings s = {RE_PROXY_HEIGHT, RE_EXPORT_SMALL, hardware, NULL, 0, 0, 0, 5};
+    re_export_settings s = {RE_PROXY_HEIGHT, RE_EXPORT_SMALL, hardware, NULL, 0, 0, 0, 5, 1};
     snprintf(err, errsize, "%s", "");
     re_project *p = re_project_open(file, 0); /* (the clip as a project of it: its own size and rate) */
     if (p && re_project_profile(p)->height <= RE_PROXY_HEIGHT)
@@ -210,6 +241,7 @@ static int export_open(re_project *p, const char *out, const re_export_settings 
     }
     int made = -1, total = s->range ? s->out - s->in + 1 : len;
     const char *used = codecs[0];
+    clock_t t0 = clock();
     for (int i = 0; i < n && !r.stopped; i++) {
         used = codecs[i];
         remove(out);
@@ -217,6 +249,10 @@ static int export_open(re_project *p, const char *out, const re_export_settings 
         if (r.stopped || (made > 0 && size_of(out) > 0 && has_video(out)))
             break; /* (made: done, or stopped) */
     }
+    double secs = (double) (clock() - t0) / CLOCKS_PER_SEC;
+    const char *dec = re_project_decoder(p, s->range ? s->in : 0);
+    snprintf(report, sizeof(report), "decoder %s, encoder %s, %d frames in %.1f s", dec ? dec : "?", used,
+             made < 0 ? 0 : made, secs);
     re_project_close(p);
     if (r.stopped) {
         remove(out);
@@ -294,14 +330,22 @@ int re_export_main(int argc, char **argv)
         re_export_args_free(a, n);
         return r;
     }
+    if (argc > 2 && !strncmp(argv[2], "-decoders ", 10)) { /* (the editor's share of the VideoCore: children.c) */
+        mlt_avformat_prefer_limit(argv[2] + 10);
+        printf("decoders %s\n", argv[2] + 10);
+        argv[2] = argv[1];
+        argv[1] = argv[0];
+        return re_export_main(argc - 1, argv + 1);
+    }
     int proxy = argc > 1 && !strcmp(argv[1], "-proxy");
     if (argc < 4) {
-        printf("failed: usage: -export project out [height [quality [hardware [in out]]]], -proxy file out [hardware]\n");
+        printf("failed: usage: -export project out [height [quality [hardware [in out]]]], -proxy file out [hardware]\n"
+               "  (-export ... in out 1: scaled as previews are; a first argument \"-decoders SPEC\": the hardware decoders this may open)\n");
         return 2;
     }
     re_export_settings s = {argc > 4 ? atoi(argv[4]) : 0, argc > 5 ? atoi(argv[5]) : RE_EXPORT_NORMAL,
                             argc > 6 ? atoi(argv[6]) : 0, NULL, argc > 8, argc > 8 ? atoi(argv[7]) : 0,
-                            argc > 8 ? atoi(argv[8]) : 0};
+                            argc > 8 ? atoi(argv[8]) : 0, 0, argc > 9 && atoi(argv[9])};
     if (re_mlt_start() < 0) {
         printf("failed: MLT couldn't start\n");
         return 2;
@@ -313,6 +357,8 @@ int re_export_main(int argc, char **argv)
     int r = proxy ? re_export_proxy(argv[2], argv[3], argc > 4 && atoi(argv[4]), say_progress, NULL, &last, err,
                                     sizeof(err))
                   : re_export(argv[2], argv[3], &s, say_progress, NULL, &last, err, sizeof(err));
+    if (re_export_report()[0])
+        printf("used %s\n", re_export_report()); /* (the editor logs it) */
     printf(r == 0 ? "done\n" : r == 1 ? "stopped\n" : "failed: %s\n", err);
     fflush(stdout);
     return r < 0 ? 2 : r;

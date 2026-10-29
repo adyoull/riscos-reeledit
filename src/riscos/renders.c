@@ -127,8 +127,8 @@ static int next(void)
     snprintf(nums[1], 16, "%d", can_hw());
     snprintf(nums[2], 16, "%d", R.job.start);
     snprintf(nums[3], 16, "%d", R.job.start + R.job.length - 1);
-    const char *args[7] = {uproj, uout, nums[0], "2", nums[1], nums[2], nums[3]};
-    _kernel_oserror *e = app_child_start("export", args, 7, "ReelEdit render", TXT_ID, cmd, sizeof(cmd));
+    const char *args[8] = {uproj, uout, nums[0], "2", nums[1], nums[2], nums[3], "1"}; /* (1: scaled as previews are) */
+    _kernel_oserror *e = app_child_start("export", args, 8, "ReelEdit render", TXT_ID, 2, cmd, sizeof(cmd));
     app_log("render: frames %d-%d: %s%s%s", R.job.start, R.job.start + R.job.length - 1, cmd, e ? ": " : "",
             e ? e->errmess : "");
     if (e) {
@@ -190,6 +190,7 @@ static void ended(void)
     char unix_out[512];
     R.running = 0;
     R.child = 0;
+    app_child_ended(TXT_ID);
     const char *uout = app_mlt_name(R.file, unix_out, sizeof(unix_out));
     if (R.ok && R.pv && !re_previews_add(R.pv, R.job.sig, R.job.length, uout)) {
         app_log("render: frames %d-%d rendered", R.job.start, R.job.start + R.job.length - 1);

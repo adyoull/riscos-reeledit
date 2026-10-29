@@ -32,6 +32,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* (patches/mlt 0014's scaler, counted: proxies and render previews use it) */
+static int fast_scaled;
+int __real_mlt_fast_scale_plane(const uint8_t *src, int sw, int sh, uint8_t *dst, int dw, int dh);
+int __wrap_mlt_fast_scale_plane(const uint8_t *src, int sw, int sh, uint8_t *dst, int dw, int dh)
+{
+    fast_scaled++;
+    return __real_mlt_fast_scale_plane(src, sw, sh, dst, dw, dh);
+}
+extern void mlt_avformat_prefer_limit(const char *spec); /* (0020) */
+
 static int fails;
 #define CHECK(c, ...)                                                                                              \
     do {                                                                                                           \
@@ -2696,7 +2706,24 @@ static void proxies(const char *numbered_rel, const char *big_rel, const char *m
           re_proxy_wanted(big), re_proxy_wanted(m2v), re_proxy_wanted(pic), re_proxy_wanted("tone880.wav"));
     mkdir("proxy-test", 0777);
     char err[200];
+    int scaled0 = fast_scaled;
     CHECK(re_export_proxy(big, "proxy-test/P1", 0, NULL, NULL, NULL, err, sizeof(err)) == 0, "proxy: not made: %s", err);
+    /* (scaled as previews are, not by swscale: three planes a frame) */
+    int scaled1 = fast_scaled, frames = 0;
+    CHECK(sscanf(re_export_report(), "decoder h264, encoder mpeg4, %d frames in", &frames) == 1,
+          "proxy: the report \"%s\"", re_export_report());
+    CHECK(frames > 0 && scaled1 - scaled0 >= 3 * frames, "proxy: %d frames, %d planes by the previews' scaler", frames,
+          scaled1 - scaled0);
+    {   /* an export (not a preview) of the same at the same size: swscale's */
+        re_export_settings es = {RE_PROXY_HEIGHT, RE_EXPORT_SMALL, 0, "mpeg4"};
+        re_project *q = re_project_new();
+        re_project_add(q, big, -1);
+        re_project_save_copy(q, "proxy-test/E1.mlt");
+        re_project_close(q);
+        CHECK(re_export("proxy-test/E1.mlt", "proxy-test/E1.mp4", &es, NULL, NULL, NULL, err, sizeof(err)) == 0
+                  && fast_scaled == scaled1,
+              "proxy: an export of it: %s, %d planes by the previews' scaler", err, fast_scaled - scaled1);
+    }
     re_project *made = re_project_open("proxy-test/P1", 0), *orig = re_project_open(big, 0);
     CHECK(made && orig && re_project_profile(made)->height == RE_PROXY_HEIGHT
               && re_project_length(made) == re_project_length(orig),
@@ -2709,7 +2736,7 @@ static void proxies(const char *numbered_rel, const char *big_rel, const char *m
         snprintf(cmd, sizeof(cmd), "cp %s 'proxy-test/The Big Clip - One.mp4'", big);
         CHECK(system(cmd) == 0, "proxy: no copy of %s", big);
         FILE *f = fopen("proxy-test/args", "w");
-        fprintf(f, "proxy-test/The Big Clip - One.mp4\nproxy-test/P 2\n0\n");
+        fprintf(f, "-decoders h264_vchiq=0,hevc_hwdec=0\nproxy-test/The Big Clip - One.mp4\nproxy-test/P 2\n0\n");
         fclose(f);
         char a0[] = "!RunImage", a1[] = "-proxy", a2[] = "@proxy-test/args";
         char *argv[] = {a0, a1, a2, NULL};
@@ -2721,6 +2748,7 @@ static void proxies(const char *numbered_rel, const char *big_rel, const char *m
             fclose(out);
         if (args_left)
             fclose(args_left);
+        mlt_avformat_prefer_limit(NULL); /* (the child's share, set by -decoders: cleared) */
     }
 
     re_project *p = re_project_new();

@@ -152,6 +152,8 @@ static char saved_layout[256], saved_title[300];
 static char start_cmd[1500];
 /* A child's arguments (children.c: in a scrap file, !RunImage -MODE @file):
    how many, read into a (the file then gone), or -1 */
+const char *re_test_own_decoders(void);
+static char child_decoders[64]; /* (the last child's "-decoders" share, from child_args) */
 static int child_args(const char *mode, char a[][300], int max)
 {
     char key[32], file[600];
@@ -167,12 +169,17 @@ static int child_args(const char *mode, char a[][300], int max)
     }
     file[n] = 0;
     char **args;
-    int k = re_export_args(file, &args);
-    for (int i = 0; i < k && i < max; i++)
-        snprintf(a[i], 300, "%s", args[i]);
+    int k = re_export_args(file, &args), skip = 0;
+    child_decoders[0] = 0;
+    if (k > 0 && !strncmp(args[0], "-decoders ", 10)) { /* (children.c's share of the VideoCore) */
+        snprintf(child_decoders, sizeof(child_decoders), "%s", args[0] + 10);
+        skip = 1;
+    }
+    for (int i = skip; i < k && i - skip < max; i++)
+        snprintf(a[i - skip], 300, "%s", args[i]);
     if (k >= 0)
         re_export_args_free(args, k);
-    return k;
+    return k < 0 ? k : k - skip;
 }
 
 static int plots, reports, questions, answer = 3, closedown, acks, menus, savebox_opens, drags;
@@ -2879,6 +2886,7 @@ static int script(int *b, int mask)
                   && !strcmp(a[2], "720") && !strcmp(a[3], "1") && !strcmp(a[4], "0") && re_project_modified(re_test_project()),
               "Export: %d tasks started, \"%s\" (%d arguments: %s), modified %d", starts, start_cmd, n, n > 1 ? a[1] : "-",
               re_project_modified(re_test_project()));
+        CHECK(!strcmp(child_decoders, "h264_vchiq=3,hevc_hwdec=1"), "Export: given decoders \"%s\"", child_decoders);
         next(255);
         memset(b, 0, 24);
         b[0] = 24; b[1] = 0x777; b[2] = 70; b[4] = 0x808C2; b[5] = 0x52454558; /* TaskWindow_Ego */
@@ -3371,18 +3379,20 @@ static int script(int *b, int mask)
         char proj[300], outf[300];
         int h = 0, q = 0, hw = 0, in = 0, out = 0;
         char a[8][300];
-        int na = child_args("export", a, 8);
-        const char *x = na == 7 ? start_cmd : NULL;
+        int na = child_args("export", a, 8), fast = 0;
+        const char *x = na == 8 ? start_cmd : NULL;
         if (x) {
             snprintf(proj, sizeof(proj), "%s", a[0]);
             snprintf(outf, sizeof(outf), "%s", a[1]);
-            h = atoi(a[2]), q = atoi(a[3]), hw = atoi(a[4]), in = atoi(a[5]), out = atoi(a[6]);
+            h = atoi(a[2]), q = atoi(a[3]), hw = atoi(a[4]), in = atoi(a[5]), out = atoi(a[6]), fast = atoi(a[7]);
         }
-        CHECK(starts == render_starts + 1 && x && q == 2 && out >= in,
+        CHECK(starts == render_starts + 1 && x && q == 2 && out >= in && fast == 1,
               "render: %d started (%d before): \"%s\"", starts, render_starts, start_cmd);
+        /* (the VideoCore's decoders: the editor has none open here, so the two a render wants) */
+        CHECK(!strcmp(child_decoders, "h264_vchiq=2,hevc_hwdec=1"), "render: given decoders \"%s\"", child_decoders);
         if (!x)
             fail_quit("render: not started");
-        re_export_settings es = {h, q, 0, "mpeg4", 1, in, out};
+        re_export_settings es = {h, q, 0, "mpeg4", 1, in, out, 0, fast};
         char err[200];
         CHECK(re_export(proj, outf, &es, NULL, NULL, NULL, err, sizeof(err)) == 0, "render: frames %d-%d: %s", in, out, err);
         render_jobs++;
@@ -3481,6 +3491,8 @@ static int script(int *b, int mask)
               re_test_tl_title());
         if (!x)
             fail_quit("proxy: not started");
+        CHECK(!strcmp(child_decoders, "h264_vchiq=1,hevc_hwdec=1") && !strcmp(re_test_own_decoders(), "h264_vchiq=2,hevc_hwdec=0"),
+              "proxy: given decoders \"%s\", the editor's own \"%s\"", child_decoders, re_test_own_decoders());
         char err[200];
         CHECK(re_export_proxy(file, outf, 0, NULL, NULL, NULL, err, sizeof(err)) == 0, "proxy: %s", err);
         snprintf(proxy_made, sizeof(proxy_made), "%s", outf);
@@ -3509,6 +3521,7 @@ static int script(int *b, int mask)
         const char *f = i >= 0 ? re_project_item_file(re_test_project(), i) : NULL;
         CHECK(f && !strcmp(f, proxy_made) && !strcmp(re_test_tl_title(), "Timeline") && starts == proxy_starts + 1,
               "proxy: the clip's file %s (%s), the Timeline \"%s\"", f ? f : "-", proxy_made, re_test_tl_title());
+        CHECK(!re_test_own_decoders()[0], "proxy: ended, the editor's own limit still \"%s\"", re_test_own_decoders());
         shot("35-proxy");
         next(359);
         b[0] = W[0].box[0] + 50; b[1] = W[0].box[3] - 50; b[2] = 2; b[3] = VIEWER; b[4] = -1;

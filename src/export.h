@@ -21,7 +21,12 @@ typedef struct
     const char *vcodec;  /* (NULL: the VideoCore's when hardware, else libx264, else mpeg4) */
     int range, in, out;  /* range: only the project's frames in to out (render previews: render.h) */
     int gop;             /* a keyframe every this many frames (0: two seconds') */
+    int fast;            /* 1: scaled as previews are (patches/mlt 0014's scaler, not swscale): proxies */
 } re_export_settings;
+
+/* What the last export or proxy used and how fast it went ("decoder
+   h264_vchiq, encoder h264_encvchiq, 250 frames in 9.5 s"), for the log */
+const char *re_export_report(void);
 
 /* The project file exported to out. progress (if given) is told each
    picture made of how many; stop (if given) is asked each picture, and
