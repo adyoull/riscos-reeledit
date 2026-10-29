@@ -618,6 +618,15 @@ void re_display_mode_changed(void)
 
 void re_display_place(int window, ro_box pic)
 {
+    /* (a new place for the picture, the Viewer resized: the overlay, a
+       plane of the screen's own, isn't clipped by the window; left where it
+       was, until the next picture placed it again, it covered the controls
+       that had moved under it, in black. Hidden now, placed again by the
+       next picture: the window's redraw shows the picture meanwhile) */
+    if (window != D.window || memcmp(&pic, &D.pic, sizeof(pic))) {
+        re_display_hide_overlay();
+        memset(ov.placed, 0, sizeof(ov.placed));
+    }
     D.window = window;
     D.pic = pic;
 }

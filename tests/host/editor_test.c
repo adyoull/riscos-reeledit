@@ -152,6 +152,8 @@ static char saved_layout[256], saved_title[300];
 static char start_cmd[1500];
 static int plots, reports, questions, answer = 3, closedown, acks, menus, savebox_opens, drags;
 static int filetypes_set, dataloads_sent, plots_tl, prequit_acks, key_sent;
+void tl_refresh(void);
+static int plots_wide; /* (OS_Plot given a coordinate past the VDU's 16 bits) */
 static char last_text[128], filetype_path[300], all_text[16384];
 static unsigned colours_seen; /* bit 0: the selected clip's orange set */
 static int ptr[5];            /* Wimp_GetPointerInfo */
@@ -339,7 +341,12 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
         return &err;
     }
     case 0x42: r->r[0] = fake_cs; break;
-    case 0x45: plots_tl++; scr_plot((int) r->r[0], (int) r->r[1], (int) r->r[2]); break; /* OS_Plot */
+    case 0x45: /* OS_Plot */
+        plots_tl++;
+        if (abs((int) r->r[1]) > 32767 || abs((int) r->r[2]) > 32767)
+            plots_wide++;
+        scr_plot((int) r->r[0], (int) r->r[1], (int) r->r[2]);
+        break;
     case 0x46: scr_vdu((const unsigned char *) r->r[0], (int) r->r[1]); break;        /* OS_WriteN */
     case 0x65: break;
     case 0x40743:                                  /* ColourTrans_SetGCOL */
@@ -902,12 +909,31 @@ static int script(int *b, int mask)
                   "VideoOverlay_RedrawWindow given the controls: %d of %d redraws", ov_redraws_outside, ov_redraws);
             double ahead = (ssb_bytes - ssb_mark) / (1920.0 * 4) - (pos - 1);
             CHECK(ahead > 5 && ahead < 14, "the sound is %.1f frames ahead of the picture, not about 10", ahead);
+            next(5000);
+            b[0] = VIEWER;
+            window_state(b);
+            b[2] += 200; /* (the bottom edge up while playing: the overlay's old place over the controls) */
+            return 2;
+        }
+        return 0;
+    case 5000: /* resized while the overlay shows: not left where it was */
+        CHECK(ov_shown_bank < 0, "resized, the overlay still shows at its old place (%d,%d %dx%d)", S.ov_x, S.ov_y,
+              S.ov_w, S.ov_h);
+        next(5001);
+        return 0;
+    case 5001: /* and placed again by the next pictures: inside the picture, above the controls */
+        if (fake_cs - phase_cs >= 30) {
+            int pic_h = (W[0].box[3] - W[0].box[1]) - 2 * 64; /* (OS units: the window less two rows of controls) */
+            CHECK(ov_shown_bank >= 0 && S.ov_y <= 0 && S.ov_y - (S.ov_h << 1) >= -pic_h
+                      && (S.ov_w << 1) <= W[0].box[2] - W[0].box[0],
+                  "resized, the overlay not placed again in the picture: %d,%d %dx%d in %d high (shown %d)", S.ov_x,
+                  S.ov_y, S.ov_w, S.ov_h, pic_h, ov_shown_bank);
             closes_mark = ssb_closes;
             plots_mark = plots;
             next(9);
             return key(b, ' ');
         }
-        return 0;
+        return nulls ? 0 : (fail_quit("stopped playing by itself"), 0);
     case 9: /* stopped */
         if (nulls) {
             if (fake_cs - phase_cs > 20)
@@ -1172,6 +1198,27 @@ static int script(int *b, int mask)
     case 88:
         CHECK(W[1].extent_w > mark, "Ctrl+wheel didn't zoom in (extent %d, was %d)", W[1].extent_w, mark);
         ctrl_key = 0;
+        /* a clip long at this zoom (slowed to 10%: ten times as long), its end far past 32767 OS units: drawn */
+        CHECK(re_project_speed(re_test_project(), 1, 10) == 1 && re_project_speed(re_test_project(), 0, 10) == 1,
+              "the clips not slowed to 10%%");
+        tl_refresh();
+        plots_wide = 0;
+        next(5002);
+        return 0;
+    case 5002:
+        if (W[1].redraw)
+            return 1;
+        CHECK(W[1].extent_w > 34000 && plots_wide == 0,
+              "a long clip zoomed in: %d plots past 16 bits (the Timeline %d OS units wide)", plots_wide, W[1].extent_w);
+        shot("49-long-clip");
+        re_project_undo(re_test_project());
+        re_project_undo(re_test_project());
+        tl_refresh();
+        next(5003);
+        return 0;
+    case 5003:
+        if (W[1].redraw)
+            return 1;
         scroll_mark = W[1].scroll_x;
         next(89);
         b[0] = TL; window_state(b);

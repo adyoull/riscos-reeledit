@@ -406,9 +406,24 @@ static void colour(unsigned bbggrr00)
     ro_swi(ColourTrans_SetGCOL, &r);
 }
 
+/* (the VDU's coordinates are 16-bit: a long clip at a close zoom ran past
+   32767 OS units and was drawn nowhere, or somewhere else (Pi test, a
+   2:46 clip). Everything plotted here is a rectangle's corner or a small
+   triangle's point, so held within a range around the screen: a rectangle
+   that runs off it is the same rectangle on it) */
+#define PLOT_MIN (-4096)
+#define PLOT_MAX 16383
+
+static int plot_limit(int v)
+{
+    return v < PLOT_MIN ? PLOT_MIN : v > PLOT_MAX ? PLOT_MAX : v;
+}
+
 static void plot(int code, int x, int y)
 {
     _kernel_swi_regs r;
+    x = plot_limit(x);
+    y = plot_limit(y);
     r.r[0] = code; r.r[1] = x; r.r[2] = y;
     ro_swi(OS_Plot, &r);
 }
