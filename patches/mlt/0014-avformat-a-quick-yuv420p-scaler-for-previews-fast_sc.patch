@@ -1,0 +1,348 @@
+From 4aa6b8563a8e7bb2ca0a739e5d5d9e1c3ddb9a4e Mon Sep 17 00:00:00 2001
+From: Andrew Youll <andrewyoull86@gmail.com>
+Date: Thu, 29 Oct 2026 11:45:08 +0000
+Subject: [PATCH 14/14] avformat: a quick yuv420p scaler for previews
+ (fast_scale.c, with NEON)
+
+With consumer.fast_scale set and nothing but the size to change (yuv420p,
+even sizes, the same colorspace and range in and out), filter_swscale
+scales the three planes itself: halved by 2x2 means while still twice
+the size wanted or more, then bilinear in 8-bit fixed point. NEON on
+32-bit ARM, used only when MLT_NEON is 1. swscale's general C was most
+of the time a picture in a picture took on a small ARM machine.
+---
+ src/modules/avformat/CMakeLists.txt   |   7 +
+ src/modules/avformat/fast_scale.c     | 206 ++++++++++++++++++++++++++
+ src/modules/avformat/fast_scale.h     |  32 ++++
+ src/modules/avformat/filter_swscale.c |  34 +++++
+ 4 files changed, 279 insertions(+)
+ create mode 100644 src/modules/avformat/fast_scale.c
+ create mode 100644 src/modules/avformat/fast_scale.h
+
+diff --git a/src/modules/avformat/CMakeLists.txt b/src/modules/avformat/CMakeLists.txt
+index 252b073..c285130 100644
+--- a/src/modules/avformat/CMakeLists.txt
++++ b/src/modules/avformat/CMakeLists.txt
+@@ -1,6 +1,7 @@
+ add_library(mltavformat ${MLT_MODULE_TYPE}
+   common.c common.h
+   factory.c
++  fast_scale.c fast_scale.h
+   filter_avcolour_space.c
+   filter_avdeinterlace.c
+   filter_swscale.c
+@@ -98,3 +99,9 @@ install(FILES
+   yuv_only.txt
+   DESTINATION ${MLT_INSTALL_DATA_DIR}/avformat
+ )
++
++# NEON for fast_scale.c alone on 32-bit ARM: used only when the application
++# says the CPU has it (fast_scale.h)
++if(CMAKE_SYSTEM_PROCESSOR MATCHES "^arm")
++  set_source_files_properties(fast_scale.c PROPERTIES COMPILE_OPTIONS "-mfpu=neon")
++endif()
+diff --git a/src/modules/avformat/fast_scale.c b/src/modules/avformat/fast_scale.c
+new file mode 100644
+index 0000000..ef84b72
+--- /dev/null
++++ b/src/modules/avformat/fast_scale.c
+@@ -0,0 +1,206 @@
++/*
++ * fast_scale.c -- a quick yuv420p scaler for previews (fast_scale.h)
++ * Copyright (C) 2026 Andrew Youll
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
++ */
++
++#include "fast_scale.h"
++
++#include <framework/mlt_factory.h>
++#include <math.h>
++#include <stdlib.h>
++#include <string.h>
++
++#if defined(__ARM_NEON) || defined(__ARM_NEON__)
++#include <arm_neon.h>
++#define HAVE_NEON 1
++#endif
++
++static int neon(void)
++{
++#ifdef HAVE_NEON
++    static int known = -1;
++#ifdef FAST_SCALE_TEST /* (a test that turns it off and on) */
++    known = -1;
++#endif
++    if (known < 0) {
++        const char *v = mlt_environment("MLT_NEON");
++        known = v && !strcmp(v, "1");
++    }
++    return known;
++#else
++    return 0;
++#endif
++}
++
++/* A row halved: out[i] the rounded mean of a[2i], a[2i+1] (and b[2i],
++   b[2i+1] when there's b); or, not halve_x, of a[i] and b[i] */
++static void halve_row(const uint8_t *a, const uint8_t *b, uint8_t *out, int n, int halve_x)
++{
++    int i = 0;
++#ifdef HAVE_NEON
++    if (neon()) {
++        if (halve_x && b) {
++            for (; i + 8 <= n; i += 8) {
++                uint16x8_t t = vaddq_u16(vpaddlq_u8(vld1q_u8(a + 2 * i)), vpaddlq_u8(vld1q_u8(b + 2 * i)));
++                vst1_u8(out + i, vrshrn_n_u16(t, 2));
++            }
++        } else if (halve_x) {
++            for (; i + 8 <= n; i += 8)
++                vst1_u8(out + i, vrshrn_n_u16(vpaddlq_u8(vld1q_u8(a + 2 * i)), 1));
++        } else {
++            for (; i + 16 <= n; i += 16)
++                vst1q_u8(out + i, vrhaddq_u8(vld1q_u8(a + i), vld1q_u8(b + i)));
++        }
++    }
++#endif
++    if (halve_x && b) {
++        for (; i < n; i++)
++            out[i] = (uint8_t) ((a[2 * i] + a[2 * i + 1] + b[2 * i] + b[2 * i + 1] + 2) >> 2);
++    } else if (halve_x) {
++        for (; i < n; i++)
++            out[i] = (uint8_t) ((a[2 * i] + a[2 * i + 1] + 1) >> 1);
++    } else {
++        for (; i < n; i++)
++            out[i] = (uint8_t) ((a[i] + b[i] + 1) >> 1);
++    }
++}
++
++/* Bilinear: two rows mixed by w (1..255), then the row sampled at xi, xw */
++static void mix_rows(const uint8_t *a, const uint8_t *b, uint8_t *out, int n, int w)
++{
++    int i = 0;
++#ifdef HAVE_NEON
++    if (neon()) {
++        uint8x8_t wa = vdup_n_u8((uint8_t) (256 - w)), wb = vdup_n_u8((uint8_t) w);
++        for (; i + 8 <= n; i += 8)
++            vst1_u8(out + i, vrshrn_n_u16(vmlal_u8(vmull_u8(vld1_u8(a + i), wa), vld1_u8(b + i), wb), 8));
++    }
++#endif
++    for (; i < n; i++)
++        out[i] = (uint8_t) ((a[i] * (256 - w) + b[i] * w + 128) >> 8);
++}
++
++static void sample_row(const uint8_t *row, const int32_t *xi, const uint16_t *xw, uint8_t *out, int n)
++{
++    int i = 0;
++#ifdef HAVE_NEON
++    if (neon()) {
++        for (; i + 8 <= n; i += 8) {
++            uint8_t p0[8], p1[8];
++            for (int k = 0; k < 8; k++) {
++                p0[k] = row[xi[i + k]];
++                p1[k] = row[xi[i + k] + 1];
++            }
++            uint16x8_t w1 = vld1q_u16(xw + i), w0 = vsubq_u16(vdupq_n_u16(256), w1);
++            uint16x8_t s = vmlaq_u16(vmulq_u16(vmovl_u8(vld1_u8(p0)), w0), vmovl_u8(vld1_u8(p1)), w1);
++            vst1_u8(out + i, vrshrn_n_u16(s, 8));
++        }
++    }
++#endif
++    for (; i < n; i++)
++        out[i] = (uint8_t) ((row[xi[i]] * (256 - xw[i]) + row[xi[i] + 1] * xw[i] + 128) >> 8);
++}
++
++/* (dst x shows src (x + 0.5) * s / d - 0.5, between its two nearest) */
++static void positions(int s, int d, int32_t *idx, uint16_t *wt)
++{
++    for (int i = 0; i < d; i++) {
++        double p = (i + 0.5) * s / d - 0.5;
++        if (p < 0)
++            p = 0;
++        int k = (int) p, w = (int) lround((p - k) * 256);
++        if (w == 256) {
++            k++;
++            w = 0;
++        }
++        if (k >= s - 1) {
++            k = s - 1;
++            w = 0;
++        }
++        idx[i] = k;
++        wt[i] = (uint16_t) w;
++    }
++}
++
++int mlt_fast_scale_plane(const uint8_t *src, int sw, int sh, uint8_t *dst, int dw, int dh)
++{
++    uint8_t *tmp = NULL;
++    /* (halved while twice the size or more: each step averages, so a big reduction doesn't alias) */
++    while ((sw >= 2 * dw && sw >= 2) || (sh >= 2 * dh && sh >= 2)) {
++        int hx = sw >= 2 * dw && sw >= 2, hy = sh >= 2 * dh && sh >= 2;
++        int nw = hx ? sw / 2 : sw, nh = hy ? sh / 2 : sh;
++        uint8_t *h = malloc((size_t) nw * nh + 16);
++        if (!h) {
++            free(tmp);
++            return -1;
++        }
++        for (int y = 0; y < nh; y++) {
++            const uint8_t *a = src + (size_t) (hy ? 2 * y : y) * sw;
++            if (hx)
++                halve_row(a, hy ? a + sw : NULL, h + (size_t) y * nw, nw, 1);
++            else
++                halve_row(a, a + sw, h + (size_t) y * nw, nw, 0);
++        }
++        free(tmp);
++        tmp = h;
++        src = h;
++        sw = nw;
++        sh = nh;
++    }
++    if (sw == dw && sh == dh) {
++        memcpy(dst, src, (size_t) dw * dh);
++        free(tmp);
++        return 0;
++    }
++    int32_t *xi = malloc(sizeof(int32_t) * dw);
++    uint16_t *xw = malloc(sizeof(uint16_t) * dw);
++    uint8_t *row = malloc((size_t) sw + 16);
++    if (!xi || !xw || !row) {
++        free(xi);
++        free(xw);
++        free(row);
++        free(tmp);
++        return -1;
++    }
++    positions(sw, dw, xi, xw);
++    for (int y = 0; y < dh; y++) {
++        double p = (y + 0.5) * sh / dh - 0.5;
++        if (p < 0)
++            p = 0;
++        int k = (int) p, w = (int) lround((p - k) * 256);
++        if (w == 256) {
++            k++;
++            w = 0;
++        }
++        if (k >= sh - 1) {
++            k = sh - 1;
++            w = 0;
++        }
++        const uint8_t *a = src + (size_t) k * sw;
++        if (w)
++            mix_rows(a, a + sw, row, sw, w);
++        else
++            memcpy(row, a, sw);
++        row[sw] = row[sw - 1];
++        sample_row(row, xi, xw, dst + (size_t) y * dw, dw);
++    }
++    free(xi);
++    free(xw);
++    free(row);
++    free(tmp);
++    return 0;
++}
+diff --git a/src/modules/avformat/fast_scale.h b/src/modules/avformat/fast_scale.h
+new file mode 100644
+index 0000000..6156e97
+--- /dev/null
++++ b/src/modules/avformat/fast_scale.h
+@@ -0,0 +1,32 @@
++/*
++ * fast_scale.h -- a quick yuv420p scaler for previews (filter_swscale.c)
++ * Copyright (C) 2026 Andrew Youll
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
++ */
++
++#ifndef FAST_SCALE_H
++#define FAST_SCALE_H
++
++#include <stdint.h>
++
++/* A plane scaled from sw x sh to dw x dh (rows sw and dw bytes long):
++   halved (2x2, or along one way, rounding) while it's still twice the size
++   wanted or more, then bilinear in 8-bit fixed point. NEON for the rows
++   (with -mfpu=neon on 32-bit ARM, and only when the application has said
++   the CPU has it: MLT's environment "MLT_NEON" 1). 0, or -1 (no memory). */
++int mlt_fast_scale_plane(const uint8_t *src, int sw, int sh, uint8_t *dst, int dw, int dh);
++
++#endif
+diff --git a/src/modules/avformat/filter_swscale.c b/src/modules/avformat/filter_swscale.c
+index 25ac5ab..a09db11 100644
+--- a/src/modules/avformat/filter_swscale.c
++++ b/src/modules/avformat/filter_swscale.c
+@@ -18,6 +18,7 @@
+  */
+ 
+ #include "common.h"
++#include "fast_scale.h"
+ #include <framework/mlt_factory.h>
+ #include <framework/mlt_filter.h>
+ #include <framework/mlt_frame.h>
+@@ -173,6 +174,39 @@ static int filter_scale(mlt_frame frame,
+     if (!mlt_properties_get_int(properties, "consumer.fast_scale"))
+         interp |= SWS_FULL_CHR_H_INP | SWS_FULL_CHR_H_INT | SWS_ACCURATE_RND;
+ 
++    // A preview's yuv420p with nothing to change but the size: scaled here
++    // (fast_scale.h), not by swscale, whose general code was most of the
++    // time a picture in a picture took on a small ARM machine
++    if (*format == mlt_image_yuv420p && mlt_properties_get_int(properties, "consumer.fast_scale")
++        && (interp & 0xff) != SWS_POINT && !(iwidth & 1) && !(iheight & 1) && !(owidth & 1)
++        && !(oheight & 1) && iwidth > 0 && iheight > 0 && owidth > 0 && oheight > 0) {
++        mlt_profile profile = mlt_service_profile(
++            MLT_PRODUCER_SERVICE(mlt_frame_get_original_producer(frame)));
++        mlt_colorspace dst_colorspace = profile ? profile->colorspace : mlt_colorspace_bt601;
++        mlt_colorspace src_colorspace = mlt_image_colorspace_id(mlt_properties_get(properties, "colorspace"));
++        int src_full_range = mlt_properties_get_int(properties, "full_range");
++        int dst_full_range = mlt_image_full_range(mlt_properties_get(properties, "consumer.color_range"));
++        if (src_colorspace == dst_colorspace && src_full_range == dst_full_range) {
++            int out_size = mlt_image_format_size(*format, owidth, oheight, NULL);
++            uint8_t *out = mlt_pool_alloc(out_size);
++            const uint8_t *in = *image;
++            int ok = out && !mlt_fast_scale_plane(in, iwidth, iheight, out, owidth, oheight)
++                     && !mlt_fast_scale_plane(in + iwidth * iheight, iwidth / 2, iheight / 2,
++                                              out + owidth * oheight, owidth / 2, oheight / 2)
++                     && !mlt_fast_scale_plane(in + iwidth * iheight + (iwidth / 2) * (iheight / 2),
++                                              iwidth / 2, iheight / 2,
++                                              out + owidth * oheight + (owidth / 2) * (oheight / 2),
++                                              owidth / 2, oheight / 2);
++            if (ok) {
++                mlt_frame_set_image(frame, out, out_size, mlt_pool_release);
++                *image = out;
++                /* (an alpha: filter_rescale.c scales it) */
++                return 0;
++            }
++            mlt_pool_release(out);
++        }
++    }
++
+     // Convert the pixel formats
+     int avformat = convert_mlt_to_av_cs(*format);
+ 
+-- 
+2.43.0
+

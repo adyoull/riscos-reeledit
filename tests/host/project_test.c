@@ -1077,6 +1077,146 @@ static void scale_planes(void)
           out[3], out[4], out[15]);
 }
 
+
+/* MLT's swscale filter (patch 0014): a preview's yuv420p scaled by
+   fast_scale.c, near what swscale makes; its alpha scaled too; and swscale
+   still used when the colours change */
+static uint8_t *swscaled(mlt_profile prof, int fast, const char *cs, int ow, int oh, uint8_t **alpha, int noisy)
+{
+    int iw = 128, ih = 72, isize = iw * ih * 3 / 2;
+    mlt_frame fr = mlt_frame_init(NULL);
+    uint8_t *buf = mlt_pool_alloc(isize), *a = mlt_pool_alloc(iw * ih);
+    for (int y = 0; y < ih; y++)
+        for (int x = 0; x < iw; x++) {
+            buf[y * iw + x] = (uint8_t) (40 + x + y + ((x / 8 + y / 8) & 1) * 30 + (noisy ? (x * x + 3 * y) % 5 * 6 : 0));
+            a[y * iw + x] = (uint8_t) (x < 64 ? 255 : 0);
+        }
+    for (int y = 0; y < ih / 2; y++)
+        for (int x = 0; x < iw / 2; x++) {
+            buf[iw * ih + y * iw / 2 + x] = (uint8_t) (60 + 2 * x);
+            buf[iw * ih + iw * ih / 4 + y * iw / 2 + x] = (uint8_t) (200 - 3 * y);
+        }
+    mlt_frame_set_image(fr, buf, isize, mlt_pool_release);
+    mlt_frame_set_alpha(fr, a, iw * ih, mlt_pool_release);
+    mlt_properties fp = MLT_FRAME_PROPERTIES(fr);
+    mlt_properties_set_int(fp, "format", mlt_image_yuv420p);
+    mlt_properties_set_int(fp, "width", iw);
+    mlt_properties_set_int(fp, "height", ih);
+    mlt_properties_set(fp, "colorspace", cs);
+    mlt_properties_set(fp, "consumer.rescale", "bilinear");
+    mlt_properties_set_int(fp, "consumer.fast_scale", fast);
+    mlt_filter f = mlt_factory_filter(prof, "swscale", NULL);
+    mlt_filter_process(f, fr);
+    mlt_image_format want = mlt_image_yuv420p;
+    uint8_t *img = NULL, *copy = NULL;
+    int w = ow, h = oh, size = 0;
+    mlt_frame_get_image(fr, &img, &want, &w, &h, 0);
+    uint8_t *al = mlt_frame_get_alpha_size(fr, &size);
+    if (img && want == mlt_image_yuv420p && w == ow && h == oh) {
+        copy = malloc(ow * oh * 3 / 2);
+        memcpy(copy, img, ow * oh * 3 / 2);
+    }
+    *alpha = NULL;
+    if (al && size == ow * oh) {
+        *alpha = malloc(size);
+        memcpy(*alpha, al, size);
+    }
+    mlt_frame_close(fr);
+    mlt_filter_close(f);
+    return copy;
+}
+
+static void fast_scale(mlt_profile prof)
+{
+    static const int sizes[][2] = {{32, 18}, {96, 54}, {200, 112}};
+    for (int k = 0; k < 3; k++) {
+        int ow = sizes[k][0], oh = sizes[k][1], n = ow * oh * 3 / 2;
+        uint8_t *af, *as;
+        uint8_t *f = swscaled(prof, 1, "601", ow, oh, &af, k == 0), *s = swscaled(prof, 0, "601", ow, oh, &as, k == 0);
+        long sum = 0;
+        int most = 0;
+        for (int i = 0; f && s && i < n; i++) {
+            int d = abs(f[i] - s[i]);
+            sum += d;
+            most = d > most ? d : most;
+        }
+        if (k == 0) { /* (a quarter of the size: each pixel the mean of its 4x4, sharper than swscale's) */
+            int bad = 0, got = 0, want = 0;
+            for (int y = 0; f && y < oh; y++)
+                for (int x = 0; x < ow; x++) {
+                    int t = 0;
+                    for (int j = 0; j < 4; j++)
+                        for (int i = 0; i < 4; i++) {
+                            int sx = 4 * x + i, sy = 4 * y + j;
+                            t += (uint8_t) (40 + sx + sy + ((sx / 8 + sy / 8) & 1) * 30 + (sx * sx + 3 * sy) % 5 * 6);
+                        }
+                    if (abs(f[y * ow + x] - (t + 8) / 16) > 1 && !bad++) {
+                        got = f[y * ow + x];
+                        want = (t + 8) / 16;
+                    }
+                }
+            CHECK(f && !bad, "fast scale: a quarter the size not 4x4 means: %d wrong (%d, want %d)", bad, got, want);
+        } else
+            CHECK(f && s && sum <= n * 2 && most <= 24, "fast scale: %dx%d not near swscale's: mean %.2f, most %d", ow,
+                  oh, f && s ? (double) sum / n : -1.0, most);
+        CHECK(af && af[0] == 255 && af[ow * oh - 1] == 0 && af[ow / 4] == 255 && af[ow * 3 / 4] == 0,
+              "fast scale: %dx%d alpha not scaled", ow, oh);
+        free(f);
+        free(s);
+        free(af);
+        free(as);
+    }
+    {   /* (709 into the 601 here: left to swscale, which changes the colours; ours wouldn't) */
+        uint8_t *a1, *a2;
+        uint8_t *f = swscaled(prof, 1, "709", 96, 54, &a1, 0), *n = swscaled(prof, 1, "601", 96, 54, &a2, 0);
+        int moved = f && n && memcmp(f + 96 * 54, n + 96 * 54, 96 * 54 / 2);
+        CHECK(moved, "fast scale: 709 into 601 not left to swscale");
+        free(f);
+        free(n);
+        free(a1);
+        free(a2);
+    }
+}
+
+/* MLT's resize filter (patch 0015): a 4:3 yuv420p picture in the 16:9 frame
+   padded as yuv420p (not made yuv422 for it), at the middle, its alpha too */
+static void resize_pads(mlt_profile prof)
+{
+    int iw = 240, ih = 180, ow = prof->width, oh = prof->height, isize = iw * ih * 3 / 2;
+    mlt_frame fr = mlt_frame_init(NULL);
+    uint8_t *buf = mlt_pool_alloc(isize), *a = mlt_pool_alloc(iw * ih);
+    memset(buf, 200, iw * ih);
+    memset(buf + iw * ih, 90, iw * ih / 4);
+    memset(buf + iw * ih * 5 / 4, 170, iw * ih / 4);
+    memset(a, 255, iw * ih);
+    mlt_frame_set_image(fr, buf, isize, mlt_pool_release);
+    mlt_frame_set_alpha(fr, a, iw * ih, mlt_pool_release);
+    mlt_properties fp = MLT_FRAME_PROPERTIES(fr);
+    mlt_properties_set_int(fp, "format", mlt_image_yuv420p);
+    mlt_properties_set_int(fp, "width", iw);
+    mlt_properties_set_int(fp, "height", ih);
+    mlt_properties_set_double(fp, "aspect_ratio", 1.0);
+    mlt_properties_set(fp, "consumer.rescale", "bilinear");
+    mlt_filter f = mlt_factory_filter(prof, "resize", NULL);
+    mlt_filter_process(f, fr);
+    mlt_image_format want = mlt_image_yuv420p;
+    uint8_t *img = NULL;
+    int w = ow, h = oh, size = 0;
+    mlt_frame_get_image(fr, &img, &want, &w, &h, 0);
+    uint8_t *al = mlt_frame_get_alpha_size(fr, &size);
+    int ox = (ow - iw) / 2, ok = img && want == mlt_image_yuv420p && w == ow && h == oh;
+    const uint8_t *u = ok ? img + ow * oh : NULL, *v = ok ? u + ow * oh / 4 : NULL;
+    CHECK(ok && img[ow * 90 + 2] == 16 && img[ow * 90 + ox] == 200 && img[ow * 90 + ox - 1] == 16
+              && img[ow * 90 + ox + iw - 1] == 200 && img[ow * 90 + ox + iw] == 16 && u[45 * ow / 2 + 1] == 128
+              && u[45 * ow / 2 + ox / 2] == 90 && v[45 * ow / 2 + ox / 2 + iw / 2 - 1] == 170
+              && v[45 * ow / 2 + ox / 2 + iw / 2] == 128,
+          "resize: 4:3 in 16:9 not padded as yuv420p (%s %dx%d)", mlt_image_format_name(want), w, h);
+    CHECK(al && size == ow * oh && al[ow * 90 + 2] == 0 && al[ow * 90 + ox] == 255 && al[ow * 90 + ox + iw] == 0,
+          "resize: the alpha not padded with it");
+    mlt_frame_close(fr);
+    mlt_filter_close(f);
+}
+
 static void motion(const char *a, const char *ramp, const char *out)
 {
     scale_planes();
@@ -1092,6 +1232,8 @@ static void motion(const char *a, const char *ramp, const char *out)
     CHECK(ours && mlt_properties_get_int(MLT_FILTER_PROPERTIES(ours), "_reeledit_affine"),
           "motion: affine is the plus module's, not ours");
     mlt_filter_close(ours);
+    fast_scale(re_project_profile(p));
+    resize_pads(re_project_profile(p));
     int l0 = luma_xy(e, s + 2, 2, 90), m0 = luma_xy(e, s + 2, 160, 90);
     CHECK(it.picture && !it.moving && abs(l0 - ramp_y(2)) <= 3 && abs(m0 - ramp_y(160)) <= 3,
           "motion: the picture as it is: %d at the left, %d in the middle (picture %d)", l0, m0, it.picture);

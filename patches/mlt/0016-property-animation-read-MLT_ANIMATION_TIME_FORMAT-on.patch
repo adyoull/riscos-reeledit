@@ -1,0 +1,62 @@
+From 42c39d7a7c8a09ea436b5ddb6649e7639aa96f1a Mon Sep 17 00:00:00 2001
+From: Andrew Youll <andrewyoull86@gmail.com>
+Date: Thu, 29 Oct 2026 11:54:24 +0000
+Subject: [PATCH 16/16] property, animation: read MLT_ANIMATION_TIME_FORMAT
+ once
+
+Every property got as a string asked the environment for it, hundreds of
+times a frame when there are animated properties; getenv is slow where a
+name not in the environment is then looked for among the system's own
+variables, as on RISC OS.
+---
+ src/framework/mlt_animation.c | 11 +++++++++--
+ src/framework/mlt_property.c  | 11 +++++++++--
+ 2 files changed, 18 insertions(+), 4 deletions(-)
+
+diff --git a/src/framework/mlt_animation.c b/src/framework/mlt_animation.c
+index 0806ef2..4aa7056 100644
+--- a/src/framework/mlt_animation.c
++++ b/src/framework/mlt_animation.c
+@@ -817,8 +817,15 @@ char *mlt_animation_serialize_cut_tf(mlt_animation self,
+ 
+ static mlt_time_format default_time_format()
+ {
+-    const char *e = getenv("MLT_ANIMATION_TIME_FORMAT");
+-    return e ? strtol(e, NULL, 10) : mlt_time_frames;
++    /* (read once: every property got as a string asked, hundreds of times a
++       picture, and getenv is slow on some systems, as RISC OS's, where a
++       name not in the environment is looked for among the OS's variables) */
++    static int known = -1;
++    if (known < 0) {
++        const char *e = getenv("MLT_ANIMATION_TIME_FORMAT");
++        known = e ? (int) strtol(e, NULL, 10) : (int) mlt_time_frames;
++    }
++    return (mlt_time_format) known;
+ }
+ 
+ /** Serialize a cut of the animation.
+diff --git a/src/framework/mlt_property.c b/src/framework/mlt_property.c
+index 3c00b33..74c8ade 100644
+--- a/src/framework/mlt_property.c
++++ b/src/framework/mlt_property.c
+@@ -783,8 +783,15 @@ char *mlt_property_get_string_tf(mlt_property self, mlt_time_format time_format)
+ 
+ static mlt_time_format default_time_format()
+ {
+-    const char *e = getenv("MLT_ANIMATION_TIME_FORMAT");
+-    return e ? strtol(e, NULL, 10) : mlt_time_frames;
++    /* (read once: every property got as a string asked, hundreds of times a
++       picture, and getenv is slow on some systems, as RISC OS's, where a
++       name not in the environment is looked for among the OS's variables) */
++    static int known = -1;
++    if (known < 0) {
++        const char *e = getenv("MLT_ANIMATION_TIME_FORMAT");
++        known = e ? (int) strtol(e, NULL, 10) : (int) mlt_time_frames;
++    }
++    return (mlt_time_format) known;
+ }
+ 
+ /** Get the property as a string.
+-- 
+2.43.0
+

@@ -113,8 +113,9 @@ CC="$RISCOS_TOOLCHAIN/bin/arm-riscos-gnueabihf-gcc"
 echo "built $O/bench,ff8"
 
 # ---- neon_check (tools/neon_check.c): MLT's NEON loops against the C
-"$CC" -O2 $CFLAGS_EXTRA -I"$STAGE/include/mlt-7" -I"$M/src/modules/core" -I"$TOP/src" "$TOP/tools/neon_check.c" \
-  "$M/src/modules/core/core_neon.c" "$TOP/src/neon.c" -mfpu=neon -o "$O/neon_check" -static
+"$CC" -O2 $CFLAGS_EXTRA -I"$STAGE/include/mlt-7" -I"$M/src/modules/core" -I"$M/src/modules/avformat" -I"$TOP/src" \
+  "$TOP/tools/neon_check.c" "$M/src/modules/core/core_neon.c" "$M/src/modules/avformat/fast_scale.c" -DFAST_SCALE_TEST \
+  "$TOP/src/neon.c" -mfpu=neon -o "$O/neon_check" -static
 "$RISCOS_TOOLCHAIN/bin/arm-riscos-gnueabihf-strip" -o "$O/neon_check.elf" "$O/neon_check"
 "$RISCOS_TOOLCHAIN/bin/elf2aif" -e "$O/neon_check.elf" "$O/neon_check,ff8" > /dev/null
 echo "built $O/neon_check,ff8"

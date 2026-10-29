@@ -1,5 +1,6 @@
 /*
  * neon_check.c -- the MLT core module's NEON loops (patches/mlt 0011), and
+ * the avformat module's preview scaler (0014: fast_scale.c), and
  * ReelEdit's own (src/neon.c: pan and zoom, green screen), against the C
  * loops they stand in for, on random rows
  * Copyright (C) 2026 Andrew Youll
@@ -13,6 +14,7 @@
  */
 
 #include "core_neon.h"
+#include "fast_scale.h"
 #include "scale.h"
 #include "neon.h"
 
@@ -49,10 +51,12 @@ static void compare(const char *what, const uint8_t *x, const uint8_t *y, int n,
     }
 }
 
-/* (linked without MLT: core_neon.c asks only this, once) */
+/* (linked without MLT: core_neon.c asks only this, once; fast_scale.c,
+   built for this, each time: so it can be turned off) */
+static int neon_wanted = 1;
 char *mlt_environment(const char *name)
 {
-    return strcmp(name, "MLT_NEON") ? NULL : (char *) "1";
+    return strcmp(name, "MLT_NEON") ? NULL : neon_wanted ? (char *) "1" : (char *) "0";
 }
 
 int main(void)
@@ -248,6 +252,27 @@ int main(void)
         if (done != (n & ~7))
             bad = 1;
         compare("charcoal", cx, co, done, 0);
+    }
+    /* fast_scale.c (0014): planes of all sizes, scaled up and down, the same with NEON as without */
+    for (int t = 0; t < 300; t++) {
+        int sw = 2 + rand() % 400, sh = 2 + rand() % 120, dw = 1 + rand() % 400, dh = 1 + rand() % 120;
+        if (t < 4) { /* (halving: both ways, across only, down only, and a quarter) */
+            static const int k[4][4] = {{320, 180, 160, 90}, {320, 180, 160, 180}, {320, 180, 320, 90}, {640, 360, 150, 84}};
+            sw = k[t][0], sh = k[t][1], dw = k[t][2], dh = k[t][3];
+        }
+        uint8_t *src = malloc((size_t) sw * sh), *o1 = malloc((size_t) dw * dh), *o2 = malloc((size_t) dw * dh);
+        fill(src, sw * sh, 0);
+        neon_wanted = 1;
+        int r1 = mlt_fast_scale_plane(src, sw, sh, o1, dw, dh);
+        neon_wanted = 0;
+        int r2 = mlt_fast_scale_plane(src, sw, sh, o2, dw, dh);
+        neon_wanted = 1;
+        if (r1 || r2)
+            bad = 1;
+        compare("fast_scale", o1, o2, dw * dh, 0);
+        free(src);
+        free(o1);
+        free(o2);
     }
     printf("neon_check: %s (largest difference from the C: %d)\n", bad ? "FAILED" : "passed", worst);
     return bad;

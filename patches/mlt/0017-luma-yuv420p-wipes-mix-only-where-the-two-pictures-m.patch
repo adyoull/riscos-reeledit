@@ -1,0 +1,74 @@
+From b9366063a367dbed78a61a610afe16762682b5f6 Mon Sep 17 00:00:00 2001
+From: Andrew Youll <andrewyoull86@gmail.com>
+Date: Thu, 29 Oct 2026 11:59:07 +0000
+Subject: [PATCH 17/17] luma: yuv420p wipes mix only where the two pictures
+ meet
+
+Most of a wipe's picture is all of one clip or the other: runs of a row
+with a weight of 0 are left as they are and runs of 256 copied, and only
+what's between is mixed (core_neon.h's mix_w).
+---
+ src/modules/core/transition_luma.c | 33 ++++++++++++++++++++++++------
+ 1 file changed, 27 insertions(+), 6 deletions(-)
+
+diff --git a/src/modules/core/transition_luma.c b/src/modules/core/transition_luma.c
+index 713942d..8a7c2cf 100644
+--- a/src/modules/core/transition_luma.c
++++ b/src/modules/core/transition_luma.c
+@@ -510,6 +510,31 @@ static void luma_composite_yuv422(mlt_frame a_frame,
+     }
+ }
+ 
++/* A row of d mixed with s by w (0 .. 256): runs of 0 left, runs of 256
++   copied, the rest mixed (NEON where there is): most of a wipe's picture is
++   all of one or the other */
++static void mix_row_runs(uint8_t *d, const uint8_t *s, const uint16_t *w, int n)
++{
++    int x = 0;
++    while (x < n) {
++        int start = x;
++        if (w[x] == 0) {
++            while (x < n && w[x] == 0)
++                x++;
++        } else if (w[x] == 256) {
++            while (x < n && w[x] == 256)
++                x++;
++            memcpy(d + start, s + start, x - start);
++        } else {
++            while (x < n && w[x] != 0 && w[x] != 256)
++                x++;
++            if (!mlt_core_neon_mix_w(d + start, s + start, w + start, x - start))
++                for (int i = start; i < x; i++)
++                    d[i] = (s[i] * w[i] + d[i] * (256 - w[i])) >> 8;
++        }
++    }
++}
++
+ /** A wipe of two opaque yuv420p progressive pictures by the luma map,
+  * plane by plane: each pixel's mix (the yuv422 path's integer smoothstep)
+  * looked up in a table made for this frame (the map's values in 1024
+@@ -574,9 +599,7 @@ static int luma_composite_yuv420p(mlt_frame a_frame,
+             w_row[x] = table[l[x_offset >> 16] >> 6];
+         uint8_t *d = p_dest + y * width;
+         const uint8_t *s = p_src + y * width;
+-        if (!mlt_core_neon_mix_w(d, s, w_row, width))
+-            for (int x = 0; x < width; x++)
+-                d[x] = (s[x] * w_row[x] + d[x] * (256 - w_row[x])) >> 8;
++        mix_row_runs(d, s, w_row, width);
+         if (y & 1)
+             continue;
+         for (int x = 0; x < cw; x++)
+@@ -585,9 +608,7 @@ static int luma_composite_yuv420p(mlt_frame a_frame,
+         for (int c = 0; c < 2; c++) {
+             uint8_t *dc = (c ? dv : du) + cy * cw;
+             const uint8_t *sc = (c ? sv : su) + cy * cw;
+-            if (!mlt_core_neon_mix_w(dc, sc, c_row, cw))
+-                for (int x = 0; x < cw; x++)
+-                    dc[x] = (sc[x] * c_row[x] + dc[x] * (256 - c_row[x])) >> 8;
++            mix_row_runs(dc, sc, c_row, cw);
+         }
+     }
+     mlt_pool_release(table);
+-- 
+2.43.0
+
