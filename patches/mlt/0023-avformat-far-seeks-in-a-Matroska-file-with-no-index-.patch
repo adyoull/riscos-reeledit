@@ -1,0 +1,274 @@
+From f06d2b35694a645e3aed7faa53af73999b6e30f1 Mon Sep 17 00:00:00 2001
+From: Andrew Youll <andrewyoull86@gmail.com>
+Date: Fri, 30 Oct 2026 19:19:36 +0000
+Subject: [PATCH 23/23] avformat: far seeks in a Matroska file with no index
+ (Cues)
+
+A Matroska file written without Cues has no index, and FFmpeg's demuxer
+then seeks by reading every cluster from the start to the target (half of
+the file for a seek to the middle: minutes from a network share, the
+program frozen). A byte seek doesn't help: the demuxer ignores it.
+
+mkv_index.c: before a seek with nothing in the index within 20 s before
+the target, a cluster is found where the target should be (the file's
+average rate; its ID, then any CRC-32, Void, Position or PrevSize, then
+its Timecode), the guess moved until one is 12 to 42 s before the target,
+and it's added to the index. The demuxer goes straight there and reads a
+few seconds; the keyframes it reads are indexed as before. Used by
+seek_video and seek_audio. A 600 s file: a seek to 56% read 1.2 MB, not
+79 MB, with the same pictures as the indexed file, with or without its
+Duration.
+---
+ src/modules/avformat/CMakeLists.txt      |   1 +
+ src/modules/avformat/mkv_index.c         | 157 +++++++++++++++++++++++
+ src/modules/avformat/mkv_index.h         |  33 +++++
+ src/modules/avformat/producer_avformat.c |   3 +
+ 4 files changed, 194 insertions(+)
+ create mode 100644 src/modules/avformat/mkv_index.c
+ create mode 100644 src/modules/avformat/mkv_index.h
+
+diff --git a/src/modules/avformat/CMakeLists.txt b/src/modules/avformat/CMakeLists.txt
+index c285130..0eb6f86 100644
+--- a/src/modules/avformat/CMakeLists.txt
++++ b/src/modules/avformat/CMakeLists.txt
+@@ -2,6 +2,7 @@ add_library(mltavformat ${MLT_MODULE_TYPE}
+   common.c common.h
+   factory.c
+   fast_scale.c fast_scale.h
++  mkv_index.c mkv_index.h
+   filter_avcolour_space.c
+   filter_avdeinterlace.c
+   filter_swscale.c
+diff --git a/src/modules/avformat/mkv_index.c b/src/modules/avformat/mkv_index.c
+new file mode 100644
+index 0000000..855bc10
+--- /dev/null
++++ b/src/modules/avformat/mkv_index.c
+@@ -0,0 +1,157 @@
++/*
++ * mkv_index.c -- far seeks in a Matroska file with no index (mkv_index.h)
++ * Copyright (C) 2026 Andrew Youll
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
++ */
++
++/* A Matroska file written without Cues (by a muxer writing to a pipe, or
++   some rippers) has no index. FFmpeg's demuxer then seeks by reading every
++   cluster from the last one it knows (the start) to the target: half of a
++   2 GB file for a seek to the middle, minutes over a network share, the
++   program frozen meanwhile. It adds each keyframe it reads to the index,
++   and seeks straight to an indexed cluster. So: guess the byte where the
++   target is (the file's average rate), look there for a Cluster element
++   (ID 1F 43 B6 75, its size, then its Timecode, E7, after any CRC-32,
++   Void, Position or PrevSize), move the guess until
++   one is found a few seconds (MARGIN) before the target, and add it to
++   the index. The demuxer then reads from there: a few seconds of it. */
++
++#include "mkv_index.h"
++
++#include <libavutil/mathematics.h>
++#include <string.h>
++
++#define MARGIN 12.0 /* seconds before the target: a keyframe at least by then (GOPs are shorter) */
++#define WINDOW 30.0 /* a cluster this far further back is too far: try again later in the file */
++#define NEAR 20.0   /* an index entry this far before the target already is near enough (that much read) */
++#define LOOK (4 << 20) /* bytes looked through for a cluster from each guess */
++#define TRIES 10
++
++/* An EBML number (a size, or a value's length) at b[0..n): its value and
++   length, or -1 */
++static int64_t vint(const uint8_t *b, int n, int *len)
++{
++    if (n < 1 || !b[0])
++        return -1;
++    int l = 1;
++    while (!(b[0] & (0x80 >> (l - 1))))
++        l++;
++    if (l > 8 || l > n)
++        return -1;
++    int64_t v = b[0] & (0xFF >> l);
++    for (int i = 1; i < l; i++)
++        v = (v << 8) | b[i];
++    *len = l;
++    return v;
++}
++
++/* The first Cluster at or after from, within LOOK bytes: its position and
++   Timecode; 0, or -1 */
++static int find_cluster(AVIOContext *pb, int64_t from, int64_t *pos, uint64_t *tc)
++{
++    static uint8_t buf[65536 + 32];
++    int64_t at = from, end = from + LOOK;
++    while (at < end) {
++        if (avio_seek(pb, at, SEEK_SET) < 0)
++            return -1;
++        int n = avio_read(pb, buf, sizeof(buf));
++        if (n <= 32)
++            return -1; /* (the end: nothing more, and no step forwards) */
++        for (int i = 0; i + 32 <= n; i++) {
++            if (buf[i] != 0x1F || buf[i + 1] != 0x43 || buf[i + 2] != 0xB6 || buf[i + 3] != 0x75)
++                continue;
++            int l1, l2;
++            int64_t size = vint(buf + i + 4, n - i - 4, &l1);
++            if (size < 0)
++                continue;
++            const uint8_t *e = buf + i + 4 + l1, *stop = buf + n - 18;
++            while (e < stop && (e[0] == 0xBF || e[0] == 0xEC || e[0] == 0xA7 || e[0] == 0xAB)) {
++                /* (a CRC-32, Void, Position or PrevSize before it: FFmpeg's has a CRC) */
++                int lc;
++                int64_t sz = vint(e + 1, 8, &lc);
++                if (sz < 0 || sz > 64)
++                    break;
++                e += 1 + lc + sz;
++            }
++            if (e >= stop || e[0] != 0xE7) /* (its Timecode, first after those, as muxers write it) */
++                continue;
++            int64_t vl = vint(e + 1, 8, &l2);
++            if (vl < 1 || vl > 8)
++                continue;
++            uint64_t v = 0;
++            for (int k = 0; k < vl; k++)
++                v = (v << 8) | e[1 + l2 + k];
++            *pos = at + i;
++            *tc = v;
++            return 0;
++        }
++        at += n - 32; /* (an element across the edge looked at again) */
++    }
++    return -1;
++}
++
++int mlt_mkv_index_for(AVFormatContext *ctx, int si, int64_t ts)
++{
++    if (!ctx || !ctx->iformat || !strstr(ctx->iformat->name, "matroska") || !ctx->pb || !ctx->url)
++        return 0;
++    if (si < 0) {
++        si = av_find_default_stream_index(ctx);
++        if (si < 0)
++            return 0;
++        ts = av_rescale_q(ts, AV_TIME_BASE_Q, ctx->streams[si]->time_base);
++    }
++    AVStream *st = ctx->streams[si];
++    double tb = av_q2d(st->time_base), t = ts * tb, dur = ctx->duration / (double) AV_TIME_BASE;
++    int k = av_index_search_timestamp(st, ts, AVSEEK_FLAG_BACKWARD);
++    const AVIndexEntry *before = k >= 0 ? avformat_index_get_entry(st, k) : NULL;
++    if (before && before->timestamp * tb >= t - NEAR)
++        return 0; /* (the index has a place near enough before it: Cues, or read there already) */
++    int64_t size = avio_size(ctx->pb);
++    if (dur <= MARGIN * 2 || size <= 0 || t <= NEAR)
++        return 0; /* (a short file, or near the start: reading there costs little) */
++    AVIOContext *pb = NULL;
++    if (avio_open2(&pb, ctx->url, AVIO_FLAG_READ, &ctx->interrupt_callback, NULL) < 0)
++        return 0;
++    double rate = size / dur, aim = t - MARGIN - 4, start = ctx->start_time != AV_NOPTS_VALUE ? ctx->start_time / (double) AV_TIME_BASE : 0;
++    int64_t pos = -1;
++    uint64_t tc = 0;
++    int found = 0;
++    for (int i = 0; i < TRIES; i++) {
++        int64_t from = (int64_t) ((aim - start) * rate);
++        if (from < 0)
++            from = 0;
++        if (from >= size)
++            from = size - 1;
++        if (find_cluster(pb, from, &pos, &tc) < 0)
++            break; /* (none recognised in LOOK bytes: not as expected, so no more read for it) */
++        double c = tc * tb;
++        if (c > t - MARGIN)
++            aim -= c - (t - MARGIN) + 4;
++        else if (c < t - MARGIN - WINDOW)
++            aim += (t - MARGIN - WINDOW / 2) - c;
++        else {
++            found = 1;
++            break;
++        }
++    }
++    avio_closep(&pb);
++    if (!found)
++        return 0;
++    av_add_index_entry(st, pos, (int64_t) tc, 0, 0, AVINDEX_KEYFRAME);
++    av_log(ctx, AV_LOG_VERBOSE, "no index here: a cluster at %.1f s (byte %" PRId64 ") indexed for a seek to %.1f s\n",
++           tc * tb, pos, t);
++    return 1;
++}
+diff --git a/src/modules/avformat/mkv_index.h b/src/modules/avformat/mkv_index.h
+new file mode 100644
+index 0000000..11c7924
+--- /dev/null
++++ b/src/modules/avformat/mkv_index.h
+@@ -0,0 +1,33 @@
++/*
++ * mkv_index.h -- far seeks in a Matroska file with no index (Cues)
++ * Copyright (C) 2026 Andrew Youll
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
++ */
++
++#ifndef MKV_INDEX_H
++#define MKV_INDEX_H
++
++#include <libavformat/avformat.h>
++
++/* Before seeking a Matroska file to ts (stream si's time base; si -1:
++   AV_TIME_BASE, the default stream) past the end of what its index holds:
++   a cluster found by reading a little of the file where it should be, some
++   seconds before ts, added to the index, so the demuxer goes straight
++   there instead of reading every cluster from the start. 1 added, 0 not
++   needed (or not Matroska, or none found: the seek as it was). */
++int mlt_mkv_index_for(AVFormatContext *ctx, int si, int64_t ts);
++
++#endif
+diff --git a/src/modules/avformat/producer_avformat.c b/src/modules/avformat/producer_avformat.c
+index 1e378f9..5ad567f 100644
+--- a/src/modules/avformat/producer_avformat.c
++++ b/src/modules/avformat/producer_avformat.c
+@@ -27,6 +27,7 @@
+ #endif
+ 
+ #include "common.h"
++#include "mkv_index.h"
+ 
+ // MLT Header files
+ #include <framework/mlt_cache.h>
+@@ -1931,6 +1932,7 @@ static int seek_video(producer_avformat self,
+ 
+             // Seek to the timestamp
+             self->video_codec->skip_loop_filter = AVDISCARD_NONREF;
++            mlt_mkv_index_for(context, self->video_index, timestamp); /* (a Matroska file with no Cues) */
+             av_seek_frame(context, self->video_index, timestamp, AVSEEK_FLAG_BACKWARD);
+ 
+             // flush any pictures still in decode buffer
+@@ -4338,6 +4340,7 @@ static int seek_audio(producer_avformat self, mlt_position position, double time
+                 timestamp = 0;
+ 
+             // Set to the real timecode
++            mlt_mkv_index_for(context, -1, timestamp);
+             if (av_seek_frame(context, -1, timestamp, AVSEEK_FLAG_BACKWARD) != 0)
+                 paused = 1;
+ 
+-- 
+2.43.0
+

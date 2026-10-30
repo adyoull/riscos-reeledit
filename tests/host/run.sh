@@ -30,6 +30,11 @@ fail() { echo "FAIL: $*"; bad=1; }
 # ---- the clips
 mk() { ffmpeg -v error -y "$@"; }
 mk -f lavfi -i color=c=red:s=320x180:r=25:d=3 -c:v libx264 -qp 0 -bf 0 -pix_fmt yuv420p "$O/a.mp4"
+# (a long film in Matroska, with an index (Cues) and the same without: the muxer writes none to a pipe)
+mk -f lavfi -i testsrc=s=320x180:r=25:d=600 -f lavfi -i sine=d=600 -c:v mpeg2video -b:v 300k -g 12 \
+  -c:a ac3 -b:a 64k "$O/long-cues.mkv"
+ffmpeg -v error -y -i "$O/long-cues.mkv" -c copy -f matroska - > "$O/long-nocues.mkv"
+python3 "$HERE/mkv_nocues.py" "$O/long-cues.mkv" "$O/long-void.mkv" || bad=1 # (no Cues, the Duration kept)
 mk -f lavfi -i color=c=blue:s=320x180:r=25:d=3 -c:v libx264 -qp 0 -bf 0 -pix_fmt yuv420p "$O/b.mp4"
 mk -f lavfi -i color=c=gray:s=320x180:r=25:d=3 -vf "geq=lum='16+2*N':cb=128:cr=128" \
   -c:v libx264 -qp 0 -bf 0 -g 25 -pix_fmt yuv420p "$O/numbered.mp4"

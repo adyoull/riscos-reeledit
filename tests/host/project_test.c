@@ -2876,6 +2876,60 @@ static void encoder_fails(const char *a, const char *out)
     remove("enc-fail.mlt");
 }
 
+/* ---- a Matroska file with no index (Cues): far seeks don't read through
+   it (patches/mlt 0023; Reel froze minutes seeking such a film on a NAS),
+   and give the same pictures as the indexed one, forwards and back ---- */
+static long bytes_read_now(void)
+{
+    FILE *f = fopen("/proc/self/io", "r");
+    char k[64];
+    long v, r = -1;
+    while (f && fscanf(f, "%63s %ld", k, &v) == 2)
+        if (!strcmp(k, "rchar:"))
+            r = v;
+    if (f)
+        fclose(f);
+    return r;
+}
+static void mkv_no_cues(const char *nocues)
+{
+    re_engine_io io = {show, NULL, clk, NULL, 48000, 2, NULL};
+    re_project *pc = re_project_open("long-cues.mkv", 0), *pn = re_project_open(nocues, 0);
+    CHECK(pc && pn, "mkv: the films not opened");
+    if (!pc || !pn)
+        return;
+    re_engine *ec = re_engine_open_producer(re_project_profile(pc), re_project_producer(pc), 1, &io);
+    re_engine *en = re_engine_open_producer(re_project_profile(pn), re_project_producer(pn), 1, &io);
+    FILE *f = fopen(nocues, "rb");
+    long size = 0;
+    if (f) {
+        fseek(f, 0, SEEK_END);
+        size = ftell(f);
+        fclose(f);
+    }
+    int len = re_engine_length(en);
+    CHECK(len == re_engine_length(ec) && len > 14000, "mkv: lengths %d and %d", len, re_engine_length(ec));
+    static uint8_t want[320 * 180];
+    const int pct[] = {56, 90, 30, 75, 97};
+    for (int i = 0; i < 5; i++) {
+        int frame = len * pct[i] / 100 + 7;
+        luma_at(ec, frame);
+        int ok_c = shown_pos == frame;
+        memcpy(want, shown_luma, sizeof(want));
+        long r0 = bytes_read_now();
+        luma_at(en, frame);
+        long read = bytes_read_now() - r0;
+        CHECK(ok_c && shown_pos == frame && !memcmp(want, shown_luma, sizeof(want)),
+              "mkv: %s, frame %d (%d%%): shown %d, the same picture %d", nocues, frame, pct[i], shown_pos,
+              !memcmp(want, shown_luma, sizeof(want)));
+        CHECK(read >= 0 && read < size / 20, "mkv: %s, the seek to %d%% read %ld of %ld bytes", nocues, pct[i], read, size);
+    }
+    re_engine_close(ec);
+    re_engine_close(en);
+    re_project_close(pc);
+    re_project_close(pn);
+}
+
 static void proxies(const char *numbered_rel, const char *big_rel, const char *m2v, const char *pic, const char *out)
 {
     char numbered[PATH_MAX], big[PATH_MAX]; /* (as the desktop names them: whole) */
@@ -3614,6 +3668,8 @@ int main(int argc, char **argv)
     proxies(n, argv[7], argv[5], argv[12], out);
     latin1(a, out);
     encoder_fails(a, out);
+    mkv_no_cues("long-nocues.mkv"); /* (no Cues, nor a Duration: written to a pipe) */
+    mkv_no_cues("long-void.mkv");   /* (no Cues, the Duration kept: as a ripper's) */
     overlays(a, b, argv[9], out, argv[10], argv[11], argv[12]);
     video_overlays(a, b, argv[9], n, argv[5], out);
     char dir[512];
