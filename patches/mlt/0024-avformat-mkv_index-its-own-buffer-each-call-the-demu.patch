@@ -1,0 +1,129 @@
+From 71f0294b5b46b1c45650ff9259f65ea64804bde5 Mon Sep 17 00:00:00 2001
+From: Andrew Youll <andrewyoull86@gmail.com>
+Date: Fri, 30 Oct 2026 20:09:56 +0000
+Subject: [PATCH 24/24] avformat: mkv_index: its own buffer each call, the
+ demuxer's reader, the guess between known places
+
+From riscos-ffmpeg's review of the same fix in Reel: find_cluster's
+static buffer would be shared by two producers seeking at once (now
+allocated for each call); a second open of the file per far seek costs
+another open on a network share and fails for custom IO (the demuxer's
+own AVIOContext is used, and put back where it was); and the guess is
+interpolated between the nearest known places either side (index
+entries, then the clusters found), not only the whole file's average
+rate. The log line says how many looks it took.
+---
+ src/modules/avformat/mkv_index.c | 62 ++++++++++++++++++++++----------
+ 1 file changed, 44 insertions(+), 18 deletions(-)
+
+diff --git a/src/modules/avformat/mkv_index.c b/src/modules/avformat/mkv_index.c
+index 855bc10..6fd8ae9 100644
+--- a/src/modules/avformat/mkv_index.c
++++ b/src/modules/avformat/mkv_index.c
+@@ -60,14 +60,15 @@ static int64_t vint(const uint8_t *b, int n, int *len)
+ 
+ /* The first Cluster at or after from, within LOOK bytes: its position and
+    Timecode; 0, or -1 */
+-static int find_cluster(AVIOContext *pb, int64_t from, int64_t *pos, uint64_t *tc)
++#define BUF (65536 + 32)
++
++static int find_cluster(AVIOContext *pb, uint8_t *buf, int64_t from, int64_t *pos, uint64_t *tc)
+ {
+-    static uint8_t buf[65536 + 32];
+     int64_t at = from, end = from + LOOK;
+     while (at < end) {
+         if (avio_seek(pb, at, SEEK_SET) < 0)
+             return -1;
+-        int n = avio_read(pb, buf, sizeof(buf));
++        int n = avio_read(pb, buf, BUF);
+         if (n <= 32)
+             return -1; /* (the end: nothing more, and no step forwards) */
+         for (int i = 0; i + 32 <= n; i++) {
+@@ -105,7 +106,7 @@ static int find_cluster(AVIOContext *pb, int64_t from, int64_t *pos, uint64_t *t
+ 
+ int mlt_mkv_index_for(AVFormatContext *ctx, int si, int64_t ts)
+ {
+-    if (!ctx || !ctx->iformat || !strstr(ctx->iformat->name, "matroska") || !ctx->pb || !ctx->url)
++    if (!ctx || !ctx->iformat || !strstr(ctx->iformat->name, "matroska") || !ctx->pb)
+         return 0;
+     if (si < 0) {
+         si = av_find_default_stream_index(ctx);
+@@ -122,36 +123,61 @@ int mlt_mkv_index_for(AVFormatContext *ctx, int si, int64_t ts)
+     int64_t size = avio_size(ctx->pb);
+     if (dur <= MARGIN * 2 || size <= 0 || t <= NEAR)
+         return 0; /* (a short file, or near the start: reading there costs little) */
+-    AVIOContext *pb = NULL;
+-    if (avio_open2(&pb, ctx->url, AVIO_FLAG_READ, &ctx->interrupt_callback, NULL) < 0)
++    uint8_t *buf = av_malloc(BUF); /* (each call its own: two producers may seek at once) */
++    if (!buf)
+         return 0;
+-    double rate = size / dur, aim = t - MARGIN - 4, start = ctx->start_time != AV_NOPTS_VALUE ? ctx->start_time / (double) AV_TIME_BASE : 0;
++    /* The guess interpolated between the nearest known places either side
++       (index entries, then the clusters found here; at first the file's
++       start and end), so it narrows quickly */
++    double start = ctx->start_time != AV_NOPTS_VALUE ? ctx->start_time / (double) AV_TIME_BASE : 0;
++    double lo_t = start, hi_t = start + dur;
++    int64_t lo_p = 0, hi_p = size;
++    if (before) {
++        lo_t = before->timestamp * tb;
++        lo_p = before->pos;
++    }
++    const AVIndexEntry *after = avformat_index_get_entry(st, k + 1);
++    if (after && after->timestamp * tb > t && after->pos > lo_p) {
++        hi_t = after->timestamp * tb;
++        hi_p = after->pos;
++    }
++    /* (the demuxer's own reader, put back where it was: the seek after
++       this moves it anyway; no second open of the file) */
++    int64_t was = avio_tell(ctx->pb);
++    double aim = t - MARGIN - 4;
+     int64_t pos = -1;
+     uint64_t tc = 0;
+-    int found = 0;
++    int found = 0, looks = 0;
+     for (int i = 0; i < TRIES; i++) {
+-        int64_t from = (int64_t) ((aim - start) * rate);
+-        if (from < 0)
+-            from = 0;
++        looks++;
++        double f = hi_t > lo_t ? (aim - lo_t) / (hi_t - lo_t) : 0;
++        int64_t from = lo_p + (int64_t) (f * (hi_p - lo_p));
++        if (from < lo_p)
++            from = lo_p;
+         if (from >= size)
+             from = size - 1;
+-        if (find_cluster(pb, from, &pos, &tc) < 0)
++        if (find_cluster(ctx->pb, buf, from, &pos, &tc) < 0)
+             break; /* (none recognised in LOOK bytes: not as expected, so no more read for it) */
+         double c = tc * tb;
+-        if (c > t - MARGIN)
++        if (c > t - MARGIN) { /* (too late: the guess further back, and this the new upper place) */
++            if (c < hi_t && pos > lo_p)
++                hi_t = c, hi_p = pos;
+             aim -= c - (t - MARGIN) + 4;
+-        else if (c < t - MARGIN - WINDOW)
++        } else if (c < t - MARGIN - WINDOW) { /* (too early: further on, from here) */
++            if (c > lo_t && pos < hi_p)
++                lo_t = c, lo_p = pos;
+             aim += (t - MARGIN - WINDOW / 2) - c;
+-        else {
++        } else {
+             found = 1;
+             break;
+         }
+     }
+-    avio_closep(&pb);
++    av_free(buf);
++    avio_seek(ctx->pb, was, SEEK_SET);
+     if (!found)
+         return 0;
+     av_add_index_entry(st, pos, (int64_t) tc, 0, 0, AVINDEX_KEYFRAME);
+-    av_log(ctx, AV_LOG_VERBOSE, "no index here: a cluster at %.1f s (byte %" PRId64 ") indexed for a seek to %.1f s\n",
+-           tc * tb, pos, t);
++    av_log(ctx, AV_LOG_VERBOSE, "no index here: a cluster at %.1f s (byte %" PRId64 ") indexed for a seek to %.1f s (%d look%s)\n",
++           tc * tb, pos, t, looks, looks == 1 ? "" : "s");
+     return 1;
+ }
+-- 
+2.43.0
+
