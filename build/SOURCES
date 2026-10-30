@@ -2,9 +2,10 @@
 # sha256, URL. Each is checked before it's used.
 mlt-7.42.0.tar.gz 8800e343f43aaa885bd5d9d23553030fa220aa3e2f0c94d9fd6a936d41638cdd https://github.com/mltframework/mlt/releases/download/v7.42.0/mlt-7.42.0.tar.gz
 libxml2_2.14.5+dfsg.orig.tar.xz 3965d68e430ce35260177f31664313a80d31877082bb4e25168e292ac3e8420e http://archive.ubuntu.com/ubuntu/pool/main/libx/libxml2/libxml2_2.14.5+dfsg.orig.tar.xz
-# (a test build: riscos-ffmpeg 6f56f71, its FFmpeg/dist/r132 net4 with riscos-reelhwaccel devkit 0.2.21,
-# built here with its own scripts; not a release yet, so it's in this delivery's dist, to put in dl/)
-riscos-ffmpeg-devkit-5.1.10-riscos23-net4.tgz 745ef1b44aeb6378290c83e66d000a617c12129e3f126cd21ed9cafb6304dfa8 https://github.com/adyoull/riscos-ffmpeg/releases/download/v5.1.10-riscos23-net4/riscos-ffmpeg-devkit-5.1.10-riscos23-net4.tgz
+# (riscos-ffmpeg 6f56f71, with riscos-reelhwaccel devkit 0.2.21, built with its own scripts
+# (make deps ffmpeg apps package VERSION=5.1.10-riscos23-net4); riscos-ffmpeg hasn't released it, so
+# it's attached to ReelEdit's 0.3-beta2 release)
+riscos-ffmpeg-devkit-5.1.10-riscos23-net4.tgz 745ef1b44aeb6378290c83e66d000a617c12129e3f126cd21ed9cafb6304dfa8 https://github.com/adyoull/riscos-reeledit/releases/download/v0.3-beta2/riscos-ffmpeg-devkit-5.1.10-riscos23-net4.tgz
 riscos-mesa-devkit-20.3.5-17.tgz e0bea16a604265cde8d360055d2cb57dc38f4c7442954e599c393acd4c1395b8 https://github.com/adyoull/riscos-mesa/releases/download/v20.3.5-17/riscos-mesa-devkit-20.3.5-17.tgz
 # For the Linux tests only: FFmpeg 5.1.10, the version riscos-ffmpeg uses
 ffmpeg-5.1.10.tar.xz 208592f16306932ffced4ab8baff3fb9eb05430cf9f897e05308f4b2d35c4c24 https://github.com/adyoull/riscos-ffmpeg/releases/download/sources/ffmpeg-5.1.10.tar.xz

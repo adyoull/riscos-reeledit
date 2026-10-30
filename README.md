@@ -7,13 +7,35 @@ Raspberry Pi's video hardware through
 [riscos-reelhwaccel](https://github.com/adyoull/riscos-reelhwaccel) and
 FFmpeg from [riscos-ffmpeg](https://github.com/adyoull/riscos-ffmpeg).
 
-**ReelEdit 0.3 Beta** is ready for testing on RISC OS 5 (Raspberry Pi 2, 3
-and 4). Download it from
+**ReelEdit 0.3 Beta 2** is ready for testing on RISC OS 5 (Raspberry Pi 2,
+3 and 4). Download it from
 [Releases](https://github.com/adyoull/riscos-reeledit/releases). It comes
 with an illustrated User Guide (in the zip, and in [docs/guide](docs/guide)
 here): press F1 in the editor, or choose User guide from the icon bar menu.
 
-![The editor: the Viewer above the Timeline](docs/guide/images/editor-two-clips.png)
+![The editor: a circle wipe and a picture in picture](docs/screenshots/beta2/editor-wipe-pip.png)
+
+## New in Beta 2
+
+| | |
+|---|---|
+| ![The Inspector: a look](docs/screenshots/beta2/inspector-look-sepia.png) | ![Pan and zoom](docs/screenshots/beta2/inspector-pan-zoom.png) |
+| The Inspector: a clip's colour, here the Sepia look | Pan and zoom over a clip |
+| ![A wipe](docs/screenshots/beta2/inspector-wipe.png) | ![Keyframes](docs/screenshots/beta2/keyframed-pip.png) |
+| Wipes: a circle, softened | A picture in picture growing to full screen (keyframes) |
+| ![Sound clean-up](docs/screenshots/beta2/inspector-sound.png) | ![Sketch](docs/screenshots/beta2/effect-sketch.png) |
+| Sound clean-up: pan, rumble cut, clearer voices | Special effects: Sketch |
+| ![A freeze frame](docs/screenshots/beta2/freeze-frame.png) | ![A countdown](docs/screenshots/beta2/countdown.png) |
+| Freeze frames | Countdowns and colour clips |
+| ![A title](docs/screenshots/beta2/title.png) | ![Export](docs/screenshots/beta2/export-avi.png) |
+| Titles in RISC OS fonts | Export: an MP4 that Reel and the Filer know as a video |
+
+Also: green screen (key out a colour), the whole film's loudness for the
+web or TV, smoother playback (NEON in the hot paths; the Pi's decoder
+starts with no wait), proxies and exports that share the VideoCore, and
+names with spaces or accents. The video in these screenshots is from Big
+Buck Bunny, (c) 2008 Blender Foundation, www.bigbuckbunny.org, CC BY 3.0
+([details](docs/screenshots/beta2/README.md)).
 
 ## What it does
 
@@ -26,11 +48,19 @@ here): press F1 in the editor, or choose User guide from the icon bar menu.
 - Titles in RISC OS fonts, on their own track, so a title can go over a
   logo or a picture in picture
 - Slow motion, fast motion and reverse
+- Wipes (from the left, the top, barn doors, diagonal, circle, box,
+  clock), with soft edges
+- The Inspector: a clip's colour and looks, pan and zoom, special effects
+  (negative, sketch, posterise), sound clean-up, an overlay's place, size,
+  opacity and keyframes, green screen
+- Freeze frames, colour clips and countdowns
+- The whole film's loudness evened out (for the web or TV)
 - A Clips window with three-point editing (insert and overwrite)
 - Render previews and automatic proxies for smooth playback of busy
   projects and HEVC
 - Autosave with crash recovery
-- Export to MP4 (H.264 and AAC), with the Pi's VideoCore encoder
+- Export to MP4 (H.264 and AAC), with the Pi's VideoCore encoder; the
+  file is typed as a video (&FB2), so Reel plays it from a double-click
 - Logging (off as standard; on from the icon bar menu) for bug reports
 
 | | |
