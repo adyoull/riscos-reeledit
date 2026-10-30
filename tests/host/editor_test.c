@@ -339,7 +339,7 @@ _kernel_oserror *_kernel_swi(int no, _kernel_swi_regs *in, _kernel_swi_regs *out
             r->r[1] = ((r->r[1] & 0x7F) == 0 ? shift_key : (r->r[1] & 0x7F) == 1 ? ctrl_key : 0) ? 0xFF : 0;
         break;
     case 0x08: /* OS_File 18: a filetype set */
-        if (r->r[0] == 18 && r->r[2] == 0xBF6) { /* (an export made) */
+        if (r->r[0] == 18 && r->r[2] == 0xFB2) { /* (an export made: AVI's type, which players know) */
             exports_typed++;
             break;
         }

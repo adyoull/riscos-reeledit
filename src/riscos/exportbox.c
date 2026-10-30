@@ -28,7 +28,11 @@
 
 #define Wimp_StartTask     0x400DE
 #define OS_File            0x08
-#define FILETYPE_MP4       0xBF6
+/* An exported video's RISC OS filetype: AVI's (&FB2), which players and
+   the Filer already know as a video (Reel plays it from a double-click);
+   its name keeps "/mp4" for other systems, and programs here look at what
+   it holds, not the type (MP4's &BF6 was seen by nothing) */
+#define FILETYPE_VIDEO     0xFB2
 #define MSG_TW_OUTPUT      0x808C1
 #define MSG_TW_EGO         0x808C2
 #define MSG_TW_MORIO       0x808C3
@@ -155,8 +159,8 @@ static int create(void)
     const int WRITE = 0x1 | 0x4 | 0x10 | 0x20 | 0x100 | (15 << 12) | (7 << 24) | (0 << 28);
     const int BUTTON = 0x1 | 0x4 | 0x8 | 0x10 | 0x20 | 0x100 | (3 << 12) | (7 << 24) | (1 << 28);
     const int OPTION = 0x1 | 0x2 | 0x10 | 0x100 | (11 << 12) | (7 << 24) | (1 << 28); /* (text and sprite: option) */
-    snprintf(X.sprite, sizeof(X.sprite), "file_%03x", FILETYPE_MP4);
-    r.r[0] = 24; /* (the Wimp's sprite for MP4 files: if there's none, a plain file's) */
+    snprintf(X.sprite, sizeof(X.sprite), "file_%03x", FILETYPE_VIDEO);
+    r.r[0] = 24; /* (the Wimp's sprite for its type: if there's none, a plain file's) */
     r.r[2] = (intptr_t) X.sprite;
     if (ro_swi(0x400E9, &r)) /* Wimp_SpriteOp */
         snprintf(X.sprite, sizeof(X.sprite), "file_xxx");
@@ -357,7 +361,7 @@ void ex_click(int *b)
         int ox = st[1] - st[5], oy = st[4] - st[6];
         const char *leaf = strrchr(X.name, '.');
         sb_drag_file(X.win, ox + WIDTH / 2 - 64, oy - 124, ox + WIDTH / 2 + 64, oy - 20, leaf ? leaf + 1 : X.name,
-                     FILETYPE_MP4, dragged);
+                     FILETYPE_VIDEO, dragged);
         return;
     }
     if ((b[4] != I_SIZE && b[4] != I_QUALITY) || !(b[2] & 5))
@@ -444,7 +448,7 @@ static void ended(void)
     const char *leaf = strrchr(X.out, '.');
     leaf = leaf ? leaf + 1 : X.out;
     if (X.result == 1) {
-        r.r[0] = 18; r.r[1] = (intptr_t) X.out; r.r[2] = FILETYPE_MP4;
+        r.r[0] = 18; r.r[1] = (intptr_t) X.out; r.r[2] = FILETYPE_VIDEO;
         ro_swi(OS_File, &r);
         snprintf(t, sizeof(t), "Exported: %.80s", leaf);
         say("%.119s", t);
