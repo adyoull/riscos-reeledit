@@ -7,13 +7,20 @@ Raspberry Pi's video hardware through
 [riscos-reelhwaccel](https://github.com/adyoull/riscos-reelhwaccel) and
 FFmpeg from [riscos-ffmpeg](https://github.com/adyoull/riscos-ffmpeg).
 
-**ReelEdit 0.3 Beta 2** is ready for testing on RISC OS 5 (Raspberry Pi 2,
+**ReelEdit 0.3 Beta 3** is ready for testing on RISC OS 5 (Raspberry Pi 2,
 3 and 4). Download it from
 [Releases](https://github.com/adyoull/riscos-reeledit/releases). It comes
 with an illustrated User Guide (in the zip, and in [docs/guide](docs/guide)
 here): press F1 in the editor, or choose User guide from the icon bar menu.
 
 ![The editor: a circle wipe and a picture in picture](docs/screenshots/beta2/editor-wipe-pip.png)
+
+## New in Beta 3
+
+- Jumping far into an MKV file that has no index (Cues) no longer reads
+  through the file to get there: it finds its place by reading about a
+  megabyte. Before, a jump to the middle of a long film on a network
+  share could hold the editor for minutes.
 
 ## New in Beta 2
 
